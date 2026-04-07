@@ -12,6 +12,7 @@ import { access, readdir, readFile, stat } from "node:fs/promises";
 import { homedir } from "node:os";
 import { basename, join } from "node:path";
 import { MAX_OUTPUT_BYTES } from "../config.js";
+import type { RunHandle } from "./types.js";
 
 export { MAX_OUTPUT_BYTES };
 
@@ -21,6 +22,7 @@ const APP_SERVER_THREAD_START_REQUEST_ID = 2;
 const APP_SERVER_TURN_START_REQUEST_ID = 3;
 const APP_SERVER_THREAD_NAME_SET_REQUEST_ID = 4;
 const APP_SERVER_THREAD_ARCHIVE_REQUEST_ID = 5;
+const APP_SERVER_THREAD_RESUME_REQUEST_ID = 6;
 const APP_SERVER_START_TIMEOUT_MS = 10_000;
 const APP_SERVER_SHUTDOWN_GRACE_MS = 6_500;
 const APP_SERVER_PROTOCOL_VERSION = "2025-06-18";
@@ -1321,6 +1323,325 @@ export async function spawnCodexAppServerNewThread(
     child,
     readOutput: () => buf.read(),
     totalOutputBytes: () => buf.totalBytes,
+  };
+}
+
+export async function spawnCodexAppServerResumeRun(
+  threadId: string,
+  prompt: string,
+  opts?: { cwd?: string | null; model?: string; reasoningEffort?: string },
+): Promise<RunHandle> {
+  const appServerBin = await codexAppServerBin();
+  const child = spawn(
+    appServerBin,
+    ["app-server", "--listen", APP_SERVER_STDIO_URL],
+    {
+      cwd: opts?.cwd ?? undefined,
+      stdio: ["pipe", "pipe", "pipe"],
+      env: { ...process.env },
+    },
+  );
+
+  const pid = child.pid;
+  if (pid === undefined) {
+    throw new Error("Failed to spawn codex app-server — no PID assigned");
+  }
+
+  const buf = new BoundedOutputBuffer();
+  let stdoutRemainder = "";
+  let resolved = false;
+  let syntheticExitCode: number | null = null;
+  let onExitDelivered = false;
+  let shutdownTimer: NodeJS.Timeout | null = null;
+  const exitCallbacks = new Set<(code: number | null) => void>();
+
+  const emitExit = (code: number | null) => {
+    if (onExitDelivered) return;
+    onExitDelivered = true;
+    for (const cb of exitCallbacks) {
+      cb(code);
+    }
+  };
+
+  const scheduleShutdown = (signal: NodeJS.Signals = "SIGTERM") => {
+    if (child.exitCode !== null || child.signalCode !== null) {
+      return;
+    }
+    child.stdin?.end();
+    if (shutdownTimer) {
+      clearTimeout(shutdownTimer);
+    }
+    shutdownTimer = setTimeout(() => {
+      if (child.exitCode === null && child.signalCode === null) {
+        child.kill(signal);
+      }
+    }, APP_SERVER_SHUTDOWN_GRACE_MS);
+    shutdownTimer.unref();
+  };
+
+  const startPromise = new Promise<void>((resolve, reject) => {
+    const failStart = (message: string) => {
+      if (resolved) return;
+      resolved = true;
+      syntheticExitCode = 1;
+      buf.append(`${message}\n`);
+      reject(new Error(message));
+      scheduleShutdown();
+    };
+
+    const resolveStart = () => {
+      if (resolved) return;
+      resolved = true;
+      resolve();
+    };
+
+    const requestTurnStart = () => {
+      child.stdin?.write(
+        `${JSON.stringify({
+          jsonrpc: "2.0",
+          id: APP_SERVER_TURN_START_REQUEST_ID,
+          method: "turn/start",
+          params: {
+            threadId,
+            cwd: opts?.cwd ?? null,
+            model: opts?.model ?? null,
+            effort: opts?.reasoningEffort ?? null,
+            approvalPolicy: "never",
+            approvalsReviewer: "user",
+            sandboxPolicy: {
+              type: "dangerFullAccess",
+            },
+            input: [
+              {
+                type: "text",
+                text: `${prompt}\n`,
+                text_elements: [],
+              },
+            ],
+          },
+        })}\n`,
+      );
+    };
+
+    const requestThreadResume = () => {
+      child.stdin?.write(
+        `${JSON.stringify({
+          jsonrpc: "2.0",
+          id: APP_SERVER_THREAD_RESUME_REQUEST_ID,
+          method: "thread/resume",
+          params: {
+            threadId,
+            cwd: opts?.cwd ?? null,
+            model: opts?.model ?? null,
+            approvalPolicy: "never",
+            approvalsReviewer: "user",
+            sandbox: "danger-full-access",
+          },
+        })}\n`,
+      );
+    };
+
+    const appendCompletedItemText = (item: unknown) => {
+      if (!item || typeof item !== "object") return;
+      const record = item as Record<string, unknown>;
+      if (record["type"] !== "agent_message" && record["type"] !== "agentMessage") return;
+      const text = extractVisibleTextRaw(record["text"] ?? record["content"]);
+      if (!text) return;
+      const current = buf.read();
+      if (current.endsWith(text) || current.endsWith(`${text}\n`)) {
+        return;
+      }
+      if (current.length > 0 && !current.endsWith("\n")) {
+        buf.append("\n");
+      }
+      buf.append(`${text}\n`);
+    };
+
+    const maybeConsumeLine = (line: string) => {
+      const trimmed = line.trim();
+      if (!trimmed) return;
+
+      try {
+        const message = JSON.parse(trimmed) as Record<string, unknown>;
+        const id = typeof message["id"] === "number" ? message["id"] : null;
+        const method =
+          typeof message["method"] === "string" ? message["method"] : null;
+        const error = message["error"];
+
+        if (id === APP_SERVER_INIT_REQUEST_ID) {
+          if (error) {
+            failStart("codex app-server initialize failed");
+            return;
+          }
+          requestThreadResume();
+          return;
+        }
+
+        if (id === APP_SERVER_THREAD_RESUME_REQUEST_ID) {
+          if (error) {
+            failStart(`codex app-server thread/resume failed: ${JSON.stringify(error)}`);
+            return;
+          }
+          requestTurnStart();
+          return;
+        }
+
+        if (id === APP_SERVER_TURN_START_REQUEST_ID) {
+          if (error) {
+            failStart(`codex app-server turn/start failed: ${JSON.stringify(error)}`);
+            return;
+          }
+          resolveStart();
+          return;
+        }
+
+        if (method === "item/agentMessage/delta" || method === "agent_message.delta") {
+          const params =
+            message["params"] && typeof message["params"] === "object"
+              ? (message["params"] as Record<string, unknown>)
+              : null;
+          if (typeof params?.["delta"] === "string") {
+            buf.append(params["delta"]);
+          }
+          return;
+        }
+
+        if (method === "item/completed" || method === "item.completed") {
+          const params =
+            message["params"] && typeof message["params"] === "object"
+              ? (message["params"] as Record<string, unknown>)
+              : null;
+          appendCompletedItemText(params?.["item"]);
+          return;
+        }
+
+        if (method === "turn/completed" || method === "turn.completed") {
+          const params =
+            message["params"] && typeof message["params"] === "object"
+              ? (message["params"] as Record<string, unknown>)
+              : null;
+          const turn =
+            params?.["turn"] && typeof params["turn"] === "object"
+              ? (params["turn"] as Record<string, unknown>)
+              : null;
+          const turnError = turn?.["error"];
+          const turnStatus = typeof turn?.["status"] === "string" ? turn["status"] : null;
+          if (turnError || turnStatus === "failed") {
+            syntheticExitCode = 1;
+            buf.append(`\nturn failed: ${JSON.stringify(turnError ?? turnStatus)}\n`);
+          } else if (syntheticExitCode === null) {
+            syntheticExitCode = 0;
+          }
+          scheduleShutdown();
+          return;
+        }
+
+        if (method === "thread/realtime/error") {
+          const params =
+            message["params"] && typeof message["params"] === "object"
+              ? (message["params"] as Record<string, unknown>)
+              : null;
+          if (typeof params?.["message"] === "string") {
+            buf.append(`\n${params["message"]}\n`);
+          }
+          syntheticExitCode = 1;
+          scheduleShutdown();
+          return;
+        }
+      } catch {
+        buf.append(`${trimmed}\n`);
+      }
+    };
+
+    child.stdout?.on("data", (chunk: Buffer) => {
+      stdoutRemainder += chunk.toString("utf-8");
+      const lines = stdoutRemainder.split("\n");
+      stdoutRemainder = lines.pop() ?? "";
+      for (const line of lines) maybeConsumeLine(line);
+    });
+
+    child.stderr?.on("data", (chunk: Buffer) => {
+      buf.appendBytes(chunk);
+    });
+
+    child.on("error", (err) => {
+      if (!resolved) {
+        failStart(`Failed to start codex app-server: ${err.message}`);
+        return;
+      }
+      syntheticExitCode = 1;
+      buf.append(`Failed to start codex app-server: ${err.message}\n`);
+    });
+
+    child.on("close", (code) => {
+      if (shutdownTimer) {
+        clearTimeout(shutdownTimer);
+        shutdownTimer = null;
+      }
+      if (stdoutRemainder.trim()) {
+        maybeConsumeLine(stdoutRemainder);
+        stdoutRemainder = "";
+      }
+      if (!resolved) {
+        failStart(
+          `codex app-server exited before turn/start completed${
+            code === null ? "" : ` (code ${code})`
+          }`,
+        );
+        return;
+      }
+      emitExit(syntheticExitCode ?? code);
+    });
+
+    setTimeout(() => {
+      if (!resolved) {
+        failStart("Timed out while waiting for codex app-server turn/start");
+      }
+    }, APP_SERVER_START_TIMEOUT_MS).unref();
+  });
+
+  child.stdin?.write(
+    `${JSON.stringify({
+      jsonrpc: "2.0",
+      id: APP_SERVER_INIT_REQUEST_ID,
+      method: "initialize",
+      params: {
+        protocolVersion: APP_SERVER_PROTOCOL_VERSION,
+        clientInfo: {
+          name: "CodexRemote",
+          version: "0.0.0",
+        },
+        capabilities: {
+          experimentalApi: true,
+        },
+      },
+    })}\n`,
+  );
+
+  await startPromise;
+
+  return {
+    pid,
+    readOutput: () => buf.read(),
+    totalOutputBytes: () => buf.totalBytes,
+    stop: () => {
+      if (child.exitCode !== null || child.signalCode !== null || onExitDelivered) {
+        return Promise.resolve();
+      }
+
+      return new Promise<void>((resolve) => {
+        const handler = () => {
+          exitCallbacks.delete(handler);
+          resolve();
+        };
+        exitCallbacks.add(handler);
+        syntheticExitCode = syntheticExitCode ?? 0;
+        scheduleShutdown();
+      });
+    },
+    onExit: (cb) => {
+      exitCallbacks.add(cb);
+    },
   };
 }
 

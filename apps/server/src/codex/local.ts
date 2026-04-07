@@ -14,6 +14,7 @@ import {
   readSessionMeta,
   readSessionMessages,
   spawnCodexAppServerNewThread,
+  spawnCodexAppServerResumeRun,
   spawnCodexRun,
   spawnCodexNewRun,
 } from "./cli.js";
@@ -74,6 +75,38 @@ export class LocalCodexAdapter implements CodexAdapter {
     codexSessionId: string,
     options: StartRunOptions,
   ): Promise<RunHandle> {
+    const capability = await detectCodexAppServerThreadStart();
+    if (capability.available) {
+      try {
+        const detail = await this.getSessionDetail(codexSessionId);
+        const handle = await spawnCodexAppServerResumeRun(
+          codexSessionId,
+          options.prompt,
+          {
+            cwd: detail?.cwd ?? null,
+            model: options.model,
+            reasoningEffort: options.reasoningEffort,
+          },
+        );
+        console.info(
+          `[LocalCodexAdapter] startRun: preferred app-server resume succeeded sessionId=${codexSessionId}`,
+        );
+        return handle;
+      } catch (error) {
+        const reason =
+          error instanceof Error
+            ? error.message
+            : "unknown preferred resume strategy error";
+        console.warn(
+          `[LocalCodexAdapter] startRun: preferred app-server resume failed for sessionId=${codexSessionId}, falling back to codex exec: ${reason}`,
+        );
+      }
+    } else {
+      console.warn(
+        `[LocalCodexAdapter] startRun: preferred app-server resume unavailable for sessionId=${codexSessionId}, falling back to codex exec: ${capability.reason}`,
+      );
+    }
+
     const { child, readOutput, totalOutputBytes } = spawnCodexRun(
       codexSessionId,
       options.prompt,

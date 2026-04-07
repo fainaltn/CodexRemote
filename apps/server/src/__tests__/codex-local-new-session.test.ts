@@ -7,6 +7,7 @@ const cliMock = vi.hoisted(() => ({
   readSessionMeta: vi.fn(),
   readSessionMessages: vi.fn(),
   spawnCodexAppServerNewThread: vi.fn(),
+  spawnCodexAppServerResumeRun: vi.fn(),
   spawnCodexRun: vi.fn(),
   spawnCodexNewRun: vi.fn(),
 }));

@@ -145,4 +145,60 @@ describe("Codex CLI spawn args", () => {
     );
     expect(spawnedChild.kill).not.toHaveBeenCalled();
   });
+
+  it("resumes an existing thread through app-server and enforces danger-full-access on turn/start", async () => {
+    const { spawnCodexAppServerResumeRun } = await import("../codex/cli.js");
+
+    const runPromise = spawnCodexAppServerResumeRun("thread-existing", "hello world", {
+      cwd: "/tmp/project",
+      model: "gpt-5.4",
+      reasoningEffort: "high",
+    });
+    await Promise.resolve();
+
+    const spawnedChild = spawnMock.mock.results[0]?.value as FakeChild;
+    spawnedChild.stdout.emit(
+      "data",
+      Buffer.from(
+        '{"id":1,"result":{"userAgent":"Codex Desktop"}}\n' +
+          '{"id":6,"result":{"thread":{"id":"thread-existing"}}}\n' +
+          '{"id":3,"result":{"turn":{"id":"turn-123","status":"inProgress","items":[],"error":null}}}\n' +
+          '{"method":"item/agentMessage/delta","params":{"threadId":"thread-existing","turnId":"turn-123","itemId":"item-1","delta":"Hello"}}\n' +
+          '{"method":"turn/completed","params":{"threadId":"thread-existing","turn":{"id":"turn-123","status":"completed","error":null}}}\n',
+      ),
+    );
+    spawnedChild.emit("close", 0);
+
+    const handle = await runPromise;
+
+    expect(spawnMock).toHaveBeenCalledTimes(1);
+    const [bin, args] = spawnMock.mock.calls[0] as [string, string[]];
+    expect(bin).toBe("/tmp/codex-app-server-bin");
+    expect(args).toEqual(["app-server", "--listen", "stdio://"]);
+    expect(spawnedChild.stdin.write).toHaveBeenNthCalledWith(
+      2,
+      expect.stringContaining('"method":"thread/resume"'),
+    );
+    expect(spawnedChild.stdin.write).toHaveBeenNthCalledWith(
+      2,
+      expect.stringContaining('"sandbox":"danger-full-access"'),
+    );
+    expect(spawnedChild.stdin.write).toHaveBeenNthCalledWith(
+      3,
+      expect.stringContaining('"method":"turn/start"'),
+    );
+    expect(spawnedChild.stdin.write).toHaveBeenNthCalledWith(
+      3,
+      expect.stringContaining('"threadId":"thread-existing"'),
+    );
+    expect(spawnedChild.stdin.write).toHaveBeenNthCalledWith(
+      3,
+      expect.stringContaining('"approvalPolicy":"never"'),
+    );
+    expect(spawnedChild.stdin.write).toHaveBeenNthCalledWith(
+      3,
+      expect.stringContaining('"type":"dangerFullAccess"'),
+    );
+    expect(handle.readOutput()).toContain("Hello");
+  });
 });

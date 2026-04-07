@@ -13,8 +13,8 @@ android {
         applicationId = "dev.codexremote.android"
         minSdk = 28
         targetSdk = 35
-        versionCode = 1
-        versionName = "0.1.0-phase0"
+        versionCode = 2
+        versionName = "0.1.1"
 
         vectorDrawables {
             useSupportLibrary = true
@@ -66,6 +66,7 @@ dependencies {
     implementation(libs.androidx.ui.tooling.preview)
     implementation(libs.androidx.material3)
     implementation(libs.androidx.material.icons.extended)
+    implementation(libs.reorderable)
     debugImplementation(libs.androidx.ui.tooling)
 
     // Navigation

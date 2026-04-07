@@ -22,6 +22,7 @@ enum class SessionFolderSortOrder {
     RECENT,
     NAME_ASC,
     NAME_DESC,
+    CUSTOM,
 }
 
 /**
@@ -111,6 +112,19 @@ class ServerRepository(private val context: Context) {
         }
     }
 
+    suspend fun getCustomSessionFolderOrder(serverId: String): List<String> {
+        val key = stringPreferencesKey("custom_session_folder_order_$serverId")
+        val raw = context.serverDataStore.data.map { prefs -> prefs[key] }.firstOrNull() ?: "[]"
+        return json.decodeFromString(raw)
+    }
+
+    suspend fun setCustomSessionFolderOrder(serverId: String, folderKeys: List<String>) {
+        val key = stringPreferencesKey("custom_session_folder_order_$serverId")
+        context.serverDataStore.edit { prefs ->
+            prefs[key] = json.encodeToString(folderKeys)
+        }
+    }
+
     suspend fun getCollapsedSessionFolders(serverId: String): Set<String> {
         val key = stringPreferencesKey("collapsed_session_folders_$serverId")
         val raw = context.serverDataStore.data.map { prefs -> prefs[key] }.firstOrNull() ?: "[]"
@@ -119,6 +133,19 @@ class ServerRepository(private val context: Context) {
 
     suspend fun setCollapsedSessionFolders(serverId: String, folderKeys: Set<String>) {
         val key = stringPreferencesKey("collapsed_session_folders_$serverId")
+        context.serverDataStore.edit { prefs ->
+            prefs[key] = json.encodeToString(folderKeys.sorted())
+        }
+    }
+
+    suspend fun getHiddenSessionFolders(serverId: String): Set<String> {
+        val key = stringPreferencesKey("hidden_session_folders_$serverId")
+        val raw = context.serverDataStore.data.map { prefs -> prefs[key] }.firstOrNull() ?: "[]"
+        return json.decodeFromString<List<String>>(raw).toSet()
+    }
+
+    suspend fun setHiddenSessionFolders(serverId: String, folderKeys: Set<String>) {
+        val key = stringPreferencesKey("hidden_session_folders_$serverId")
         context.serverDataStore.edit { prefs ->
             prefs[key] = json.encodeToString(folderKeys.sorted())
         }

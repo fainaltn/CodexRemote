@@ -2,11 +2,13 @@
 
 ## Verified in this workspace
 
-- `npm test --workspace @codexremote/server`
+- `cd apps/server && ../../node_modules/.bin/vitest run src/__tests__/codex-cli-spawn.test.ts src/__tests__/codex-local-new-session.test.ts src/__tests__/codex-local-start-run.test.ts`
+- `cd apps/server && ../../node_modules/.bin/tsc --noEmit`
 - `npm test --workspace @codexremote/web`
 - `npm run build --workspace @codexremote/server`
 - `npm run build --workspace @codexremote/web`
-- `cd apps/android && ./gradlew assembleDebug`
+- `cd apps/android && JAVA_HOME=/opt/homebrew/opt/openjdk@17/libexec/openjdk.jdk/Contents/Home ANDROID_HOME=/opt/homebrew/share/android-commandlinetools ANDROID_SDK_ROOT=/opt/homebrew/share/android-commandlinetools gradle :app:assembleDebug`
+- resumed-session manual check: resume an existing thread and verify it can create a file under the project root
 
 ## Before publishing to GitHub
 

@@ -23,12 +23,16 @@ English:
 - Server 构建和测试通过
 - Web 构建和测试通过
 - Android Debug APK 可正常编译
+- Android 会话列表支持项目文件夹隐藏与自定义拖拽排序
+- 继续已有会话时，服务端会先恢复 thread 再启动 turn，避免旧会话落回只读权限
 - Inbox 已改为 staging 模式，远端只落盘到 `data/submissions/`
 
 English:
 - Server builds and tests are passing
 - Web builds and tests are passing
 - Android debug APK builds successfully
+- Android session lists now support hiding project folders and custom drag reordering
+- Resumed sessions now restore the thread before starting a turn so existing sessions do not fall back to read-only permissions
 - Inbox now uses a staging model and stores submissions under `data/submissions/`
 
 ## Repository Layout / 仓库结构

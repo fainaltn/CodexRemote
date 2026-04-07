@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>dev.codexremote.web</string>
+
+  <key>ProgramArguments</key>
+  <array>
+    <string>__NODE_BIN__</string>
+    <string>__REPO_ROOT__/node_modules/next/dist/bin/next</string>
+    <string>start</string>
+    <string>-p</string>
+    <string>31817</string>
+  </array>
+
+  <key>WorkingDirectory</key>
+  <string>__REPO_ROOT__/apps/web</string>
+
+  <key>RunAtLoad</key>
+  <true/>
+
+  <key>KeepAlive</key>
+  <true/>
+
+  <key>StandardOutPath</key>
+  <string>__REPO_ROOT__/.run/web.log</string>
+
+  <key>StandardErrorPath</key>
+  <string>__REPO_ROOT__/.run/web.log</string>
+</dict>
+</plist>

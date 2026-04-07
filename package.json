@@ -1,0 +1,12 @@
+{
+  "name": "codexremote",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Remote control system for Codex CLI",
+  "workspaces": [
+    "apps/server",
+    "apps/web",
+    "packages/shared",
+    "packages/sdk"
+  ]
+}

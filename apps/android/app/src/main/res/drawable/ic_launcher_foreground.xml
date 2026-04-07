@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Terminal/prompt icon as launcher foreground.
+     The 108dp canvas with 72dp safe zone is the adaptive icon spec. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!-- "> _" prompt glyph, centered in the 72dp safe zone (offset 18,18) -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M34,44L50,54L34,64L34,60L44.5,54L34,48ZM52,60L74,60L74,64L52,64Z" />
+</vector>

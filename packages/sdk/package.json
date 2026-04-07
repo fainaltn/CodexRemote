@@ -1,0 +1,9 @@
+{
+  "name": "@codexremote/sdk",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Host-agent client SDK for CodexRemote (Phase 2)",
+  "scripts": {
+    "build": "echo 'Not yet implemented'"
+  }
+}

@@ -1,6 +1,7 @@
 package dev.codexremote.android.ui.sessions
 
 import androidx.compose.animation.animateContentSize
+import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animateFloat
@@ -8,6 +9,7 @@ import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -27,6 +29,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -34,6 +37,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -197,7 +201,37 @@ internal fun AssistantReplyBlock(
     }
 }
 
-// ── Streaming text renderer (typewriter + rich blocks) ────────────
+// ── Incremental block parse cache ─────────────────────────────────
+
+/**
+ * Maintains stable (finalized) blocks separately from the active tail block.
+ * When text appends within the last block, only [tailBlock] changes while
+ * [stableBlocks] keeps the same list reference — allowing Compose to skip
+ * recomposition of already-rendered blocks.
+ */
+internal class BlockParseCache {
+    var stableBlocks: List<RichTextBlock> = emptyList()
+        private set
+    var tailBlock: RichTextBlock? = null
+        private set
+    private var lastText: String = ""
+
+    fun computeAndReturn(text: String): Pair<List<RichTextBlock>, RichTextBlock?> {
+        if (text != lastText) {
+            val allBlocks = parseTextToBlocks(text)
+            val newStable = if (allBlocks.size > 1) allBlocks.dropLast(1) else emptyList()
+            val newTail = allBlocks.lastOrNull()
+            if (newStable != stableBlocks) {
+                stableBlocks = newStable
+            }
+            tailBlock = newTail
+            lastText = text
+        }
+        return stableBlocks to tailBlock
+    }
+}
+
+// ── Streaming text renderer (typewriter + incremental blocks) ─────
 
 @Composable
 internal fun StreamingTextRenderer(
@@ -206,6 +240,7 @@ internal fun StreamingTextRenderer(
     modifier: Modifier = Modifier,
 ) {
     var renderedText by remember { mutableStateOf(targetText) }
+    val cache = remember { BlockParseCache() }
     val transition = rememberInfiniteTransition(label = "stream-cursor")
     val cursorAlpha by transition.animateFloat(
         initialValue = 0.25f,
@@ -239,13 +274,110 @@ internal fun StreamingTextRenderer(
         }
     }
 
-    RichBlockList(
-        text = renderedText,
-        active = active,
-        showCursor = active,
-        cursorAlpha = cursorAlpha,
+    // Incremental parse: stable blocks keep the same reference when unchanged
+    val (stableBlocks, tailBlock) = remember(renderedText) {
+        cache.computeAndReturn(renderedText)
+    }
+
+    Column(
         modifier = modifier,
+        verticalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        if (stableBlocks.isEmpty() && tailBlock == null) {
+            if (active) {
+                ShimmerBlock(modifier = Modifier.fillMaxWidth())
+            } else {
+                Text(
+                    text = "这次运行没有可显示的文本输出",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        } else {
+            // Stable blocks — only recompose when a new block is finalized
+            for (block in stableBlocks) {
+                key(block.id) {
+                    AnimatedBlock(id = block.id) {
+                        RenderSingleBlock(block, cursorAlpha = 0f)
+                    }
+                }
+            }
+            // Tail block — recomposes on every typewriter tick
+            tailBlock?.let { block ->
+                key(block.id) {
+                    AnimatedBlock(id = block.id) {
+                        RenderSingleBlock(
+                            block = block,
+                            cursorAlpha = if (active) cursorAlpha else 0f,
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun RenderSingleBlock(block: RichTextBlock, cursorAlpha: Float) {
+    when (block) {
+        is RichTextBlock.Paragraph -> ParagraphBlock(block, cursorAlpha)
+        is RichTextBlock.CodeBlock -> RichCodeBlock(block = block, cursorAlpha = cursorAlpha)
+        is RichTextBlock.ListBlock -> RichListBlock(block, cursorAlpha)
+    }
+}
+
+// ── Shimmer skeleton ──────────────────────────────────────────────
+
+/**
+ * Animated shimmer lines that simulate content loading.
+ * Used inside [StreamingTextRenderer] while waiting for the first output
+ * and in [WaitingReplyPlaceholder] for idle state.
+ */
+@Composable
+internal fun ShimmerBlock(
+    modifier: Modifier = Modifier,
+    lines: Int = 3,
+) {
+    val transition = rememberInfiniteTransition(label = "shimmer")
+    val progress by transition.animateFloat(
+        initialValue = 0f,
+        targetValue = 1f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(durationMillis = 1200, easing = LinearEasing),
+            repeatMode = RepeatMode.Restart,
+        ),
+        label = "shimmer-progress",
     )
+
+    val surfaceVariant = MaterialTheme.colorScheme.surfaceVariant
+    val shimmerBrush = Brush.linearGradient(
+        colors = listOf(
+            surfaceVariant.copy(alpha = 0.2f),
+            surfaceVariant.copy(alpha = 0.6f),
+            surfaceVariant.copy(alpha = 0.2f),
+        ),
+        start = Offset(progress * 1000f - 300f, 0f),
+        end = Offset(progress * 1000f, 0f),
+    )
+
+    Column(
+        modifier = modifier,
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        repeat(lines) { index ->
+            val fraction = when (index) {
+                0 -> 0.92f
+                lines - 1 -> 0.48f
+                else -> 0.7f
+            }
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth(fraction)
+                    .height(14.dp)
+                    .background(shimmerBrush, RoundedCornerShape(4.dp))
+            )
+        }
+    }
 }
 
 // ── Empty / waiting state ─────────────────────────────────────────
@@ -255,21 +387,11 @@ internal fun WaitingReplyPlaceholder(
     draft: Boolean,
     modifier: Modifier = Modifier,
 ) {
-    val transition = rememberInfiniteTransition(label = "waiting-pulse")
-    val alpha by transition.animateFloat(
-        initialValue = 0.3f,
-        targetValue = 0.7f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(durationMillis = 1000),
-            repeatMode = RepeatMode.Reverse,
-        ),
-        label = "waiting-alpha",
-    )
-
-    Surface(
-        modifier = modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(16.dp),
-        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = alpha),
+    Column(
+        modifier = modifier
+            .fillMaxWidth()
+            .padding(4.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
         Text(
             text = if (draft) {
@@ -277,9 +399,11 @@ internal fun WaitingReplyPlaceholder(
             } else {
                 "发送一条消息来继续对话"
             },
-            modifier = Modifier.padding(16.dp),
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
+        if (!draft) {
+            ShimmerBlock(lines = 2)
+        }
     }
 }

@@ -72,9 +72,10 @@ fun SessionDetailScreen(
     val session = uiState.session
     val topBarState = rememberTopAppBarState()
     val topBarScrollBehavior = TopAppBarDefaults.enterAlwaysScrollBehavior(topBarState)
-    val historyRounds = remember(uiState.messages) { buildHistoryRounds(uiState.messages) }
-    val latestPrompt = remember(uiState.messages) { latestCanonicalPrompt(uiState.messages) }
-    val latestReply = remember(uiState.messages) { latestCanonicalAssistantReply(uiState.messages) }
+    // Use ViewModel derived flows instead of screen-level remember blocks
+    val historyRounds by viewModel.historyRoundsFlow.collectAsState(initial = emptyList())
+    val latestPrompt by viewModel.latestUserPromptFlow.collectAsState(initial = null)
+    val latestReply by viewModel.latestAssistantReplyFlow.collectAsState(initial = null)
     val stableDetailKey = sessionId ?: "draft:${initialCwd.orEmpty()}"
     val isDraftSession = sessionId == null
     val listState = rememberLazyListState()
@@ -126,12 +127,7 @@ fun SessionDetailScreen(
         }
     }
     val isRunning = uiState.liveRun?.status in activeRunStatuses
-    val cleanedOutput = remember(uiState.liveRun?.lastOutput, uiState.liveRun?.prompt) {
-        cleanLiveOutput(
-            output = uiState.liveRun?.lastOutput,
-            rawPrompt = uiState.liveRun?.prompt,
-        )
-    }
+    val cleanedOutput by viewModel.cleanedOutputFlow.collectAsState(initial = null)
 
     // ── Side effects ─────────────────────────────────────────────
 

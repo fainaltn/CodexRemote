@@ -11,13 +11,20 @@ import dev.codexremote.android.data.model.Session
 import dev.codexremote.android.data.model.SessionDetailResponse
 import dev.codexremote.android.data.model.SessionMessage
 import dev.codexremote.android.data.network.ApiClient
+import dev.codexremote.android.data.network.LiveRunStreamEvent
 import dev.codexremote.android.data.repository.ServerRepository
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.flow.collect
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -43,6 +50,8 @@ data class SessionDetailUiState(
     val stopping: Boolean = false,
     val error: String? = null,
     val createdSessionId: String? = null,
+    val liveStreamConnected: Boolean = false,
+    val liveStreamStatus: String? = null,
 )
 
 data class PendingLocalAttachment(
@@ -93,6 +102,31 @@ class SessionDetailViewModel(application: Application) : AndroidViewModel(applic
     private val _uiState = MutableStateFlow(SessionDetailUiState(loading = true))
     val uiState = _uiState.asStateFlow()
 
+    // Derived flows — avoid redundant recomposition in the UI layer
+    internal val historyRoundsFlow: Flow<List<HistoryRound>> = uiState
+        .map { it.messages }.distinctUntilChanged()
+        .map { buildHistoryRounds(it) }
+
+    internal val latestUserPromptFlow: Flow<String?> = uiState
+        .map { it.messages }.distinctUntilChanged()
+        .map { latestCanonicalPrompt(it) }
+
+    internal val latestAssistantReplyFlow: Flow<String?> = uiState
+        .map { it.messages }.distinctUntilChanged()
+        .map { latestCanonicalAssistantReply(it) }
+
+    internal val cleanedOutputFlow: Flow<String?> = uiState
+        .map { it.liveRun?.lastOutput to it.liveRun?.prompt }.distinctUntilChanged()
+        .map { (output, prompt) -> cleanLiveOutput(output, prompt) }
+    private var liveStreamJob: Job? = null
+    private var liveStreamKey: Pair<String, String>? = null
+    private var liveStreamLastEventId: Long? = null
+
+    private fun userFacingMessage(error: Throwable, fallback: String): String {
+        val resolved = ApiClient.describeNetworkFailure(error)
+        return if (resolved.isBlank() || resolved == "连接失败，请稍后重试") fallback else resolved
+    }
+
     private suspend fun resolveServer(serverId: String): ServerHandle {
         val servers = repo.servers.first()
         val server = servers.find { it.id == serverId }
@@ -121,7 +155,7 @@ class SessionDetailViewModel(application: Application) : AndroidViewModel(applic
             } catch (e: Exception) {
                 _uiState.update {
                     it.copy(
-                        error = e.message ?: "加载会话失败",
+                        error = userFacingMessage(e, "加载会话失败"),
                         session = it.session,
                         messages = it.messages,
                     )
@@ -133,6 +167,7 @@ class SessionDetailViewModel(application: Application) : AndroidViewModel(applic
     }
 
     fun prepareDraft() {
+        stopLiveRunStream()
         _uiState.value = SessionDetailUiState(loading = false)
     }
 
@@ -142,7 +177,7 @@ class SessionDetailViewModel(application: Application) : AndroidViewModel(applic
             try {
                 refreshSessionAndLive(serverId, sessionId)
             } catch (e: Exception) {
-                _uiState.update { it.copy(error = e.message ?: "刷新会话失败") }
+                _uiState.update { it.copy(error = userFacingMessage(e, "刷新会话失败")) }
             } finally {
                 _uiState.update { it.copy(refreshing = false) }
             }
@@ -158,6 +193,122 @@ class SessionDetailViewModel(application: Application) : AndroidViewModel(applic
                 _uiState.update { it.copy(liveRun = liveRun) }
             } catch (_: Exception) {
                 // Keep the last visible live state when polling blips.
+            }
+        }
+    }
+
+    fun startLiveRunStream(serverId: String, sessionId: String) {
+        val nextKey = serverId to sessionId
+        if (liveStreamKey == nextKey && liveStreamJob?.isActive == true) return
+
+        stopLiveRunStream(resetState = false)
+        liveStreamKey = nextKey
+        _uiState.update {
+            it.copy(
+                liveStreamConnected = false,
+                liveStreamStatus = "正在连接原生实时流…",
+            )
+        }
+
+        liveStreamJob = viewModelScope.launch(Dispatchers.IO) {
+            try {
+                val handle = resolveServer(serverId)
+                try {
+                    handle.client.streamLiveRun(
+                        token = handle.token,
+                        hostId = SESSION_HOST_ID,
+                        sessionId = sessionId,
+                        initialLastEventId = liveStreamLastEventId,
+                    ).collect { event ->
+                        when (event) {
+                            is LiveRunStreamEvent.Connected -> {
+                                _uiState.update {
+                                    it.copy(
+                                        liveStreamConnected = true,
+                                        liveStreamStatus = if (event.resumedFromEventId != null) {
+                                            "原生实时流已恢复"
+                                        } else {
+                                            "原生实时流已连接"
+                                        },
+                                    )
+                                }
+                            }
+                            is LiveRunStreamEvent.RunSnapshot -> {
+                                liveStreamLastEventId = event.eventId ?: liveStreamLastEventId
+                                _uiState.update {
+                                    it.copy(
+                                        liveRun = event.run,
+                                        liveStreamConnected = true,
+                                        liveStreamStatus = when (event.run?.status) {
+                                            "running", "pending" -> "原生实时流推送中"
+                                            else -> "原生实时流已连接"
+                                        },
+                                    )
+                                }
+                            }
+                            is LiveRunStreamEvent.Gap -> {
+                                _uiState.update {
+                                    it.copy(
+                                        liveStreamConnected = true,
+                                        liveStreamStatus = "已补齐中断后的实时流",
+                                    )
+                                }
+                            }
+                            is LiveRunStreamEvent.StreamEnd -> {
+                                _uiState.update {
+                                    it.copy(
+                                        liveStreamConnected = true,
+                                        liveStreamStatus = when (event.reason) {
+                                            "no-run" -> "已连接，等待下一次运行"
+                                            else -> "本轮已结束，保持实时连接"
+                                        },
+                                    )
+                                }
+                            }
+                            is LiveRunStreamEvent.IdleTimeout -> {
+                                _uiState.update {
+                                    it.copy(
+                                        liveStreamConnected = false,
+                                        liveStreamStatus = "实时流空闲超时，正在恢复…",
+                                    )
+                                }
+                            }
+                            is LiveRunStreamEvent.Reconnecting -> {
+                                _uiState.update {
+                                    it.copy(
+                                        liveStreamConnected = false,
+                                        liveStreamStatus = event.message,
+                                    )
+                                }
+                            }
+                        }
+                    }
+                } finally {
+                    handle.client.close()
+                }
+            } catch (error: Throwable) {
+                if (error is CancellationException) return@launch
+                _uiState.update {
+                    it.copy(
+                        liveStreamConnected = false,
+                        liveStreamStatus = "实时流暂不可用，已切换为自动刷新",
+                    )
+                }
+            }
+        }
+    }
+
+    fun stopLiveRunStream(resetState: Boolean = true) {
+        liveStreamJob?.cancel()
+        liveStreamJob = null
+        liveStreamKey = null
+        liveStreamLastEventId = null
+        if (resetState) {
+            _uiState.update {
+                it.copy(
+                    liveStreamConnected = false,
+                    liveStreamStatus = null,
+                )
             }
         }
     }
@@ -285,7 +436,7 @@ class SessionDetailViewModel(application: Application) : AndroidViewModel(applic
             refreshLiveRun(serverId, sessionId)
             return true
         } catch (e: Exception) {
-            _uiState.update { it.copy(error = e.message ?: "启动运行失败") }
+            _uiState.update { it.copy(error = userFacingMessage(e, "启动运行失败")) }
             return false
         } finally {
             _uiState.update { it.copy(sending = false) }
@@ -321,7 +472,7 @@ class SessionDetailViewModel(application: Application) : AndroidViewModel(applic
                 }
                 _uiState.update { it.copy(archiving = false, archived = true) }
             } catch (e: Exception) {
-                _uiState.update { it.copy(archiving = false, error = e.message ?: "归档失败") }
+                _uiState.update { it.copy(archiving = false, error = userFacingMessage(e, "归档失败")) }
             }
         }
     }
@@ -363,7 +514,7 @@ class SessionDetailViewModel(application: Application) : AndroidViewModel(applic
                 }
                 onUploaded?.invoke(artifact)
             } catch (e: Exception) {
-                _uiState.update { it.copy(error = e.message ?: "上传失败") }
+                _uiState.update { it.copy(error = userFacingMessage(e, "上传失败")) }
             } finally {
                 _uiState.update { it.copy(uploading = false) }
             }
@@ -394,7 +545,7 @@ class SessionDetailViewModel(application: Application) : AndroidViewModel(applic
                     )
                 }
             } catch (e: Exception) {
-                _uiState.update { it.copy(error = e.message ?: "添加附件失败") }
+                _uiState.update { it.copy(error = userFacingMessage(e, "添加附件失败")) }
             } finally {
                 _uiState.update { it.copy(uploading = false) }
             }
@@ -558,7 +709,7 @@ class SessionDetailViewModel(application: Application) : AndroidViewModel(applic
             _uiState.update {
                 it.copy(
                     sending = false,
-                    error = e.message ?: "创建会话失败",
+                    error = userFacingMessage(e, "创建会话失败"),
                 )
             }
             null
@@ -617,12 +768,17 @@ class SessionDetailViewModel(application: Application) : AndroidViewModel(applic
         } catch (e: Exception) {
             _uiState.update {
                 it.copy(
-                    error = e.message ?: "创建会话失败",
+                    error = userFacingMessage(e, "创建会话失败"),
                 )
             }
             null
         } finally {
             _uiState.update { it.copy(sending = false, uploading = false) }
         }
+    }
+
+    override fun onCleared() {
+        stopLiveRunStream()
+        super.onCleared()
     }
 }

@@ -57,6 +57,10 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import dev.codexremote.android.data.model.InboxItem
 import dev.codexremote.android.data.network.ApiClient
 import dev.codexremote.android.data.repository.ServerRepository
+import dev.codexremote.android.ui.sessions.ShimmerBlock
+import dev.codexremote.android.ui.sessions.TimelineNoticeCard
+import dev.codexremote.android.ui.sessions.TimelineNoticeTone
+import dev.codexremote.android.ui.theme.PrecisionConsoleSnackbarHost
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.first
@@ -315,7 +319,7 @@ fun InboxScreen(
                 }
             )
         },
-        snackbarHost = { SnackbarHost(snackbarHostState) },
+        snackbarHost = { PrecisionConsoleSnackbarHost(snackbarHostState) },
     ) { padding ->
         LazyColumn(
             modifier = Modifier
@@ -328,10 +332,19 @@ fun InboxScreen(
             item {
                 Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                     if (error != null) {
-                        Text(
-                            text = error ?: "",
-                            color = MaterialTheme.colorScheme.error,
-                            style = MaterialTheme.typography.bodyMedium,
+                        TimelineNoticeCard(
+                            title = "收件箱加载失败",
+                            message = error ?: "",
+                            footer = "你可以稍后刷新再试，或先继续投递新内容。",
+                            tone = TimelineNoticeTone.Error,
+                            stateLabel = "错误",
+                            content = {
+                                Button(
+                                    onClick = { viewModel.loadInbox(serverId) },
+                                ) {
+                                    Text("重试")
+                                }
+                            },
                         )
                     }
 
@@ -453,36 +466,33 @@ fun InboxScreen(
 
             if (loading) {
                 item {
-                    Box(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(vertical = 32.dp),
-                        contentAlignment = Alignment.Center,
-                    ) {
-                        CircularProgressIndicator()
-                    }
+                    TimelineNoticeCard(
+                        title = "正在加载收件箱",
+                        message = "正在拉取最近投递、链接和文件记录。",
+                        footer = "新内容会在这里按时间倒序出现。",
+                        tone = TimelineNoticeTone.Neutral,
+                        stateLabel = "加载中",
+                        content = {
+                            ShimmerBlock(lines = 2)
+                        },
+                    )
                 }
             } else if (items.isEmpty()) {
                 item {
-                    Box(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(vertical = 32.dp),
-                        contentAlignment = Alignment.Center,
-                    ) {
-                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                            Icon(
-                                imageVector = Icons.Filled.Inbox,
-                                contentDescription = null,
-                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
-                            Spacer(modifier = Modifier.height(8.dp))
-                            Text(
-                                text = "收件箱还是空的",
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
-                        }
-                    }
+                    TimelineNoticeCard(
+                        title = "收件箱还是空的",
+                        message = "这里会收集你从链接、文件和分享面板投递的内容。",
+                        footer = "投递第一条内容后，列表会自动沉淀出最近记录。",
+                        tone = TimelineNoticeTone.Neutral,
+                        stateLabel = "空状态",
+                        content = {
+                            Button(
+                                onClick = { viewModel.loadInbox(serverId) },
+                            ) {
+                                Text("刷新")
+                            }
+                        },
+                    )
                 }
             } else {
                 items(items, key = { it.id }) { item ->

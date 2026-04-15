@@ -22,6 +22,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Archive
 import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
@@ -29,7 +30,6 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
-import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedTextField
@@ -93,6 +93,7 @@ fun SessionDetailScreen(
     var expandedRounds by remember(stableDetailKey) { mutableStateOf(setOf<String>()) }
     var autoFollowLive by remember(stableDetailKey) { mutableStateOf(true) }
     var pendingLiveUpdates by remember(stableDetailKey) { mutableStateOf(0) }
+    var showManualRefreshIndicator by remember(stableDetailKey) { mutableStateOf(false) }
     var showDevDiagnostics by remember { mutableStateOf(false) }
     var previousLiveStatus by remember(stableDetailKey) { mutableStateOf<String?>(null) }
     var refreshedTerminalRunId by remember(stableDetailKey) { mutableStateOf<String?>(null) }
@@ -220,6 +221,12 @@ fun SessionDetailScreen(
         }
     }
 
+    LaunchedEffect(uiState.refreshing) {
+        if (!uiState.refreshing) {
+            showManualRefreshIndicator = false
+        }
+    }
+
     // Auto-refresh when a run transitions to terminal
     LaunchedEffect(sessionId, uiState.liveRun?.status, uiState.liveRun?.id) {
         if (sessionId.isNullOrBlank()) return@LaunchedEffect
@@ -337,12 +344,20 @@ fun SessionDetailScreen(
                     IconButton(
                         onClick = {
                             if (!sessionId.isNullOrBlank()) {
+                                showManualRefreshIndicator = true
                                 viewModel.refresh(serverId, sessionId)
                             }
                         },
-                        enabled = !sessionId.isNullOrBlank(),
+                        enabled = !sessionId.isNullOrBlank() && !uiState.refreshing,
                     ) {
-                        Icon(Icons.Filled.Refresh, contentDescription = "刷新")
+                        if (uiState.refreshing && showManualRefreshIndicator) {
+                            CircularProgressIndicator(
+                                modifier = Modifier.size(18.dp),
+                                strokeWidth = 2.dp,
+                            )
+                        } else {
+                            Icon(Icons.Filled.Refresh, contentDescription = "刷新")
+                        }
                     }
                 },
             )
@@ -356,7 +371,16 @@ fun SessionDetailScreen(
                         .padding(padding),
                     contentAlignment = Alignment.Center,
                 ) {
-                    CircularProgressIndicator()
+                    TimelineNoticeCard(
+                        title = "正在加载会话",
+                        message = "正在整理历史消息、仓库状态和当前运行信息。",
+                        footer = "这通常只需要几秒钟。",
+                        tone = TimelineNoticeTone.Neutral,
+                        stateLabel = "加载中",
+                        content = {
+                            ShimmerBlock(lines = 2)
+                        },
+                    )
                 }
             }
 
@@ -374,15 +398,12 @@ fun SessionDetailScreen(
                         .padding(padding)
                         .imePadding(),
                 ) {
-                    if (uiState.loading || uiState.refreshing) {
-                        LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
-                    }
-
                     SessionControlStrip(
                         liveRun = uiState.liveRun,
                         liveStreamConnected = uiState.liveStreamConnected,
                         liveStreamStatus = uiState.liveStreamStatus,
                         queuedPromptCount = uiState.queuedPrompts.size,
+                        isRefreshing = uiState.refreshing,
                         modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
                     )
 
@@ -413,9 +434,10 @@ fun SessionDetailScreen(
                     )
 
                     PullToRefreshBox(
-                        isRefreshing = uiState.refreshing,
+                        isRefreshing = uiState.refreshing && showManualRefreshIndicator,
                         onRefresh = {
                             if (!sessionId.isNullOrBlank()) {
+                                showManualRefreshIndicator = true
                                 viewModel.refresh(serverId, sessionId)
                             }
                         },
@@ -647,22 +669,21 @@ private fun ErrorBanner(
     message: String,
     onDismiss: () -> Unit,
 ) {
-    Surface(
+    TimelineNoticeCard(
         modifier = Modifier
             .fillMaxWidth()
             .padding(horizontal = 12.dp, vertical = 4.dp),
-        shape = RoundedCornerShape(12.dp),
-        color = MaterialTheme.colorScheme.errorContainer,
-    ) {
-        Text(
-            text = message,
-            modifier = Modifier
-                .clickable(onClick = onDismiss)
-                .padding(12.dp),
-            style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.onErrorContainer,
-        )
-    }
+        title = "运行提示",
+        message = message,
+        footer = "点按关闭后，提示会收起。",
+        tone = TimelineNoticeTone.Error,
+        stateLabel = "错误",
+        content = {
+            TextButton(onClick = onDismiss) {
+                Text("关闭")
+            }
+        }
+    )
 }
 
 @Composable
@@ -674,43 +695,21 @@ private fun ErrorState(
         modifier = Modifier.fillMaxSize(),
         contentAlignment = Alignment.Center,
     ) {
-        Card(
+        TimelineNoticeCard(
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(24.dp),
-            colors = CardDefaults.cardColors(
-                containerColor = MaterialTheme.colorScheme.surface,
-            ),
-        ) {
-            Column(
-                modifier = Modifier.padding(20.dp),
-                verticalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
-                Text(
-                    text = "加载失败",
-                    style = MaterialTheme.typography.titleMedium,
-                    color = MaterialTheme.colorScheme.onSurface,
-                )
-                Text(
-                    text = message,
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-                Surface(
-                    shape = RoundedCornerShape(12.dp),
-                    color = MaterialTheme.colorScheme.primaryContainer,
-                ) {
-                    Text(
-                        text = "点击重试",
-                        modifier = Modifier
-                            .clickable(onClick = onRetry)
-                            .padding(horizontal = 12.dp, vertical = 8.dp),
-                        style = MaterialTheme.typography.labelLarge,
-                        color = MaterialTheme.colorScheme.onPrimaryContainer,
-                    )
+            title = "会话加载失败",
+            message = message,
+            footer = "请确认网络连接或主机可用后重试。",
+            tone = TimelineNoticeTone.Error,
+            stateLabel = "错误",
+            content = {
+                Button(onClick = onRetry) {
+                    Text("重试加载")
                 }
             }
-        }
+        )
     }
 }
 

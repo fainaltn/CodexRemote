@@ -39,6 +39,10 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import dev.codexremote.android.data.model.Server
 import dev.codexremote.android.data.network.ApiClient
 import dev.codexremote.android.data.repository.ServerRepository
+import dev.codexremote.android.ui.sessions.ShimmerBlock
+import dev.codexremote.android.ui.sessions.TimelineNoticeCard
+import dev.codexremote.android.ui.sessions.TimelineNoticeTone
+import dev.codexremote.android.ui.theme.PrecisionConsoleSnackbarHost
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -219,7 +223,7 @@ fun ServerSettingsScreen(
                 }
             )
         },
-        snackbarHost = { SnackbarHost(snackbarHostState) },
+        snackbarHost = { PrecisionConsoleSnackbarHost(snackbarHostState) },
     ) { padding ->
         Column(
             modifier = Modifier
@@ -232,14 +236,32 @@ fun ServerSettingsScreen(
 
             when {
                 uiState.loading -> {
-                    CircularProgressIndicator()
+                    TimelineNoticeCard(
+                        title = "正在读取设置",
+                        message = "正在校验当前服务器并整理它的连接配置。",
+                        footer = "这通常只需要几秒钟。",
+                        tone = TimelineNoticeTone.Neutral,
+                        stateLabel = "加载中",
+                        content = {
+                            ShimmerBlock(lines = 2)
+                        },
+                    )
                 }
 
                 uiState.server == null -> {
-                    Text(
-                        text = uiState.error ?: "当前服务器不可用",
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.error,
+                    TimelineNoticeCard(
+                        title = "设置加载失败",
+                        message = uiState.error ?: "当前服务器不可用",
+                        footer = "检查网络或主机状态后再试。",
+                        tone = TimelineNoticeTone.Error,
+                        stateLabel = "错误",
+                        content = {
+                            Button(
+                                onClick = { viewModel.load(serverId) },
+                            ) {
+                                Text("重试加载")
+                            }
+                        },
                     )
                 }
 

@@ -11,8 +11,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.items
-import androidx.compose.material3.HorizontalDivider
-import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -47,7 +45,8 @@ internal fun ConversationTimeline(
     onReusePrompt: (String) -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    val isActive = liveRun?.status in activeRunStatuses
+    val liveRunStatus = liveRun?.status
+    val isActive = liveRunStatus in activeRunStatuses
 
     val currentUserText = when {
         liveRun == null -> latestUserPrompt
@@ -67,6 +66,13 @@ internal fun ConversationTimeline(
         !replyOutput.isNullOrBlank() ||
         showWaitingPlaceholder
     val showStreamDegradedCard = isActive && !liveStreamConnected && !liveStreamStatus.isNullOrBlank()
+    val runStateLabel = currentRunStateLabel(
+        liveRunStatus = liveRunStatus,
+        hasVisibleOutput = !replyOutput.isNullOrBlank(),
+        liveStreamConnected = liveStreamConnected,
+        sending = sending,
+        isDraft = isDraft,
+    )
 
     // Only show historical rounds in the history section;
     // the current (non-historical) round is rendered separately below.
@@ -76,10 +82,21 @@ internal fun ConversationTimeline(
         LazyColumn(
             state = listState,
             modifier = Modifier.fillMaxSize(),
-            contentPadding = PaddingValues(horizontal = 16.dp, vertical = 12.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp),
+            contentPadding = PaddingValues(horizontal = 14.dp, vertical = 8.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp),
         ) {
-            // ① History rounds (only past rounds, not the current turn)
+            item(key = "history-header") {
+                TimelineSectionHeader(
+                    title = "历史记录",
+                    subtitle = if (historicalRounds.isNotEmpty()) {
+                        "过去的回合会按时间沉淀成可展开的历史卡片"
+                    } else {
+                        "当前会话还没有形成历史回合"
+                    },
+                    stateLabel = if (historicalRounds.isNotEmpty()) "${historicalRounds.size} 个回合" else "空",
+                )
+            }
+
             if (historicalRounds.isNotEmpty()) {
                 items(
                     historicalRounds,
@@ -92,12 +109,14 @@ internal fun ConversationTimeline(
                         onToggle = { onToggleRound(round.id) },
                     )
                 }
-
-                // Separator between history and current turn
-                item(key = "history-divider") {
-                    HorizontalDivider(
-                        modifier = Modifier.padding(vertical = 4.dp),
-                        color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f),
+            } else {
+                item(key = "history-empty") {
+                    TimelineNoticeCard(
+                        title = "暂无历史记录",
+                        message = "当前会话还没有过去的回合。等到新的消息往前推进后，历史会在这里自动沉淀。",
+                        footer = "你可以先看当前运行，再回到这里展开已经完成的回合。",
+                        tone = TimelineNoticeTone.Neutral,
+                        stateLabel = "历史为空",
                     )
                 }
             }

@@ -126,6 +126,16 @@ function sanitizePromptDisplay(prompt: string): string {
   return trimmed;
 }
 
+function summarizeInlineText(text: string, maxLength = 96): string {
+  const normalized = text.replace(/\s+/g, " ").trim();
+  if (!normalized) {
+    return "";
+  }
+  return normalized.length > maxLength
+    ? `${normalized.slice(0, maxLength)}…`
+    : normalized;
+}
+
 function statusLabel(status: string): string {
   switch (status) {
     case "pending":
@@ -141,6 +151,55 @@ function statusLabel(status: string): string {
     default:
       return status;
   }
+}
+
+function runStageLabel(status: string, isRunning: boolean, hasOutput: boolean): string {
+  if (status === "pending") {
+    return "准备连接";
+  }
+  if (status === "running") {
+    return hasOutput ? "流式输出" : "思考中";
+  }
+  if (status === "completed") {
+    return "终端收束";
+  }
+  if (status === "failed") {
+    return "终端错误";
+  }
+  if (status === "stopped") {
+    return "已停止";
+  }
+  return isRunning ? "运行中" : statusLabel(status);
+}
+
+function runStageHint(status: string, isRunning: boolean, hasOutput: boolean): string {
+  if (status === "pending") {
+    return "等待后台建立这次运行的状态通道";
+  }
+  if (status === "running") {
+    return hasOutput
+      ? "Codex 正在持续增量输出内容"
+      : "Codex 正在思考并组织下一步动作";
+  }
+  if (status === "completed") {
+    return "本轮运行已经完成，输出保留在终端卡片中";
+  }
+  if (status === "failed") {
+    return "本轮运行遇到错误，先查看报错再决定是否重试";
+  }
+  if (status === "stopped") {
+    return "本轮运行已被手动终止";
+  }
+  return isRunning ? "运行仍在持续" : "当前没有可用的运行状态";
+}
+
+function runStageTone(
+  status: string,
+  hasOutput: boolean,
+): "pending" | "thinking" | "streaming" | "terminal" {
+  if (status === "pending") return "pending";
+  if (status === "running") return hasOutput ? "streaming" : "thinking";
+  return "terminal";
 }
 
 interface HistoryGroup {
@@ -324,6 +383,65 @@ export default function SessionDetailPage() {
   const liveOutput = cleanLiveOutput(liveRun?.lastOutput ?? null);
   const latestPrompt = liveRun?.prompt.trim() ?? "";
   const reusablePrompt = sanitizePromptDisplay(liveRun?.prompt ?? "");
+  const runTone = liveRun
+    ? runStageTone(liveRun.status, Boolean(liveOutput))
+    : null;
+  const runStage = liveRun
+    ? runStageLabel(liveRun.status, isRunning, Boolean(liveOutput))
+    : "";
+  const runStageCopy = liveRun
+    ? runStageHint(liveRun.status, isRunning, Boolean(liveOutput))
+    : "";
+  const promptPreview = summarizeInlineText(prompt, 96);
+  const activeRunPrompt = summarizeInlineText(reusablePrompt || latestPrompt, 120);
+  const composerModeLabel = isRunning
+    ? "运行中"
+    : sending
+      ? "排队中"
+      : prompt.trim()
+        ? "准备发送"
+        : "等待输入";
+  const composerModeHint = isRunning
+    ? activeRunPrompt
+      ? `当前运行：${activeRunPrompt}`
+      : "当前运行仍在持续，停止后可以发起下一轮 follow-up。"
+    : sending
+      ? promptPreview
+        ? `正在提交：${promptPreview}`
+        : "提示词正在进入队列。"
+      : pendingArtifacts.length > 0
+        ? "附件已挂载到下一次提交，输入后即可一并发送。"
+        : "输入 follow-up 命令，直接作为下一轮指令发送。";
+  const composerInlineHint = isRunning
+    ? "停止后可继续提交新的 follow-up。"
+    : sending
+      ? "当前指令正在发送队列中。"
+      : pendingArtifacts.length > 0
+        ? "附件会自动随下一次请求一起发送。"
+        : "输入完成后可以直接提交。";
+  const composerQueueHint = sending
+    ? `队列：${promptPreview || "正在提交当前命令"}`
+    : prompt.trim()
+      ? `预览：${promptPreview || "当前输入"}`
+      : pendingArtifacts.length > 0
+        ? "附件已挂载，等待指令"
+        : "可直接发送";
+  const composerActionKicker = isRunning
+    ? "保持控制"
+    : sending
+      ? "提交队列"
+      : prompt.trim()
+        ? "准备执行"
+        : "等待输入";
+  const composerActionLabel = isRunning
+    ? "停止运行"
+    : sending
+      ? "提交中…"
+      : "发送命令";
+  const historyRoundCount = historyGroups.length;
+  const historicalRoundCount = historyGroups.filter(
+    (group) => group.isHistorical,
+  ).length;
 
   useEffect(() => {
     if (prefillAppliedRef.current) return;
@@ -581,9 +699,10 @@ export default function SessionDetailPage() {
           </div>
         </div>
         <div className="content">
-          <div className="empty-state">
+          <div className="empty-state" role="alert">
             <div className="empty-state-icon">⚠</div>
-            <div className="empty-state-text">{error}</div>
+            <div className="empty-state-text">会话同步失败</div>
+            <div className="empty-state-sub">{error}</div>
           </div>
         </div>
       </div>
@@ -668,350 +787,370 @@ export default function SessionDetailPage() {
           )}
 
           <main className="detail-main detail-main-single" aria-label="会话详情">
-            <section className="detail-conversation-shell">
-              <div className="history-section">
-                <div className="history-header">
-                  <span>历史上下文</span>
-                  <span className="history-count">
-                    {historyGroups.length} 轮 / {messages.length} 条
+            <section className="detail-overview panel">
+              <div className="detail-overview-top">
+                <div className="detail-overview-copy">
+                  <div className="detail-overview-eyebrow">Session detail</div>
+                  <h2>{session?.title || sessionId}</h2>
+                  <p>{session?.cwd || "当前没有可用的工作目录信息"}</p>
+                </div>
+                <div className="detail-overview-badges">
+                  <span className="pill pill-muted">
+                    {historyRoundCount} 轮历史
+                  </span>
+                  <span className="pill">
+                    {session?.archivedAt ? "已归档" : "活跃中"}
+                  </span>
+                  <span className="pill pill-accent">
+                    {liveRun ? statusLabel(liveRun.status) : "无运行中任务"}
                   </span>
                 </div>
-                {historyGroups.length > 0 ? (
-                  <div className="history-list">
-                    {historyGroups.map((group) => {
-                      const expanded = !group.folded || expandedGroups[group.id];
-                      if (!expanded) {
-                        return (
-                          <button
-                            key={group.id}
-                            type="button"
-                            className={`history-folded-card ${
-                              group.isHistorical
-                                ? "history-folded-card-historical"
-                                : "history-folded-card-current"
-                            }`}
-                            onClick={() => toggleHistoryGroup(group.id)}
-                          >
-                            <div className="history-folded-top">
-                              <span>{group.title}</span>
-                              <span>{group.messages.length} 条</span>
-                            </div>
-                            <div className="history-folded-preview">{group.preview}</div>
-                          </button>
-                        );
-                      }
-
-                      return (
-                        <div
-                          key={group.id}
-                          className={`history-group-expanded ${
-                            group.isHistorical
-                              ? "history-group-expanded-historical"
-                              : "history-group-expanded-current"
-                          }`}
-                        >
-                          {group.folded && (
-                            <button
-                              type="button"
-                              className="history-collapse-btn"
-                              onClick={() => toggleHistoryGroup(group.id)}
-                            >
-                              收起这轮历史
-                            </button>
-                          )}
-                          {group.primaryMessages.map((message, index) => {
-                            const isLastPrimary =
-                              index === group.primaryMessages.length - 1;
-                            const shouldInsertProcessCard =
-                              group.foldedMessages.length > 0 &&
-                              isLastPrimary &&
-                              message.role === "assistant";
-                            const isHistoricalUserMessage =
-                              group.isHistorical &&
-                              message.role === "user" &&
-                              message.kind === "message";
-                            const isEditingThisMessage =
-                              editingMessageId === message.id;
-
-                            return (
-                              <div key={message.id}>
-                                {shouldInsertProcessCard && (
-                                  <>
-                                    <button
-                                      type="button"
-                                      className="history-folded-card history-folded-card-current"
-                                      onClick={() =>
-                                        toggleHistoryGroup(`${group.id}-process`)
-                                      }
-                                      style={{ marginBottom: 12 }}
-                                    >
-                                      <div className="history-folded-top">
-                                        <span>Codex 过程</span>
-                                        <span>{group.foldedMessages.length} 条</span>
-                                      </div>
-                                      <div className="history-folded-preview">
-                                        {expandedGroups[`${group.id}-process`]
-                                          ? "点击收起过程"
-                                          : summarizeGroupTitle(
-                                              group.foldedMessages[0]?.text,
-                                            )}
-                                      </div>
-                                    </button>
-                                    {expandedGroups[`${group.id}-process`] &&
-                                      group.foldedMessages.map((foldedMessage) => (
-                                        <div
-                                          key={foldedMessage.id}
-                                          className="history-message history-message-process"
-                                          style={{ marginBottom: 10 }}
-                                        >
-                                          <div className="history-message-top">
-                                            <span className="history-role">
-                                              Codex 过程
-                                            </span>
-                                            <span className="history-time">
-                                              {formatDate(foldedMessage.createdAt)}
-                                            </span>
-                                          </div>
-                                          <div className="history-text">
-                                            {foldedMessage.text}
-                                          </div>
-                                        </div>
-                                      ))}
-                                  </>
-                                )}
-                                <div
-                                  className={`${messageClassName(message)} ${
-                                    isEditingThisMessage
-                                      ? " history-message-editing"
-                                      : ""
-                                  }`}
-                                >
-                                  <div className="history-message-top">
-                                    <span className="history-role">
-                                      {messageRoleLabel(message)}
-                                    </span>
-                                    <span className="history-time">
-                                      {formatDate(message.createdAt)}
-                                    </span>
-                                  </div>
-                                  {isEditingThisMessage ? (
-                                    <>
-                                      <textarea
-                                        className="history-edit-textarea"
-                                        value={editingText}
-                                        onChange={(event) =>
-                                          setEditingText(event.target.value)
-                                        }
-                                        rows={4}
-                                        autoFocus
-                                        disabled={sending || isRunning}
-                                      />
-                                      <div className="history-message-actions">
-                                        <button
-                                          type="button"
-                                          className="history-message-secondary-btn"
-                                          onClick={handleCancelEditingMessage}
-                                          disabled={sending || isRunning}
-                                        >
-                                          取消
-                                        </button>
-                                        <button
-                                          type="button"
-                                          className="history-message-primary-btn"
-                                          onClick={() =>
-                                            void handleSubmitEditedPrompt(
-                                              editingText,
-                                            )
-                                          }
-                                          disabled={
-                                            sending ||
-                                            isRunning ||
-                                            !editingText.trim()
-                                          }
-                                        >
-                                          {sending ? "发送中…" : "重新发送"}
-                                        </button>
-                                      </div>
-                                    </>
-                                  ) : (
-                                    <>
-                                      <div className="history-text">{message.text}</div>
-                                      {isHistoricalUserMessage && (
-                                        <div className="history-message-actions">
-                                          <button
-                                            type="button"
-                                            className="history-message-secondary-btn"
-                                            onClick={() =>
-                                              handleStartEditingMessage(message)
-                                            }
-                                            disabled={sending || isRunning}
-                                          >
-                                            编辑并重发
-                                          </button>
-                                        </div>
-                                      )}
-                                    </>
-                                  )}
-                                </div>
-                              </div>
-                            );
-                          })}
-                        </div>
-                      );
-                    })}
-                  </div>
-                ) : (
-                  <div className="history-empty">还没有可展示的历史消息</div>
-                )}
               </div>
-
-              {liveRun ? (
-                <div className="run-section">
-                  <div className="run-header">
-                    <span className={`status-badge status-${liveRun.status}`}>
-                      {isRunning && "● "}
-                      {statusLabel(liveRun.status)}
-                    </span>
-                    {liveRun.model && (
-                      <span className="model-badge">{liveRun.model}</span>
-                    )}
-                  </div>
-
-                  <div className="history-group-expanded run-panel">
-                    <div className="history-message history-message-user">
-                      <div className="history-message-top">
-                        <span className="history-role">你</span>
-                        <span className="history-time">
-                          {formatDate(liveRun.startedAt)}
-                        </span>
-                      </div>
-                      <div className="history-text">
-                        {sanitizePromptDisplay(liveRun.prompt)}
-                      </div>
-                    </div>
-                    <div
-                      className={`history-message history-message-assistant ${
-                        !isRunning ? "history-message-terminal" : ""
-                      }`}
-                    >
-                      <div className="history-message-top">
-                        <span className="history-role">Codex</span>
-                        <span className="history-time">
-                          {isRunning ? "流式回复中" : statusLabel(liveRun.status)}
-                        </span>
-                      </div>
-                      <div className="history-text run-output" ref={outputRef}>
-                        {liveOutput ??
-                          (isRunning
-                            ? "Codex 正在思考…"
-                            : "这次运行没有可显示的文本输出")}
-                      </div>
-                    </div>
-                  </div>
-
-                  {!isRunning && latestPrompt && (
-                    <div className="run-actions">
-                      <button
-                        type="button"
-                        className="history-message-secondary-btn"
-                        onClick={handleReuseLatestPrompt}
-                        disabled={sending}
-                      >
-                        回填提示词
-                      </button>
-                      <button
-                        type="button"
-                        className="history-message-primary-btn"
-                        onClick={() => void handleRetryLatestPrompt()}
-                        disabled={sending}
-                      >
-                        {sending ? "发送中…" : "重试本轮"}
-                      </button>
-                    </div>
-                  )}
-
-                  {liveRun.error && <div className="run-error">{liveRun.error}</div>}
+              <div className="detail-overview-stats">
+                <div className="detail-overview-stat">
+                  <span>消息</span>
+                  <strong>{messages.length}</strong>
                 </div>
-              ) : (
-                <div className="empty-state">
-                  <div className="empty-state-icon">⚡</div>
-                  <div className="empty-state-text">当前没有运行中的任务</div>
-                  <div className="empty-state-sub">
-                    发送一条提示词来继续处理这个 Codex 会话
-                  </div>
+                <div className="detail-overview-stat">
+                  <span>历史轮次</span>
+                  <strong>{historyRoundCount}</strong>
                 </div>
-              )}
+                <div className="detail-overview-stat">
+                  <span>当前可见</span>
+                  <strong>{historyRoundCount - historicalRoundCount}</strong>
+                </div>
+              </div>
             </section>
 
-            {pendingArtifacts.length > 0 && (
-              <section className="detail-attachments panel">
-                <div className="panel-header">
-                  <h2>待发送附件</h2>
-                  <span className="history-count">{pendingArtifacts.length} 个</span>
-                </div>
-                <div className="session-list">
-                  {pendingArtifacts.map((artifact) => (
-                    <div key={artifact.id} className="session-card">
-                      <div className="session-card-header">
-                        <span className="session-card-title">
-                          {artifact.originalName}
-                        </span>
-                        <button
-                          type="button"
-                          className="icon-btn"
-                          title="移除附件"
-                          onClick={() =>
-                            setPendingArtifacts((prev) =>
-                              prev.filter((entry) => entry.id !== artifact.id),
-                            )
+            <section className="detail-conversation-shell">
+              <div className="detail-run-grid">
+                <div className="detail-history-panel">
+                  <div className="history-section">
+                    <div className="history-header">
+                      <span>历史上下文</span>
+                      <span className="history-count">
+                        {historyGroups.length} 轮 / {messages.length} 条
+                      </span>
+                    </div>
+                    {historyGroups.length > 0 ? (
+                      <div className="history-list">
+                        {historyGroups.map((group) => {
+                          const expanded = !group.folded || expandedGroups[group.id];
+                          if (!expanded) {
+                            return (
+                              <button
+                                key={group.id}
+                                type="button"
+                                className={`history-folded-card ${
+                                  group.isHistorical
+                                    ? "history-folded-card-historical"
+                                    : "history-folded-card-current"
+                                }`}
+                                onClick={() => toggleHistoryGroup(group.id)}
+                              >
+                                <div className="history-folded-top">
+                                  <span>{group.title}</span>
+                                  <span>{group.messages.length} 条</span>
+                                </div>
+                                <div className="history-folded-preview">
+                                  {group.preview}
+                                </div>
+                              </button>
+                            );
                           }
-                        >
-                          ×
-                        </button>
+
+                          return (
+                            <div
+                              key={group.id}
+                              className={`history-group-expanded ${
+                                group.isHistorical
+                                  ? "history-group-expanded-historical"
+                                  : "history-group-expanded-current"
+                              }`}
+                            >
+                              {group.folded && (
+                                <button
+                                  type="button"
+                                  className="history-collapse-btn"
+                                  onClick={() => toggleHistoryGroup(group.id)}
+                                >
+                                  收起这轮历史
+                                </button>
+                              )}
+                              {group.primaryMessages.map((message, index) => {
+                                const isLastPrimary =
+                                  index === group.primaryMessages.length - 1;
+                                const shouldInsertProcessCard =
+                                  group.foldedMessages.length > 0 &&
+                                  isLastPrimary &&
+                                  message.role === "assistant";
+                                const isHistoricalUserMessage =
+                                  group.isHistorical &&
+                                  message.role === "user" &&
+                                  message.kind === "message";
+                                const isEditingThisMessage =
+                                  editingMessageId === message.id;
+
+                                return (
+                                  <div key={message.id}>
+                                    {shouldInsertProcessCard && (
+                                      <>
+                                        <button
+                                          type="button"
+                                          className="history-folded-card history-folded-card-current"
+                                          onClick={() =>
+                                            toggleHistoryGroup(`${group.id}-process`)
+                                          }
+                                          style={{ marginBottom: 12 }}
+                                        >
+                                          <div className="history-folded-top">
+                                            <span>Codex 过程</span>
+                                            <span>{group.foldedMessages.length} 条</span>
+                                          </div>
+                                          <div className="history-folded-preview">
+                                            {expandedGroups[`${group.id}-process`]
+                                              ? "点击收起过程"
+                                              : summarizeGroupTitle(
+                                                  group.foldedMessages[0]?.text,
+                                                )}
+                                          </div>
+                                        </button>
+                                        {expandedGroups[`${group.id}-process`] &&
+                                          group.foldedMessages.map((foldedMessage) => (
+                                            <div
+                                              key={foldedMessage.id}
+                                              className="history-message history-message-process"
+                                              style={{ marginBottom: 10 }}
+                                            >
+                                              <div className="history-message-top">
+                                                <span className="history-role">
+                                                  Codex 过程
+                                                </span>
+                                                <span className="history-time">
+                                                  {formatDate(foldedMessage.createdAt)}
+                                                </span>
+                                              </div>
+                                              <div className="history-text">
+                                                {foldedMessage.text}
+                                              </div>
+                                            </div>
+                                          ))}
+                                      </>
+                                    )}
+                                    <div
+                                      className={`${messageClassName(message)} ${
+                                        isEditingThisMessage
+                                          ? " history-message-editing"
+                                          : ""
+                                      }`}
+                                    >
+                                      <div className="history-message-top">
+                                        <span className="history-role">
+                                          {messageRoleLabel(message)}
+                                        </span>
+                                        <span className="history-time">
+                                          {formatDate(message.createdAt)}
+                                        </span>
+                                      </div>
+                                      {isEditingThisMessage ? (
+                                        <>
+                                          <textarea
+                                            className="history-edit-textarea"
+                                            value={editingText}
+                                            onChange={(event) =>
+                                              setEditingText(event.target.value)
+                                            }
+                                            rows={4}
+                                            autoFocus
+                                            disabled={sending || isRunning}
+                                          />
+                                          <div className="history-message-actions">
+                                            <button
+                                              type="button"
+                                              className="history-message-secondary-btn"
+                                              onClick={handleCancelEditingMessage}
+                                              disabled={sending || isRunning}
+                                            >
+                                              取消
+                                            </button>
+                                            <button
+                                              type="button"
+                                              className="history-message-primary-btn"
+                                              onClick={() =>
+                                                void handleSubmitEditedPrompt(
+                                                  editingText,
+                                                )
+                                              }
+                                              disabled={
+                                                sending ||
+                                                isRunning ||
+                                                !editingText.trim()
+                                              }
+                                            >
+                                              {sending ? "发送中…" : "重新发送"}
+                                            </button>
+                                          </div>
+                                        </>
+                                      ) : (
+                                        <>
+                                          <div className="history-text">
+                                            {message.text}
+                                          </div>
+                                          {isHistoricalUserMessage && (
+                                            <div className="history-message-actions">
+                                              <button
+                                                type="button"
+                                                className="history-message-secondary-btn"
+                                                onClick={() =>
+                                                  handleStartEditingMessage(message)
+                                                }
+                                                disabled={sending || isRunning}
+                                              >
+                                                编辑并重发
+                                              </button>
+                                            </div>
+                                          )}
+                                        </>
+                                      )}
+                                    </div>
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          );
+                        })}
                       </div>
-                      <div className="session-card-preview">
-                        {artifact.mimeType} · {formatBytes(artifact.sizeBytes)}
+                    ) : (
+                      <div className="history-empty detail-history-empty">
+                        <div className="history-empty-title">还没有可展示的历史消息</div>
+                        <div className="history-empty-copy">
+                          这次会话刚刚开始。新的提示词会先出现在右侧的运行面板中，历史上下文会在后续逐步展开。
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                <div className="detail-run-panel">
+                  {liveRun ? (
+                    <>
+                      <div className="run-header">
+                        <span className={`status-badge status-${liveRun.status}`}>
+                          {isRunning && "● "}
+                          {statusLabel(liveRun.status)}
+                        </span>
+                        {liveRun.model && (
+                          <span className="model-badge">{liveRun.model}</span>
+                        )}
+                        {liveRun.reasoningEffort && (
+                          <span className="model-badge">
+                            reasoning {liveRun.reasoningEffort}
+                          </span>
+                        )}
+                      </div>
+
+                      <div className="run-stage-rail" aria-label="运行阶段">
+                        <span
+                          className={`run-stage-pill ${
+                            runTone === "thinking" ? "run-stage-pill-active" : ""
+                          }`}
+                        >
+                          思考
+                        </span>
+                        <span
+                          className={`run-stage-pill ${
+                            runTone === "streaming" ? "run-stage-pill-active" : ""
+                          }`}
+                        >
+                          流式
+                        </span>
+                        <span
+                          className={`run-stage-pill ${
+                            runTone === "terminal" ? "run-stage-pill-active" : ""
+                          }`}
+                        >
+                          终端
+                        </span>
+                      </div>
+
+                      <div className="run-state-copy">
+                        <div className="run-state-title">{runStage}</div>
+                        <div className="run-state-subtitle">{runStageCopy}</div>
+                      </div>
+
+                      <div className="run-snapshot">
+                        <div className="run-snapshot-label">本轮提示词</div>
+                        <div className="run-snapshot-text">
+                          {sanitizePromptDisplay(liveRun.prompt)}
+                        </div>
+                      </div>
+
+                      <div
+                        className={`run-terminal-card ${
+                          isRunning
+                            ? "run-terminal-card-running"
+                            : liveRun.status === "failed"
+                            ? "run-terminal-card-error"
+                            : "run-terminal-card-complete"
+                        }`}
+                      >
+                        <div className="history-message-top">
+                          <span className="history-role">Codex 输出</span>
+                          <span className="history-time">
+                            {isRunning ? "实时流" : statusLabel(liveRun.status)}
+                          </span>
+                        </div>
+                        <div className="run-terminal-output" ref={outputRef}>
+                          {liveOutput ??
+                            (isRunning
+                              ? "Codex 正在思考并等待下一段输出…"
+                              : "这次运行没有可显示的终端文本")}
+                        </div>
+                      </div>
+
+                      {!isRunning && latestPrompt && (
+                        <div className="run-actions">
+                          <button
+                            type="button"
+                            className="history-message-secondary-btn"
+                            onClick={handleReuseLatestPrompt}
+                            disabled={sending}
+                          >
+                            回填提示词
+                          </button>
+                          <button
+                            type="button"
+                            className="history-message-primary-btn"
+                            onClick={() => void handleRetryLatestPrompt()}
+                            disabled={sending}
+                          >
+                            {sending ? "发送中…" : "重试本轮"}
+                          </button>
+                        </div>
+                      )}
+
+                      {liveRun.error && (
+                        <div className="run-error detail-run-error">
+                          <div className="run-error-title">运行错误</div>
+                          <div className="run-error-copy">{liveRun.error}</div>
+                        </div>
+                      )}
+                    </>
+                  ) : (
+                    <div className="empty-state detail-run-empty">
+                      <div className="empty-state-icon">⚡</div>
+                      <div className="empty-state-text">当前没有运行中的任务</div>
+                      <div className="empty-state-sub">
+                        发送一条提示词后，这里会显示思考、流式输出和终端收束状态。
                       </div>
                     </div>
-                  ))}
+                  )}
                 </div>
-              </section>
-            )}
+              </div>
+            </section>
 
             {error && session && (
-              <div className="error-message detail-inline-error">{error}</div>
-            )}
-
-            {uploading && uploadProgress && (
-              <div className="upload-status upload-status-progress">
-                <span>上传中…</span>
-                <div className="upload-progress-bar">
-                  <div
-                    className="upload-progress-fill"
-                    style={{
-                      width: `${Math.round(
-                        (uploadProgress.loaded / uploadProgress.total) * 100,
-                      )}%`,
-                    }}
-                  />
-                </div>
-                <span>
-                  {Math.round((uploadProgress.loaded / uploadProgress.total) * 100)}
-                  %
-                </span>
-              </div>
-            )}
-            {uploading && !uploadProgress && (
-              <div className="upload-status upload-status-progress">
-                <div className="spinner" style={{ width: 16, height: 16 }} />
-                <span>上传中…</span>
-              </div>
-            )}
-            {uploadResult && (
-              <div className={`upload-status upload-status-${uploadResult.status}`}>
-                <span>{uploadResult.status === "success" ? "✓" : "✗"}</span>
-                <span>{uploadResult.message}</span>
-              </div>
+              <div className="error-message detail-inline-error" role="alert">{error}</div>
             )}
           </main>
         </div>
@@ -1027,42 +1166,168 @@ export default function SessionDetailPage() {
       />
 
       {/* Sticky prompt bar */}
-      <form className="prompt-bar" onSubmit={handleSendPrompt}>
-        <button
-          type="button"
-          className="upload-btn"
-          onClick={handleUploadClick}
-          disabled={uploading}
-          title="上传文件或图片"
-        >
-          📎
-        </button>
-        <input
-          className="prompt-input"
-          type="text"
-          placeholder={isRunning ? "任务进行中…" : "继续处理这个会话…"}
-          value={prompt}
-          onChange={(e) => setPrompt(e.target.value)}
-          disabled={isRunning || sending}
-        />
-        {isRunning ? (
+      <form className="prompt-bar composer-panel" onSubmit={handleSendPrompt}>
+        <div className="composer-topline">
+          <div className="composer-copy-block">
+            <div className="composer-eyebrow">Command center</div>
+            <h2>
+              {isRunning
+                ? "停止、检查或发起下一条 follow-up"
+                : "准备下一条命令"}
+            </h2>
+            <p>{composerModeHint}</p>
+          </div>
+          <div className="composer-badges">
+            <span
+              className={`composer-pill composer-pill-${
+                isRunning ? "primary" : sending ? "accent" : "muted"
+              }`}
+            >
+              {composerModeLabel}
+            </span>
+            <span className="composer-pill composer-pill-muted">
+              {pendingArtifacts.length > 0
+                ? `${pendingArtifacts.length} 个附件`
+                : "无附件"}
+            </span>
+            <span className="composer-pill composer-pill-muted">
+              {isRunning ? "Live run" : "Ready for follow-up"}
+            </span>
+          </div>
+        </div>
+
+        {pendingArtifacts.length > 0 && (
+          <div className="composer-attachments">
+            <div className="composer-attachments-header">
+              <span>待发送附件</span>
+              <span>{pendingArtifacts.length} 个</span>
+            </div>
+            <div className="composer-attachment-grid">
+              {pendingArtifacts.map((artifact) => (
+                <div key={artifact.id} className="composer-attachment-card">
+                  <div className="composer-attachment-top">
+                    <div className="composer-attachment-copy">
+                      <div className="composer-attachment-name">
+                        {artifact.originalName}
+                      </div>
+                      <div className="composer-attachment-meta">
+                        {artifact.mimeType} · {formatBytes(artifact.sizeBytes)}
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      className="icon-btn composer-attachment-remove"
+                      title="移除附件"
+                      onClick={() =>
+                        setPendingArtifacts((prev) =>
+                          prev.filter((entry) => entry.id !== artifact.id),
+                        )
+                      }
+                    >
+                      ×
+                    </button>
+                  </div>
+                  <div className="composer-attachment-path">
+                    {artifact.storedPath}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        <div className="composer-command-row">
           <button
             type="button"
-            className="stop-btn"
-            onClick={handleStop}
-            title="停止运行"
+            className="upload-btn composer-upload-btn"
+            onClick={handleUploadClick}
+            disabled={uploading}
+            title="上传文件或图片"
           >
-            ■
+            📎
           </button>
-        ) : (
-          <button
-            type="submit"
-            className="send-btn"
-            disabled={!prompt.trim() || sending}
-            title="继续处理"
+          <div className="prompt-field">
+            <input
+              className="prompt-input composer-input"
+              type="text"
+              placeholder={isRunning ? "运行中，停止后继续…" : "输入下一条 follow-up 命令…"}
+              value={prompt}
+              onChange={(e) => setPrompt(e.target.value)}
+              disabled={isRunning || sending}
+            />
+            <div className="prompt-support-row">
+              <div className="prompt-support-copy">
+                <span className="prompt-support-label">Follow-up</span>
+                <span className="prompt-support-text">{composerInlineHint}</span>
+              </div>
+              <div className="prompt-queue-preview">{composerQueueHint}</div>
+            </div>
+          </div>
+          {isRunning ? (
+            <button
+              type="button"
+              className="stop-btn composer-action-btn"
+              onClick={handleStop}
+              title="停止运行"
+            >
+              <span className="composer-action-kicker">{composerActionKicker}</span>
+              <span className="composer-action-label">{composerActionLabel}</span>
+            </button>
+          ) : (
+            <button
+              type="submit"
+              className="send-btn composer-action-btn"
+              disabled={!prompt.trim() || sending}
+              title="继续处理"
+            >
+              <span className="composer-action-kicker">{composerActionKicker}</span>
+              <span className="composer-action-label">{composerActionLabel}</span>
+            </button>
+          )}
+        </div>
+
+        {uploading && uploadProgress && (
+          <div
+            className="upload-status composer-upload-status upload-status-progress"
+            role="status"
+            aria-live="polite"
           >
-            ▶
-          </button>
+            <span>上传中…</span>
+            <div className="upload-progress-bar">
+              <div
+                className="upload-progress-fill"
+                style={{
+                  width: `${Math.round(
+                    (uploadProgress.loaded / uploadProgress.total) * 100,
+                  )}%`,
+                }}
+              />
+            </div>
+            <span>
+              {Math.round((uploadProgress.loaded / uploadProgress.total) * 100)}
+              %
+            </span>
+          </div>
+        )}
+        {uploading && !uploadProgress && (
+          <div
+            className="upload-status composer-upload-status upload-status-progress"
+            role="status"
+            aria-live="polite"
+          >
+            <div className="spinner" style={{ width: 16, height: 16 }} />
+            <span>上传中…</span>
+          </div>
+        )}
+        {uploadResult && (
+          <div
+            className={`upload-status composer-upload-status upload-status-${uploadResult.status}`}
+            role="status"
+            aria-live="polite"
+          >
+            <span>{uploadResult.status === "success" ? "✓" : "✗"}</span>
+            <span>{uploadResult.message}</span>
+          </div>
         )}
       </form>
     </div>

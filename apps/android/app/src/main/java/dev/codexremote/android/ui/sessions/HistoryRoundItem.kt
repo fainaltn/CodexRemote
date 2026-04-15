@@ -48,7 +48,7 @@ internal fun HistoryRoundItem(
 ) {
     Column(
         modifier = modifier.fillMaxWidth(),
-        verticalArrangement = Arrangement.spacedBy(6.dp),
+        verticalArrangement = Arrangement.spacedBy(4.dp),
     ) {
         HistoryRoundSummary(
             round = round,
@@ -64,8 +64,8 @@ internal fun HistoryRoundItem(
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(start = 4.dp),
-                verticalArrangement = Arrangement.spacedBy(8.dp),
+                    .padding(start = 2.dp),
+                verticalArrangement = Arrangement.spacedBy(6.dp),
             ) {
                 HistoryRoundExpandedHeader(round = round)
 
@@ -111,8 +111,8 @@ private fun HistoryRoundSummary(
         border = BorderStroke(1.dp, palette.border),
     ) {
         Column(
-            modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp),
+            modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp),
         ) {
             Row(
                 modifier = Modifier.fillMaxWidth(),
@@ -187,8 +187,8 @@ private fun HistoryRoundExpandedHeader(round: HistoryRound) {
         border = BorderStroke(1.dp, palette.border.copy(alpha = 0.75f)),
     ) {
         Column(
-            modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp),
+            modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp),
         ) {
             Row(
                 modifier = Modifier.fillMaxWidth(),

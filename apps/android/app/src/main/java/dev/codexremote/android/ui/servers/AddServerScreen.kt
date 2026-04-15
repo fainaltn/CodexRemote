@@ -37,6 +37,7 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import dev.codexremote.android.data.model.Server
 import dev.codexremote.android.data.network.ApiClient
 import dev.codexremote.android.data.repository.ServerRepository
+import dev.codexremote.android.ui.theme.PrecisionConsoleSnackbarHost
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
@@ -119,7 +120,7 @@ fun AddServerScreen(
                 }
             )
         },
-        snackbarHost = { SnackbarHost(snackbarHostState) },
+        snackbarHost = { PrecisionConsoleSnackbarHost(snackbarHostState) },
     ) { padding ->
         Column(
             modifier = Modifier

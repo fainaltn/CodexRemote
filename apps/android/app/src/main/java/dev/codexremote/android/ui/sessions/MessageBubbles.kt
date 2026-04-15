@@ -1,9 +1,16 @@
 package dev.codexremote.android.ui.sessions
 
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateContentSize
+import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.Spring
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.scaleIn
+import androidx.compose.animation.scaleOut
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
@@ -46,6 +53,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
@@ -95,8 +103,8 @@ internal fun UserMessageBubble(
             },
         ) {
             Column(
-                modifier = Modifier.padding(14.dp),
-                verticalArrangement = Arrangement.spacedBy(4.dp),
+                modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
+                verticalArrangement = Arrangement.spacedBy(3.dp),
             ) {
                 Text(
                     text = displayText,
@@ -177,17 +185,42 @@ internal fun AssistantReplyBlock(
     modifier: Modifier = Modifier,
 ) {
     val terminalStatus = status?.takeIf { it in terminalRunStatuses && it != "completed" }
-    val accentColor = when (terminalStatus) {
-        null -> MaterialTheme.colorScheme.primary
-        else -> MaterialTheme.colorScheme.error
+    val hasSettled = !isActive && status in terminalRunStatuses
+    val runStateLabel = currentRunStateLabel(
+        liveRunStatus = status,
+        hasVisibleOutput = !output.isNullOrBlank(),
+        liveStreamConnected = isActive,
+        sending = sending,
+        isDraft = false,
+    )
+    val accentColor = when {
+        terminalStatus != null -> MaterialTheme.colorScheme.error
+        hasSettled -> MaterialTheme.colorScheme.secondary
+        else -> MaterialTheme.colorScheme.primary
     }
     val renderOutput = terminalStatus == null || !output.isNullOrBlank()
     var showSheet by remember { mutableStateOf(false) }
     val clipboardManager = LocalClipboardManager.current
+    val accentWidth by animateDpAsState(
+        targetValue = if (hasSettled) 5.dp else 3.dp,
+        animationSpec = spring(stiffness = Spring.StiffnessLow),
+        label = "assistant-accent-width",
+    )
+    val accentAlpha by animateFloatAsState(
+        targetValue = if (hasSettled) 1f else if (isActive) 0.92f else 0.78f,
+        animationSpec = spring(stiffness = Spring.StiffnessLow),
+        label = "assistant-accent-alpha",
+    )
+    val contentAlpha by animateFloatAsState(
+        targetValue = if (hasSettled) 1f else 0.98f,
+        animationSpec = spring(stiffness = Spring.StiffnessMediumLow),
+        label = "assistant-content-alpha",
+    )
 
     Column(
         modifier = modifier
             .fillMaxWidth()
+            .alpha(contentAlpha)
             .combinedClickable(
                 onClick = {},
                 onLongClick = {
@@ -203,11 +236,11 @@ internal fun AssistantReplyBlock(
             // Left accent bar visible only while active
             Box(
                 modifier = Modifier
-                    .width(3.dp)
+                    .width(accentWidth)
                     .heightIn(min = 48.dp)
                     .drawBehind {
-                        if (isActive || terminalStatus != null) {
-                            drawRect(accentColor)
+                        if (isActive || hasSettled) {
+                            drawRect(accentColor.copy(alpha = accentAlpha))
                         }
                     }
             )
@@ -216,13 +249,41 @@ internal fun AssistantReplyBlock(
 
             Column(
                 modifier = Modifier.weight(1f),
-                verticalArrangement = Arrangement.spacedBy(4.dp),
+                verticalArrangement = Arrangement.spacedBy(3.dp),
             ) {
-                terminalStatus?.let { statusValue ->
+                AnimatedVisibility(
+                    visible = hasSettled,
+                    enter = fadeIn(animationSpec = tween(220)) + scaleIn(
+                        animationSpec = tween(220),
+                        initialScale = 0.98f,
+                    ),
+                    exit = fadeOut(animationSpec = tween(150)) + scaleOut(
+                        animationSpec = tween(150),
+                        targetScale = 0.98f,
+                    ),
+                ) {
                     TimelineNoticeCard(
-                        title = terminalRunTitle(statusValue),
-                        message = terminalRunMessage(statusValue, error),
-                        tone = TimelineNoticeTone.Error,
+                        title = when {
+                            terminalStatus != null -> terminalRunTitle(terminalStatus)
+                            else -> "本轮已收束"
+                        },
+                        message = when {
+                            terminalStatus != null -> terminalRunMessage(terminalStatus, error)
+                            !output.isNullOrBlank() -> "流式输出已经沉淀为最终结果，当前内容可继续浏览、复制或直接重试。"
+                            else -> "本轮已经结束，当前没有额外的文本输出。"
+                        },
+                        tone = when {
+                            terminalStatus != null -> TimelineNoticeTone.Error
+                            else -> TimelineNoticeTone.Neutral
+                        },
+                        stateLabel = when {
+                            terminalStatus != null -> statusLabel(terminalStatus)
+                            else -> "已同步"
+                        },
+                        stateTone = when {
+                            terminalStatus != null -> TimelineNoticeTone.Error
+                            else -> TimelineNoticeTone.Neutral
+                        },
                     )
                 }
 
@@ -238,17 +299,14 @@ internal fun AssistantReplyBlock(
                 if (terminalStatus == null) {
                     // Error inline
                     error?.let { errorMsg ->
-                        Surface(
-                            modifier = Modifier.fillMaxWidth(),
-                            shape = RoundedCornerShape(12.dp),
-                            color = MaterialTheme.colorScheme.errorContainer,
+                        TimelineNoticeCard(
+                            title = "本轮运行有问题",
+                            message = errorMsg,
+                            footer = "你仍然可以重试本轮或回填提示词。",
+                            tone = TimelineNoticeTone.Error,
+                            stateLabel = "错误",
                         ) {
-                            Text(
-                                text = errorMsg,
-                                modifier = Modifier.padding(12.dp),
-                                style = MaterialTheme.typography.bodyMedium,
-                                color = MaterialTheme.colorScheme.onErrorContainer,
-                            )
+                            // Intentionally left empty: the message itself carries the feedback.
                         }
                     }
                 }
@@ -258,12 +316,13 @@ internal fun AssistantReplyBlock(
                     model = model,
                     elapsed = startedAt?.let { formatRunElapsed(it, finishedAt) },
                     isActive = isActive,
+                    stateLabel = runStateLabel,
                 )
 
                 // Action buttons (only when run is done and has content)
                 if (!isActive && onRetry != null && onReusePrompt != null) {
                     Row(
-                        modifier = Modifier.padding(top = 4.dp),
+                        modifier = Modifier.padding(top = 2.dp),
                         horizontalArrangement = Arrangement.spacedBy(8.dp),
                     ) {
                         TextButton(onClick = onReusePrompt, enabled = !sending) {
@@ -399,10 +458,12 @@ internal fun StreamingTextRenderer(
             if (active) {
                 ShimmerBlock(modifier = Modifier.fillMaxWidth())
             } else {
-                Text(
-                    text = "这次运行没有可显示的文本输出",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                TimelineNoticeCard(
+                    title = "没有可见输出",
+                    message = "这次运行没有返回文本内容，但它仍然会保留在当前回合中。",
+                    footer = "你仍然可以重试本轮或回填提示词。",
+                    tone = TimelineNoticeTone.Neutral,
+                    stateLabel = "空输出",
                 )
             }
         } else {
@@ -446,7 +507,7 @@ private fun RenderSingleBlock(block: RichTextBlock, cursorAlpha: Float) {
  * and in [WaitingReplyPlaceholder] for idle state.
  */
 @Composable
-internal fun ShimmerBlock(
+fun ShimmerBlock(
     modifier: Modifier = Modifier,
     lines: Int = 3,
 ) {
@@ -518,6 +579,7 @@ internal fun WaitingReplyPlaceholder(
                 "当前没有活跃运行时，这里会保持安静而不突兀。"
             },
             tone = TimelineNoticeTone.Neutral,
+            stateLabel = if (draft) "待发送" else "空闲",
             content = {
                 ShimmerBlock(lines = if (draft) 2 else 3)
             },

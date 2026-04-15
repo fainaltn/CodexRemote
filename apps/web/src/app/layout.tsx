@@ -1,9 +1,20 @@
 import type { Metadata, Viewport } from "next";
+import { JetBrains_Mono, Manrope } from "next/font/google";
 import "./globals.css";
 import { AuthProvider } from "@/lib/auth";
 import { AppShellClient } from "./app-shell-client";
 
 const THEME_STORAGE_KEY = "codexremote_theme_pref";
+const manrope = Manrope({
+  subsets: ["latin"],
+  variable: "--font-sans",
+  display: "swap",
+});
+const jetbrainsMono = JetBrains_Mono({
+  subsets: ["latin"],
+  variable: "--font-mono",
+  display: "swap",
+});
 
 export const metadata: Metadata = {
   title: "CodexRemote",
@@ -16,7 +27,7 @@ export const viewport: Viewport = {
   maximumScale: 1,
   userScalable: false,
   viewportFit: "cover",
-  themeColor: "#09090b",
+  themeColor: "#07111f",
 };
 
 export default function RootLayout({
@@ -45,7 +56,7 @@ export default function RootLayout({
           }}
         />
       </head>
-      <body>
+      <body className={`${manrope.variable} ${jetbrainsMono.variable}`}>
         <AuthProvider>
           <AppShellClient>{children}</AppShellClient>
         </AuthProvider>

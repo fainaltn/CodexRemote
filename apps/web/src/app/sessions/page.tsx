@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback, type FormEvent } from "react";
+import { useState, useEffect, useCallback, useMemo, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/lib/auth";
 import {
@@ -33,6 +33,15 @@ function shortenPath(path: string | null): string {
   return "…/" + segments.slice(-2).join("/");
 }
 
+function isFreshActivity(dateStr: string, minutes = 60): boolean {
+  return Date.now() - new Date(dateStr).getTime() <= minutes * 60_000;
+}
+
+type Signal = {
+  label: string;
+  tone: "primary" | "accent" | "muted";
+};
+
 interface SessionGroup {
   key: string;
   label: string;
@@ -46,6 +55,60 @@ function projectLabel(path: string | null): string {
   if (!path) return "未归类";
   const segments = path.split("/").filter(Boolean);
   return segments.at(-1) ?? path;
+}
+
+function getGroupSignal(
+  group: SessionGroup,
+  projectParam: string | null,
+  activeGroupKey: string | null,
+): Signal {
+  const routeProject = group.path ?? "__ungrouped__";
+  if (projectParam === routeProject || activeGroupKey === group.key) {
+    return { label: "当前项目", tone: "primary" };
+  }
+  if (group.draftOnly && group.sessions.length === 0) {
+    return { label: "草稿", tone: "muted" };
+  }
+  if (isFreshActivity(group.updatedAt, 120)) {
+    return { label: "最近活跃", tone: "accent" };
+  }
+  return { label: "历史", tone: "muted" };
+}
+
+function getSessionSignal(session: Session, index: number): Signal {
+  if (session.archivedAt) {
+    return { label: "已归档", tone: "muted" };
+  }
+  if (index === 0 && isFreshActivity(session.updatedAt, 30)) {
+    return { label: "最新", tone: "primary" };
+  }
+  if (isFreshActivity(session.updatedAt, 60)) {
+    return { label: "活跃", tone: "accent" };
+  }
+  return { label: "历史", tone: "muted" };
+}
+
+function rankGroups(
+  groups: SessionGroup[],
+  projectParam: string | null,
+  activeGroupKey: string | null,
+): SessionGroup[] {
+  const weight = (signal: Signal) => {
+    if (signal.label === "当前项目") return 0;
+    if (signal.label === "草稿") return 1;
+    if (signal.label === "最近活跃") return 2;
+    return 3;
+  };
+
+  return [...groups].sort((a, b) => {
+    const aSignal = getGroupSignal(a, projectParam, activeGroupKey);
+    const bSignal = getGroupSignal(b, projectParam, activeGroupKey);
+    return (
+      weight(aSignal) - weight(bSignal) ||
+      b.updatedAt.localeCompare(a.updatedAt) ||
+      a.label.localeCompare(b.label)
+    );
+  });
 }
 
 function groupSessionsByProject(sessions: Session[]): SessionGroup[] {
@@ -237,12 +300,18 @@ export default function SessionsPage() {
     }
   }
 
-  const groups = mergeDraftProjects(sessions, draftProjects);
+  const groups = useMemo(
+    () => mergeDraftProjects(sessions, draftProjects),
+    [sessions, draftProjects],
+  );
+  const orderedGroups = useMemo(
+    () => rankGroups(groups, projectParam, activeGroupKey),
+    [groups, projectParam, activeGroupKey],
+  );
   const selectionActive = batchMode || selectedSessionIds.length > 0;
-  const activeSessionCount = sessions.length;
   const selectedCount = selectedSessionIds.length;
   const activeGroup =
-    groups.find((group) => {
+    orderedGroups.find((group) => {
       if (projectParam === "__ungrouped__") {
         return group.path === null;
       }
@@ -251,9 +320,13 @@ export default function SessionsPage() {
       }
       return group.key === activeGroupKey;
     }) ??
-    groups.find((group) => group.key === activeGroupKey) ??
-    groups[0] ??
+    orderedGroups.find((group) => group.key === activeGroupKey) ??
+    orderedGroups[0] ??
     null;
+  const currentProjectCount = orderedGroups.length;
+  const currentGroupSignal = activeGroup
+    ? getGroupSignal(activeGroup, projectParam, activeGroupKey)
+    : null;
 
   useEffect(() => {
     function syncProjectFromLocation() {
@@ -366,15 +439,107 @@ export default function SessionsPage() {
 
       <div className="content sessions-content">
         <div className="sessions-desktop-shell">
+          <aside className="sessions-project-rail panel" aria-label="项目导航">
+            <div className="sessions-project-rail-header">
+              <div>
+                <div className="sessions-sidebar-eyebrow">Project Navigator</div>
+                <h2>精选项目</h2>
+              </div>
+              <div className="sessions-project-rail-count">
+                {currentProjectCount} 个
+              </div>
+            </div>
+            <div className="sessions-project-rail-stats">
+              <div className="sessions-project-rail-stat">
+                <span>当前</span>
+                <strong>{activeGroup ? activeGroup.label : "无"}</strong>
+              </div>
+              <div className="sessions-project-rail-stat">
+                <span>更新</span>
+                <strong>{activeGroup ? timeAgo(activeGroup.updatedAt) : "—"}</strong>
+              </div>
+              <div className="sessions-project-rail-stat">
+                <span>模式</span>
+                <strong>{batchMode ? "批量" : "浏览"}</strong>
+              </div>
+            </div>
+            <div className="sessions-project-list">
+              {orderedGroups.length === 0 ? (
+                <div className="sessions-project-empty">还没有发现项目。</div>
+              ) : (
+                orderedGroups.map((group) => {
+                  const isActive = activeGroup?.key === group.key;
+                  const groupSignal = getGroupSignal(
+                    group,
+                    projectParam,
+                    activeGroupKey,
+                  );
+
+                  return (
+                    <button
+                      key={group.key}
+                      type="button"
+                      className={`sessions-project-card ${
+                        isActive ? "sessions-project-card-active" : ""
+                      } ${group.draftOnly ? "sessions-project-card-draft" : ""}`}
+                      onClick={() => {
+                        setActiveGroupKey(group.key);
+                        const value = group.path ?? "__ungrouped__";
+                        setProjectParam(value);
+                        window.dispatchEvent(
+                          new CustomEvent("codexremote-project-selected", {
+                            detail: value,
+                          }),
+                        );
+                        if (group.path) {
+                          router.replace(`/sessions?project=${encodeURIComponent(value)}`);
+                        } else {
+                          router.replace("/sessions?project=__ungrouped__");
+                        }
+                      }}
+                    >
+                      <div className="sessions-project-card-top">
+                        <span className="sessions-project-card-title">
+                          {group.label}
+                        </span>
+                        <span
+                          className={`sessions-project-card-state sessions-project-card-state-${groupSignal.tone}`}
+                        >
+                          {groupSignal.label}
+                        </span>
+                      </div>
+                      <div className="sessions-project-card-path">
+                        {shortenPath(group.path)}
+                      </div>
+                      <div className="sessions-project-card-meta">
+                        <span>
+                          {group.draftOnly
+                            ? "草稿目录"
+                            : `${group.sessions.length} 个线程`}
+                        </span>
+                        <span>{timeAgo(group.updatedAt)}</span>
+                      </div>
+                    </button>
+                  );
+                })
+              )}
+            </div>
+          </aside>
+
           <main className="sessions-workbench panel" aria-label="会话工作区">
             {loading && sessions.length === 0 ? (
               <div className="empty-state">
                 <div className="spinner" />
+                <div className="empty-state-text">正在重建项目导航</div>
+                <div className="empty-state-sub">
+                  会同步当前项目、草稿目录和最近活跃线程。
+                </div>
               </div>
             ) : error ? (
-              <div className="empty-state">
+              <div className="empty-state" role="alert">
                 <div className="empty-state-icon">⚠</div>
-                <div className="empty-state-text">{error}</div>
+                <div className="empty-state-text">项目导航同步失败</div>
+                <div className="empty-state-sub">{error}</div>
                 <button
                   className="btn-primary"
                   style={{
@@ -394,7 +559,7 @@ export default function SessionsPage() {
                 <div className="empty-state-icon">📋</div>
                 <div className="empty-state-text">还没有发现会话</div>
                 <div className="empty-state-sub">
-                  请先在主机上启动或恢复一个 Codex 会话
+                  先在主机上启动或恢复一个 Codex 会话，或从“选择项目”加入草稿目录。
                 </div>
               </div>
             ) : (
@@ -406,14 +571,31 @@ export default function SessionsPage() {
                     </div>
                     <div className="session-group-title-row">
                       <h2>{activeGroup.label}</h2>
+                      {currentGroupSignal && (
+                        <span
+                          className={`pill pill-${currentGroupSignal.tone}`}
+                        >
+                          {currentGroupSignal.label}
+                        </span>
+                      )}
                       {activeGroup.draftOnly && <span className="pill">草稿</span>}
                     </div>
                     <div className="session-group-path">
                       {shortenPath(activeGroup.path)}
                     </div>
+                    <div className="sessions-workbench-note">
+                      {activeGroup.draftOnly
+                        ? "这个项目还只是草稿目录。点击创建首个线程后，会进入真正的会话工作区。"
+                        : `${activeGroup.sessions.length} 个会话 · 最近更新 ${timeAgo(activeGroup.updatedAt)}`}
+                    </div>
                   </div>
 
                   <div className="sessions-workbench-actions">
+                    {selectionActive && (
+                      <span className="pill pill-muted">
+                        批量中 · {selectedCount}
+                      </span>
+                    )}
                     <button
                       className="session-group-new-btn"
                       onClick={() =>
@@ -432,44 +614,13 @@ export default function SessionsPage() {
                           ? "创建首个线程"
                           : "新线程"}
                     </button>
-                    {selectionActive ? (
-                      <>
-                        <button
-                          className="session-group-new-btn"
-                          onClick={() => {
-                            setSelectedSessionIds([]);
-                            setBatchMode(false);
-                          }}
-                          disabled={archivingId === "batch"}
-                        >
-                          取消
-                        </button>
-                        <button
-                          className="session-group-new-btn"
-                          onClick={handleArchiveSelected}
-                          disabled={
-                            selectedSessionIds.length === 0 ||
-                            archivingId === "batch"
-                          }
-                        >
-                          {archivingId === "batch" ? "归档中…" : "归档选中"}
-                        </button>
-                      </>
-                    ) : (
-                      <button
-                        className="session-group-new-btn"
-                        onClick={() => setBatchMode(true)}
-                      >
-                        批量选择
-                      </button>
-                    )}
                   </div>
                 </section>
 
                 <section className="sessions-workbench-meta">
                   <div className="sessions-workbench-stat">
                     <span>项目文件夹</span>
-                    <strong>{groups.length} 个</strong>
+                    <strong>{currentProjectCount} 个</strong>
                   </div>
                   <div className="sessions-workbench-stat">
                     <span>线程数</span>
@@ -487,10 +638,6 @@ export default function SessionsPage() {
                     <span>选择状态</span>
                     <strong>{selectionActive ? `${selectedCount} 已选` : "浏览中"}</strong>
                   </div>
-                  <div className="sessions-workbench-stat">
-                    <span>总会话</span>
-                    <strong>{activeSessionCount} 个</strong>
-                  </div>
                 </section>
 
                 {activeGroup.draftOnly ? (
@@ -499,98 +646,112 @@ export default function SessionsPage() {
                   </div>
                 ) : (
                   <div className="session-list session-list-desktop">
-                    {activeGroup.sessions.map((session) => (
-                      <div
-                        key={session.id}
-                        className={`session-card ${
-                          selectionActive && selectedSessionIds.includes(session.id)
-                            ? "session-card-selected"
-                            : ""
-                        }`}
-                        role="button"
-                        tabIndex={0}
-                        aria-pressed={
-                          selectionActive && selectedSessionIds.includes(session.id)
-                        }
-                        onClick={() => {
-                          if (selectionActive) {
-                            toggleSelected(session.id);
-                            return;
+                    {activeGroup.sessions.map((session, index) => {
+                      const sessionSignal = getSessionSignal(session, index);
+
+                      return (
+                        <div
+                          key={session.id}
+                          className={`session-card ${
+                            selectionActive && selectedSessionIds.includes(session.id)
+                              ? "session-card-selected"
+                              : ""
+                          }`}
+                          role="button"
+                          tabIndex={0}
+                          aria-pressed={
+                            selectionActive && selectedSessionIds.includes(session.id)
                           }
-                          router.push(`/sessions/${session.id}`);
-                        }}
-                        onKeyDown={(e) => {
-                          if (e.key === "Enter" || e.key === " ") {
-                            e.preventDefault();
+                          onClick={() => {
                             if (selectionActive) {
                               toggleSelected(session.id);
                               return;
                             }
                             router.push(`/sessions/${session.id}`);
-                          }
-                        }}
-                      >
-                        <div className="session-card-header">
-                          <div className="session-card-header-left">
-                            {selectionActive && (
-                              <button
-                                type="button"
-                                className="session-card-select-btn"
-                                aria-label={
-                                  selectedSessionIds.includes(session.id)
-                                    ? "取消选择"
-                                    : "选择会话"
-                                }
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  toggleSelected(session.id);
-                                }}
+                          }}
+                          onKeyDown={(e) => {
+                            if (e.key === "Enter" || e.key === " ") {
+                              e.preventDefault();
+                              if (selectionActive) {
+                                toggleSelected(session.id);
+                                return;
+                              }
+                              router.push(`/sessions/${session.id}`);
+                            }
+                          }}
+                        >
+                          <div className="session-card-header">
+                            <div className="session-card-header-left">
+                              {selectionActive && (
+                                <button
+                                  type="button"
+                                  className="session-card-select-btn"
+                                  aria-label={
+                                    selectedSessionIds.includes(session.id)
+                                      ? "取消选择"
+                                      : "选择会话"
+                                  }
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    toggleSelected(session.id);
+                                  }}
+                                >
+                                  {selectedSessionIds.includes(session.id)
+                                    ? "☑"
+                                    : "☐"}
+                                </button>
+                              )}
+                              <span className="session-card-title">
+                                {session.title || session.id}
+                              </span>
+                            </div>
+                            <div className="session-card-header-actions">
+                              <span
+                                className={`session-card-state session-card-state-${sessionSignal.tone}`}
                               >
-                                {selectedSessionIds.includes(session.id) ? "☑" : "☐"}
-                              </button>
-                            )}
-                            <span className="session-card-title">
-                              {session.title || session.id}
-                            </span>
-                          </div>
-                          <div className="session-card-header-actions">
-                            <span className="session-card-time">
-                              {timeAgo(session.updatedAt)}
-                            </span>
-                            {!selectionActive && (
+                                {sessionSignal.label}
+                              </span>
+                              <span className="session-card-time">
+                                {timeAgo(session.updatedAt)}
+                              </span>
+                              {!selectionActive && (
+                                <button
+                                  className="session-card-action-btn"
+                                  type="button"
+                                  title="重命名"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    startRename(session);
+                                  }}
+                                >
+                                  ✎
+                                </button>
+                              )}
                               <button
                                 className="session-card-action-btn"
                                 type="button"
-                                title="重命名"
+                                title="归档"
                                 onClick={(e) => {
                                   e.stopPropagation();
-                                  startRename(session);
+                                  void handleArchive(session.id);
                                 }}
+                                disabled={archivingId !== null}
                               >
-                                ✎
+                                {archivingId === session.id ? "…" : "⌫"}
                               </button>
-                            )}
-                            <button
-                              className="session-card-action-btn"
-                              type="button"
-                              title="归档"
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                void handleArchive(session.id);
-                              }}
-                              disabled={archivingId !== null}
-                            >
-                              {archivingId === session.id ? "…" : "⌫"}
-                            </button>
+                            </div>
                           </div>
+                          <div className="session-card-cwd">
+                            {shortenPath(session.cwd)}
+                          </div>
+                          {session.lastPreview && (
+                            <div className="session-card-preview">
+                              {session.lastPreview}
+                            </div>
+                          )}
                         </div>
-                        {session.lastPreview && (
-                          <div className="session-card-preview">
-                            {session.lastPreview}
-                          </div>
-                        )}
-                      </div>
-                    ))}
+                      );
+                    })}
                   </div>
                 )}
               </>

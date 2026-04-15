@@ -70,52 +70,64 @@ function NewSessionPageInner() {
       <div className="content new-session-content">
         <div className="new-session-layout new-session-workspace">
           <section className="project-browser-card new-session-browser">
-          <div className="project-browser-top">
-            <div>
-              <div className="project-browser-label">当前项目目录</div>
-              <div className="project-browser-path">
-                {browser?.currentPath ?? "加载中…"}
+            <div className="project-browser-top">
+              <div>
+                <div className="project-browser-label">当前项目目录</div>
+                <div className="project-browser-path">
+                  {browser?.currentPath ?? "加载中…"}
+                </div>
               </div>
-            </div>
-            <div className="project-browser-actions">
-              {browser?.parentPath && (
+              <div className="project-browser-actions">
+                {browser?.parentPath && (
+                  <button
+                    className="icon-btn"
+                    onClick={() => void load(browser.parentPath ?? undefined)}
+                    title="上一级"
+                  >
+                    ↑
+                  </button>
+                )}
                 <button
                   className="icon-btn"
-                  onClick={() => void load(browser.parentPath ?? undefined)}
-                  title="上一级"
+                  onClick={() => void load(browser?.currentPath)}
+                  title="刷新目录"
                 >
-                  ↑
+                  ↻
                 </button>
-              )}
-              <button
-                className="icon-btn"
-                onClick={() => void load(browser?.currentPath)}
-                title="刷新目录"
-              >
-                ↻
-              </button>
+              </div>
             </div>
-          </div>
 
-          {loading ? (
-            <div className="history-empty">正在读取当前主机上的目录…</div>
-          ) : (
-            <div className="project-entry-list">
-              {browser?.entries.map((entry) => (
-                <button
-                  key={entry.path}
-                  className="project-entry-btn"
-                  onClick={() => void load(entry.path)}
-                >
-                  <span>{entry.name}</span>
-                  <span>›</span>
-                </button>
-              ))}
-              {browser?.entries.length === 0 && (
-                <div className="history-empty">这个目录下没有可进入的子文件夹</div>
-              )}
-            </div>
-          )}
+            {loading ? (
+              <div className="history-empty">
+                <div className="history-empty-title">正在读取主机目录</div>
+                <div className="history-empty-copy">
+                  会话会从当前 workspace 的可进入目录里生成，完成后你可以先加入草稿列表。
+                </div>
+              </div>
+            ) : (
+              <div className="project-entry-list">
+                {browser?.entries.map((entry) => (
+                  <button
+                    key={entry.path}
+                    className="project-entry-btn"
+                    onClick={() => void load(entry.path)}
+                  >
+                    <span>{entry.name}</span>
+                    <span>›</span>
+                  </button>
+                ))}
+                {browser?.entries.length === 0 && (
+                  <div className="history-empty">
+                    <div className="history-empty-title">
+                      这个目录下没有可进入的子文件夹
+                    </div>
+                    <div className="history-empty-copy">
+                      返回上一级继续浏览，或者直接把当前目录加入会话列表。
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
           </section>
 
           <aside className="project-browser-card new-session-inspector">
@@ -126,7 +138,10 @@ function NewSessionPageInner() {
 
             <div className="stack">
               <div className="history-empty">
-                右上角的 + 用来挑选主机目录。选定当前目录后，它会先出现在会话列表里，等你准备好再创建线程。
+                <div className="history-empty-title">先把目录放进会话列表</div>
+                <div className="history-empty-copy">
+                  右上角的 + 用来挑选主机目录。选定当前目录后，它会先作为草稿保留，等你回到会话页再创建首个线程。
+                </div>
               </div>
               <div className="panel" style={{ padding: 12 }}>
                 <div className="panel-header">
@@ -149,7 +164,7 @@ function NewSessionPageInner() {
                 </div>
               </div>
 
-              {error && <div className="error-message">{error}</div>}
+              {error && <div className="error-message" role="alert">{error}</div>}
 
               <button
                 className="btn-primary new-session-submit"

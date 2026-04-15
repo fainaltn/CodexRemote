@@ -30,6 +30,7 @@ internal fun MicroStatusRow(
     model: String?,
     elapsed: String?,
     isActive: Boolean,
+    stateLabel: String? = null,
     modifier: Modifier = Modifier,
 ) {
     val transition = rememberInfiniteTransition(label = "micro-pulse")
@@ -60,7 +61,8 @@ internal fun MicroStatusRow(
             )
         }
 
-        if (isActive) {
+        val label = stateLabel?.takeIf { it.isNotBlank() } ?: if (isActive) "生成中" else null
+        if (label != null) {
             Surface(
                 shape = RoundedCornerShape(999.dp),
                 color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.8f),
@@ -70,13 +72,15 @@ internal fun MicroStatusRow(
                     horizontalArrangement = Arrangement.spacedBy(4.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    Surface(
-                        modifier = Modifier.size(6.dp),
-                        shape = RoundedCornerShape(999.dp),
-                        color = MaterialTheme.colorScheme.primary.copy(alpha = pulseAlpha),
-                    ) {}
+                    if (isActive) {
+                        Surface(
+                            modifier = Modifier.size(6.dp),
+                            shape = RoundedCornerShape(999.dp),
+                            color = MaterialTheme.colorScheme.primary.copy(alpha = pulseAlpha),
+                        ) {}
+                    }
                     Text(
-                        text = "生成中",
+                        text = label,
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.primary,
                     )

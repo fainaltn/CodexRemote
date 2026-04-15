@@ -3,10 +3,12 @@ package dev.codexremote.android.ui.sessions
 import android.app.Application
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -22,6 +24,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
@@ -52,6 +55,7 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
@@ -81,6 +85,8 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
+import java.time.Duration
+import java.time.Instant
 import java.io.File
 import sh.calvin.reorderable.ReorderableCollectionItemScope
 import sh.calvin.reorderable.ReorderableItem
@@ -104,6 +110,46 @@ data class DraftProject(
 private fun projectLabel(path: String?): String = when {
     path.isNullOrBlank() -> "未归类"
     else -> File(path).name.ifBlank { path }
+}
+
+private fun parseInstantOrNull(value: String): Instant? = runCatching { Instant.parse(value) }.getOrNull()
+
+private data class SessionRecency(
+    val label: String,
+    val emphasis: SessionEmphasis,
+)
+
+private enum class SessionEmphasis {
+    Primary,
+    Secondary,
+    Neutral,
+}
+
+private fun sessionRecency(session: Session): SessionRecency {
+    val updatedAt = parseInstantOrNull(session.updatedAt) ?: return SessionRecency("历史", SessionEmphasis.Neutral)
+    val age = Duration.between(updatedAt, Instant.now()).coerceAtLeast(Duration.ZERO)
+    return when {
+        age.toMinutes() < 5 -> SessionRecency("刚刚活跃", SessionEmphasis.Primary)
+        age.toMinutes() < 60 -> SessionRecency("近 1 小时", SessionEmphasis.Primary)
+        age.toHours() < 24 -> SessionRecency("今日更新", SessionEmphasis.Secondary)
+        else -> SessionRecency("历史", SessionEmphasis.Neutral)
+    }
+}
+
+private data class FolderSummary(
+    val totalSessions: Int,
+    val recentSessions: Int,
+)
+
+private fun folderSummary(folder: ProjectFolder): FolderSummary {
+    val recentSessions = folder.sessions.count { session ->
+        val updatedAt = parseInstantOrNull(session.updatedAt) ?: return@count false
+        Duration.between(updatedAt, Instant.now()).coerceAtMost(Duration.ofDays(3650)).toMinutes() < 60
+    }
+    return FolderSummary(
+        totalSessions = folder.sessions.size,
+        recentSessions = recentSessions,
+    )
 }
 
 private fun buildProjectFolders(
@@ -418,6 +464,13 @@ fun SessionListScreen(
     val projectPaths = remember(folders) {
         folders.mapNotNull { it.path }.toSet()
     }
+    val currentProjectFolder = remember(folders, selectedProjectCwd) {
+        val currentPath = selectedProjectCwd?.trim().orEmpty().takeIf { it.isNotBlank() }
+        folders.firstOrNull { it.path == currentPath }
+    }
+    val recentSessionCount = remember(sessions) {
+        sessions.count { sessionRecency(it).label != "历史" }
+    }
     var renameTarget by remember { mutableStateOf<Session?>(null) }
     var hideTarget by remember { mutableStateOf<ProjectFolder?>(null) }
     var renameText by remember { mutableStateOf("") }
@@ -656,6 +709,14 @@ fun SessionListScreen(
 
             else -> {
                 Column(modifier = Modifier.padding(padding)) {
+                    SessionNavigationSummary(
+                        folderCount = folders.size,
+                        sessionCount = sessions.size,
+                        recentSessionCount = recentSessionCount,
+                        currentProjectFolder = currentProjectFolder,
+                        selectionMode = selectionMode,
+                        selectedCount = selectedSessionIds.size,
+                    )
                     SessionFolderControls(
                         sortOrder = folderSortOrder,
                         onCycleSort = { viewModel.cycleFolderSort(serverId) },
@@ -677,6 +738,7 @@ fun SessionListScreen(
                                     FolderRow(
                                         folder = folder,
                                         collapsed = folder.persistenceKey in collapsedFolderKeys,
+                                        isCurrentProject = folder.path == selectedProjectCwd?.trim().orEmpty().takeIf { it.isNotBlank() },
                                         onToggleCollapsed = {
                                             viewModel.toggleFolderCollapsed(serverId, folder.persistenceKey)
                                         },
@@ -830,29 +892,130 @@ private fun reorderHandleModifier(
     )
 }
 
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun SessionNavigationSummary(
+    folderCount: Int,
+    sessionCount: Int,
+    recentSessionCount: Int,
+    currentProjectFolder: ProjectFolder?,
+    selectionMode: Boolean,
+    selectedCount: Int,
+) {
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(start = 16.dp, end = 16.dp, top = 4.dp, bottom = 10.dp),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
+        ),
+        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
+    ) {
+        Column(
+            modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Text(
+                text = if (selectionMode) "正在多选" else "项目导航",
+                style = MaterialTheme.typography.titleSmall,
+            )
+            Text(
+                text = when {
+                    selectionMode -> "已选择 $selectedCount 个会话，继续点按可追加选择。"
+                    currentProjectFolder != null -> "当前聚焦 ${currentProjectFolder.label}，会话与项目层级更容易扫读。"
+                    else -> "项目按更新时间分组，最近活动会自动更显眼。"
+                },
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            FlowRow(
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                StatusChip(
+                    text = "$folderCount 个项目",
+                    emphasis = SessionEmphasis.Secondary,
+                )
+                StatusChip(
+                    text = "$sessionCount 条会话",
+                    emphasis = SessionEmphasis.Neutral,
+                )
+                StatusChip(
+                    text = "$recentSessionCount 个近活跃",
+                    emphasis = if (recentSessionCount > 0) SessionEmphasis.Primary else SessionEmphasis.Neutral,
+                )
+                if (currentProjectFolder != null) {
+                    StatusChip(
+                        text = "当前项目 · ${currentProjectFolder.label}",
+                        emphasis = SessionEmphasis.Primary,
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun StatusChip(
+    text: String,
+    emphasis: SessionEmphasis,
+) {
+    val colors = when (emphasis) {
+        SessionEmphasis.Primary -> MaterialTheme.colorScheme.primaryContainer to MaterialTheme.colorScheme.onPrimaryContainer
+        SessionEmphasis.Secondary -> MaterialTheme.colorScheme.secondaryContainer to MaterialTheme.colorScheme.onSecondaryContainer
+        SessionEmphasis.Neutral -> MaterialTheme.colorScheme.surfaceContainerLow to MaterialTheme.colorScheme.onSurfaceVariant
+    }
+    Surface(
+        shape = RoundedCornerShape(999.dp),
+        color = colors.first,
+    ) {
+        Text(
+            text = text,
+            modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp),
+            style = MaterialTheme.typography.labelSmall,
+            color = colors.second,
+        )
+    }
+}
+
 @Composable
 private fun SessionFolderControls(
     sortOrder: SessionFolderSortOrder,
     onCycleSort: () -> Unit,
 ) {
-    Row(
+    Card(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(start = 16.dp, end = 8.dp, top = 4.dp, bottom = 10.dp),
-        horizontalArrangement = Arrangement.SpaceBetween,
-        verticalAlignment = Alignment.CenterVertically,
+            .padding(start = 16.dp, end = 16.dp, top = 0.dp, bottom = 10.dp),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surface,
+        ),
+        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
     ) {
-        Text(
-            text = "长按文件夹可隐藏，拖动右侧把手排序。当前: ${sortOrder.label()}",
-            style = MaterialTheme.typography.labelSmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.weight(1f),
-        )
-        IconButton(onClick = onCycleSort) {
-            Icon(
-                imageVector = Icons.Filled.SwapVert,
-                contentDescription = "切换文件夹排序，当前为 ${sortOrder.label()}",
-            )
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 14.dp, vertical = 10.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = "浏览方式",
+                    style = MaterialTheme.typography.labelLarge,
+                )
+                Text(
+                    text = "长按可隐藏，右侧把手可拖动排序。当前：${sortOrder.label()}",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            IconButton(onClick = onCycleSort) {
+                Icon(
+                    imageVector = Icons.Filled.SwapVert,
+                    contentDescription = "切换文件夹排序，当前为 ${sortOrder.label()}",
+                )
+            }
         }
     }
 }
@@ -862,6 +1025,7 @@ private fun SessionFolderControls(
 private fun FolderRow(
     folder: ProjectFolder,
     collapsed: Boolean,
+    isCurrentProject: Boolean,
     onToggleCollapsed: () -> Unit,
     onHide: () -> Unit,
     onNewThread: () -> Unit,
@@ -872,23 +1036,29 @@ private fun FolderRow(
     val leadingIcon = if (collapsed) Icons.AutoMirrored.Filled.KeyboardArrowRight else Icons.Filled.ExpandMore
     val folderIcon = if (collapsed) Icons.Filled.Folder else Icons.Filled.FolderOpen
     val folderInteractionSource = remember { MutableInteractionSource() }
+    val summary = remember(folder) { folderSummary(folder) }
 
     Card(
         modifier = Modifier
             .fillMaxWidth(),
         colors = CardDefaults.cardColors(
-            containerColor = if (dragging) {
-                MaterialTheme.colorScheme.secondaryContainer
-            } else {
-                MaterialTheme.colorScheme.surface
+            containerColor = when {
+                dragging -> MaterialTheme.colorScheme.secondaryContainer
+                isCurrentProject -> MaterialTheme.colorScheme.primaryContainer
+                folder.draftOnly -> MaterialTheme.colorScheme.surfaceContainerHigh
+                else -> MaterialTheme.colorScheme.surface
             },
         ),
-        elevation = CardDefaults.cardElevation(defaultElevation = if (dragging) 6.dp else 1.dp),
+        elevation = CardDefaults.cardElevation(defaultElevation = when {
+            dragging -> 6.dp
+            isCurrentProject -> 2.dp
+            else -> 1.dp
+        }),
     ) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 12.dp, vertical = 8.dp),
+                .padding(horizontal = 12.dp, vertical = 10.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Row(
@@ -906,25 +1076,69 @@ private fun FolderRow(
                 Icon(
                     imageVector = leadingIcon,
                     contentDescription = if (collapsed) "展开文件夹" else "折叠文件夹",
-                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    tint = if (isCurrentProject) {
+                        MaterialTheme.colorScheme.onPrimaryContainer
+                    } else {
+                        MaterialTheme.colorScheme.onSurfaceVariant
+                    },
                     modifier = Modifier.size(20.dp),
                 )
                 Spacer(modifier = Modifier.width(6.dp))
                 Icon(
                     imageVector = folderIcon,
                     contentDescription = null,
-                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    tint = if (isCurrentProject) {
+                        MaterialTheme.colorScheme.onPrimaryContainer
+                    } else {
+                        MaterialTheme.colorScheme.onSurfaceVariant
+                    },
                     modifier = Modifier.size(20.dp),
                 )
                 Spacer(modifier = Modifier.width(12.dp))
-                Text(
-                    text = folder.label,
-                    style = MaterialTheme.typography.bodyLarge,
-                    color = MaterialTheme.colorScheme.onSurface,
-                    modifier = Modifier.weight(1f),
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
+                Column(modifier = Modifier.weight(1f)) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        Text(
+                            text = folder.label,
+                            style = MaterialTheme.typography.bodyLarge,
+                            color = if (isCurrentProject) {
+                                MaterialTheme.colorScheme.onPrimaryContainer
+                            } else {
+                                MaterialTheme.colorScheme.onSurface
+                            },
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                        if (isCurrentProject) {
+                            StatusChip(
+                                text = "当前项目",
+                                emphasis = SessionEmphasis.Primary,
+                            )
+                        } else if (folder.draftOnly) {
+                            StatusChip(
+                                text = "草稿",
+                                emphasis = SessionEmphasis.Secondary,
+                            )
+                        }
+                    }
+                    Text(
+                        text = when {
+                            folder.draftOnly -> "等待第一条会话"
+                            summary.recentSessions > 0 -> "${summary.totalSessions} 条会话 · ${summary.recentSessions} 条近活跃"
+                            else -> "${summary.totalSessions} 条会话"
+                        },
+                        style = MaterialTheme.typography.labelSmall,
+                        color = if (isCurrentProject) {
+                            MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.82f)
+                        } else {
+                            MaterialTheme.colorScheme.onSurfaceVariant
+                        },
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
             }
 
             IconButton(
@@ -966,6 +1180,7 @@ private fun SessionCard(
     onTap: () -> Unit,
     onRename: () -> Unit,
 ) {
+    val recency = remember(session.updatedAt) { sessionRecency(session) }
     Card(
         modifier = Modifier
             .fillMaxWidth()
@@ -975,13 +1190,13 @@ private fun SessionCard(
                 onLongClick = onRename,
             ),
         colors = CardDefaults.cardColors(
-            containerColor = if (selected) {
-                MaterialTheme.colorScheme.primaryContainer
-            } else {
-                MaterialTheme.colorScheme.surfaceVariant
+            containerColor = when {
+                selected -> MaterialTheme.colorScheme.primaryContainer
+                recency.emphasis == SessionEmphasis.Primary -> MaterialTheme.colorScheme.surfaceContainerHigh
+                else -> MaterialTheme.colorScheme.surfaceVariant
             }
         ),
-        elevation = CardDefaults.cardElevation(defaultElevation = 1.dp),
+        elevation = CardDefaults.cardElevation(defaultElevation = if (selected) 2.dp else 1.dp),
     ) {
         Row(
             modifier = Modifier
@@ -990,12 +1205,29 @@ private fun SessionCard(
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Column(modifier = Modifier.weight(1f)) {
-                Text(
-                    text = session.title,
-                    style = MaterialTheme.typography.titleMedium,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    Text(
+                        text = session.title,
+                        style = MaterialTheme.typography.titleMedium,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f, fill = false),
+                    )
+                    if (selected) {
+                        StatusChip(
+                            text = "已选中",
+                            emphasis = SessionEmphasis.Primary,
+                        )
+                    } else if (recency.emphasis == SessionEmphasis.Primary) {
+                        StatusChip(
+                            text = recency.label,
+                            emphasis = SessionEmphasis.Primary,
+                        )
+                    }
+                }
                 if (session.lastPreview != null) {
                     Text(
                         text = session.lastPreview,
@@ -1005,12 +1237,20 @@ private fun SessionCard(
                         overflow = TextOverflow.Ellipsis,
                     )
                 }
-                if (selectionMode) {
-                    Text(
-                        text = if (selected) "已选中" else "长按可多选归档",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.primary,
+                Row(
+                    modifier = Modifier.padding(top = 4.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    StatusChip(
+                        text = formatDate(session.updatedAt),
+                        emphasis = recency.emphasis,
                     )
+                    if (selectionMode && !selected) {
+                        StatusChip(
+                            text = "长按多选",
+                            emphasis = SessionEmphasis.Neutral,
+                        )
+                    }
                 }
             }
         }
@@ -1024,9 +1264,9 @@ private fun DraftProjectCard(path: String?) {
             .fillMaxWidth()
             .padding(start = 28.dp),
         colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surfaceVariant,
+            containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
         ),
-        elevation = CardDefaults.cardElevation(defaultElevation = 1.dp),
+        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
     ) {
         Column(
             modifier = Modifier
@@ -1052,6 +1292,10 @@ private fun DraftProjectCard(path: String?) {
                     overflow = TextOverflow.Ellipsis,
                 )
             }
+            StatusChip(
+                text = "草稿项目",
+                emphasis = SessionEmphasis.Secondary,
+            )
         }
     }
 }

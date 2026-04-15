@@ -23,6 +23,7 @@ import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Dns
 import androidx.compose.material.icons.filled.ErrorOutline
 import androidx.compose.material.icons.filled.Sync
+import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -46,6 +47,8 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import dev.codexremote.android.data.model.Server
 import dev.codexremote.android.data.network.ApiClient
 import dev.codexremote.android.data.repository.ServerRepository
+import dev.codexremote.android.ui.sessions.TimelineNoticeCard
+import dev.codexremote.android.ui.sessions.TimelineNoticeTone
 import dev.codexremote.android.ui.theme.ThemePreference
 import dev.codexremote.android.ui.theme.ThemeToggleAction
 import dev.codexremote.android.ui.theme.CodexOnline
@@ -154,26 +157,19 @@ fun ServerListScreen(
                     .padding(padding),
                 contentAlignment = Alignment.Center,
             ) {
-                Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    Icon(
-                        imageVector = Icons.Filled.Dns,
-                        contentDescription = null,
-                        modifier = Modifier.size(48.dp),
-                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                    Spacer(modifier = Modifier.height(12.dp))
-                    Text(
-                        text = "还没有配置服务器",
-                        style = MaterialTheme.typography.bodyLarge,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                    Spacer(modifier = Modifier.height(4.dp))
-                    Text(
-                        text = "点击右下角 + 添加你的 CodexRemote 服务器",
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
+                TimelineNoticeCard(
+                    modifier = Modifier.padding(horizontal = 24.dp),
+                    title = "还没有配置服务器",
+                    message = "添加一个 CodexRemote 主机后，这里会显示它的连接状态和登录入口。",
+                    footer = "右下角的 + 会带你进入添加流程。",
+                    tone = TimelineNoticeTone.Neutral,
+                    stateLabel = "空状态",
+                    content = {
+                        Button(onClick = onAddServer) {
+                            Text("添加服务器")
+                        }
+                    },
+                )
             }
         } else {
             LazyColumn(

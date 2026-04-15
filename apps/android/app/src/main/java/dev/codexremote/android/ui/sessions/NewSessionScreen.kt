@@ -162,40 +162,72 @@ fun NewSessionScreen(
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
 
-            Card(modifier = Modifier.fillMaxWidth()) {
-                if (loading && browser == null) {
-                    Box(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(24.dp),
-                        contentAlignment = Alignment.Center,
-                    ) {
-                        CircularProgressIndicator()
-                    }
-                } else {
-                    LazyColumn(
-                        modifier = Modifier.fillMaxWidth(),
-                        contentPadding = PaddingValues(8.dp),
-                        verticalArrangement = Arrangement.spacedBy(6.dp),
-                    ) {
-                        items(browser?.entries ?: emptyList(), key = { it.path }) { entry ->
-                            Row(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .clickable {
-                                        viewModel.openPath(serverId, entry.path)
-                                    }
-                                    .padding(12.dp),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.CenterVertically,
-                            ) {
-                                Text(
-                                    text = entry.name,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis,
-                                    modifier = Modifier.weight(1f),
-                                )
-                                Text("›")
+            when {
+                loading && browser == null -> {
+                    TimelineNoticeCard(
+                        title = "正在读取目录",
+                        message = "正在扫描当前主机上的项目文件夹。",
+                        footer = "这通常只需要几秒钟。",
+                        tone = TimelineNoticeTone.Neutral,
+                        stateLabel = "加载中",
+                        content = {
+                            ShimmerBlock(lines = 2)
+                        },
+                    )
+                }
+
+                !loading && browser?.entries.isNullOrEmpty() -> {
+                    TimelineNoticeCard(
+                        title = "当前目录没有可选项目",
+                        message = "这个位置下还没有项目文件夹，或者目录暂时无法列出。",
+                        footer = "你可以返回上一级，或刷新后再看一次。",
+                        tone = TimelineNoticeTone.Warning,
+                        stateLabel = "空目录",
+                        content = {
+                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                Button(
+                                    onClick = { viewModel.openPath(serverId, browser?.parentPath ?: initialCwd) },
+                                    enabled = browser?.parentPath != null || initialCwd != null,
+                                ) {
+                                    Text("返回上一级")
+                                }
+                                Button(
+                                    onClick = { viewModel.openPath(serverId, browser?.currentPath ?: initialCwd) },
+                                    enabled = !loading,
+                                ) {
+                                    Text("刷新")
+                                }
+                            }
+                        },
+                    )
+                }
+
+                else -> {
+                    Card(modifier = Modifier.fillMaxWidth()) {
+                        LazyColumn(
+                            modifier = Modifier.fillMaxWidth(),
+                            contentPadding = PaddingValues(8.dp),
+                            verticalArrangement = Arrangement.spacedBy(6.dp),
+                        ) {
+                            items(browser?.entries ?: emptyList(), key = { it.path }) { entry ->
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .clickable {
+                                            viewModel.openPath(serverId, entry.path)
+                                        }
+                                        .padding(12.dp),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically,
+                                ) {
+                                    Text(
+                                        text = entry.name,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis,
+                                        modifier = Modifier.weight(1f),
+                                    )
+                                    Text("›")
+                                }
                             }
                         }
                     }
@@ -209,10 +241,19 @@ fun NewSessionScreen(
             )
 
             if (error != null) {
-                Text(
-                    text = error ?: "",
-                    color = MaterialTheme.colorScheme.error,
-                    style = MaterialTheme.typography.bodySmall,
+                TimelineNoticeCard(
+                    title = "目录读取失败",
+                    message = error ?: "",
+                    footer = "确认主机在线后，再试一次通常就能恢复。",
+                    tone = TimelineNoticeTone.Error,
+                    stateLabel = "错误",
+                    content = {
+                        Button(
+                            onClick = { viewModel.openPath(serverId, browser?.currentPath ?: initialCwd) },
+                        ) {
+                            Text("重试")
+                        }
+                    },
                 )
             }
 

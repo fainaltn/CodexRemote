@@ -12,7 +12,7 @@ Use this skill when the user wants to push an updated Android APK into the LAN S
 1. Confirm the APK to publish. In this repo the default source is `apps/android/app/build/outputs/apk/debug/app-debug.apk`.
 2. Read `versionName` from `apps/android/app/build.gradle.kts` unless the user gives a different version.
 3. Use the APK file modification date as the version date unless the user gives a different date.
-4. Rename the APK into a dated artifact named like `YYYY-MM-DD_CodexRemote_v0.1.3.apk`.
+4. Rename the APK into a dated artifact named like `YYYY-MM-DD_CodexRemote_v0.1.4.apk`.
 5. Copy the APK into the default LAN target `smb://192.168.2.1/share/`.
 
 ## Project-specific guardrails

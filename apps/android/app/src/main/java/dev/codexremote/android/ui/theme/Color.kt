@@ -2,30 +2,32 @@ package dev.codexremote.android.ui.theme
 
 import androidx.compose.ui.graphics.Color
 
-val CodexBlue = Color(0xFF4C8DFF)
-val CodexBlueLight = Color(0xFF2B72F4)
-val CodexBlueDark = Color(0xFF8DB9FF)
+val CodexBlue = Color(0xFF58A6FF)
+val CodexBlueLight = Color(0xFF2F7FFF)
+val CodexBlueDark = Color(0xFF97C2FF)
+val CodexCyan = Color(0xFF49D8C4)
+val CodexCyanSoft = Color(0xFFB8F3EB)
 
-val CodexBackgroundLight = Color(0xFFF4F7FC)
-val CodexBackgroundDark = Color(0xFF0B1020)
+val CodexBackgroundLight = Color(0xFFEDF3FB)
+val CodexBackgroundDark = Color(0xFF081220)
 
-val CodexSurface = Color(0xFFFAFCFF)
-val CodexSurfaceDark = Color(0xFF11182A)
+val CodexSurface = Color(0xFFFBFDFF)
+val CodexSurfaceDark = Color(0xFF0F1B2D)
 val CodexSurfaceRaised = Color(0xFFFFFFFF)
-val CodexSurfaceRaisedDark = Color(0xFF172036)
+val CodexSurfaceRaisedDark = Color(0xFF15233A)
 
-val CodexSurfaceSoftLight = Color(0xFFF0F5FE)
-val CodexSurfaceSoftDark = Color(0xFF1A2438)
-val CodexSurfaceSubtleLight = Color(0xFFE7EEF9)
-val CodexSurfaceSubtleDark = Color(0xFF243149)
+val CodexSurfaceSoftLight = Color(0xFFF3F7FD)
+val CodexSurfaceSoftDark = Color(0xFF122036)
+val CodexSurfaceSubtleLight = Color(0xFFE6EFFB)
+val CodexSurfaceSubtleDark = Color(0xFF1D2D47)
 
-val CodexCurrentCardLight = Color(0xFFEAF2FF)
-val CodexCurrentCardDark = Color(0xFF142945)
+val CodexCurrentCardLight = Color(0xFFE5F0FF)
+val CodexCurrentCardDark = Color(0xFF132B46)
 val CodexHistoryCardLight = Color(0xFFFFFFFF)
-val CodexHistoryCardDark = Color(0xFF121A2A)
+val CodexHistoryCardDark = Color(0xFF101A2B)
 
-val CodexOutlineLight = Color(0xFFD8E1EF)
-val CodexOutlineDark = Color(0xFF334058)
+val CodexOutlineLight = Color(0xFFD4DFEE)
+val CodexOutlineDark = Color(0xFF2D3D57)
 
 val CodexOnline = Color(0xFF2FB36D)
 val CodexOffline = Color(0xFFF05252)

@@ -1,12 +1,12 @@
 # Release Checklist
 
-## Release focus for v0.1.3
+## Release focus for v0.1.4
 
-- Android session detail now behaves like a stronger mobile control console rather than a plain chat view
-- Android supports runtime controls for model and reasoning effort before sending a turn
-- Android session detail shows read-only repo status plus repo actions for branch create/switch, commit, and push
-- Session timeline readability is improved with clearer waiting, degraded-stream, failure, and history-round states
-- Codex session discovery now aggregates metadata and messages across multiple rollout files for one session id
+- Web and Android now share a clearer `Precision Console` visual language across login, navigation, session detail, and feedback states
+- Web session navigation and session detail are more productized, with stronger hierarchy for current project, active thread, and live-run status
+- Android session detail now prioritizes Codex output more aggressively by compressing status chrome and giving more space back to the timeline
+- Android composer behaves more like a compact command bar, with clearer run-state affordances and follow-up controls
+- Empty states, loading states, upload feedback, and inline error treatment are more consistent across the product
 
 ## Verified in this workspace
 

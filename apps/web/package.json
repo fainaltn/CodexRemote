@@ -1,13 +1,13 @@
 {
   "name": "@codexremote/web",
-  "version": "0.0.0",
+  "version": "0.1.4",
   "private": true,
   "description": "Next.js mobile-first web client for CodexRemote",
   "scripts": {
     "dev": "next dev -p 3001",
     "build": "next build",
     "start": "next start -p 3001",
-    "typecheck": "tsc --noEmit",
+    "typecheck": "next typegen && tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest"
   },

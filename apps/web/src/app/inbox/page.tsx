@@ -170,7 +170,7 @@ export default function InboxPage() {
       </div>
 
       <div className="content inbox-page">
-        {error && <div className="error-message">{error}</div>}
+        {error && <div className="error-message" role="alert">{error}</div>}
 
         <section className="panel" aria-labelledby="inbox-link-title">
           <div className="panel-header">
@@ -259,13 +259,17 @@ export default function InboxPage() {
           {loading ? (
             <div className="empty-state">
               <div className="spinner" />
+              <div className="empty-state-text">正在同步最近投递</div>
+              <div className="empty-state-sub">
+                链接、文件和 submission bundle 会重新拉回收件箱。
+              </div>
             </div>
           ) : items.length === 0 ? (
             <div className="empty-state">
               <div className="empty-state-icon">📥</div>
               <div className="empty-state-text">收件箱还是空的</div>
               <div className="empty-state-sub">
-                来自网页或 Android 的链接和文件会出现在这里
+                来自网页或 Android 的链接、文件和 submission bundle 会出现在这里
               </div>
             </div>
           ) : (

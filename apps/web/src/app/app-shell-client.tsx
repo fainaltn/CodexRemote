@@ -21,6 +21,11 @@ interface SessionTreeGroup {
   draftOnly: boolean;
 }
 
+type GroupSignal = {
+  label: string;
+  tone: "primary" | "accent" | "muted";
+};
+
 function projectLabel(path: string | null): string {
   if (!path) return "未归类";
   const segments = path.split("/").filter(Boolean);
@@ -34,6 +39,10 @@ function shortenPath(path: string | null): string {
   return "…/" + segments.slice(-2).join("/");
 }
 
+function isFreshActivity(dateStr: string, minutes = 60): boolean {
+  return Date.now() - new Date(dateStr).getTime() <= minutes * 60_000;
+}
+
 function timeAgo(dateStr: string): string {
   const diff = Date.now() - new Date(dateStr).getTime();
   const mins = Math.floor(diff / 60000);
@@ -43,6 +52,66 @@ function timeAgo(dateStr: string): string {
   if (hours < 24) return `${hours} 小时前`;
   const days = Math.floor(hours / 24);
   return `${days} 天前`;
+}
+
+function getGroupSignal(
+  group: SessionTreeGroup,
+  selectedProject: string | null,
+  currentSessionId: string | null,
+): GroupSignal {
+  const routeProject = routeProjectValue(group);
+  if (selectedProject === routeProject) {
+    return { label: "当前项目", tone: "primary" };
+  }
+  if (currentSessionId && group.sessions.some((session) => session.id === currentSessionId)) {
+    return { label: "当前会话", tone: "primary" };
+  }
+  if (group.draftOnly && group.sessions.length === 0) {
+    return { label: "草稿", tone: "muted" };
+  }
+  if (isFreshActivity(group.updatedAt, 120)) {
+    return { label: "最近活跃", tone: "accent" };
+  }
+  return { label: "历史", tone: "muted" };
+}
+
+function getSessionSignal(
+  session: Session,
+  currentSessionId: string | null,
+): GroupSignal {
+  if (session.archivedAt) {
+    return { label: "已归档", tone: "muted" };
+  }
+  if (session.id === currentSessionId) {
+    return { label: "当前会话", tone: "primary" };
+  }
+  if (isFreshActivity(session.updatedAt, 45)) {
+    return { label: "活跃", tone: "accent" };
+  }
+  return { label: "历史", tone: "muted" };
+}
+
+function sortGroupsForFocus(
+  groups: SessionTreeGroup[],
+  selectedProject: string | null,
+  currentSessionId: string | null,
+): SessionTreeGroup[] {
+  const signalWeight = (signal: GroupSignal) => {
+    if (signal.label === "当前项目" || signal.label === "当前会话") return 0;
+    if (signal.label === "草稿") return 1;
+    if (signal.label === "最近活跃") return 2;
+    return 3;
+  };
+
+  return [...groups].sort((a, b) => {
+    const aSignal = getGroupSignal(a, selectedProject, currentSessionId);
+    const bSignal = getGroupSignal(b, selectedProject, currentSessionId);
+    return (
+      signalWeight(aSignal) - signalWeight(bSignal) ||
+      b.updatedAt.localeCompare(a.updatedAt) ||
+      a.label.localeCompare(b.label)
+    );
+  });
 }
 
 function groupSessionsByProject(
@@ -118,14 +187,6 @@ export function AppShellClient({ children }: { children: ReactNode }) {
       const nextDraftProjects = listDraftProjects();
       const nextGroups = groupSessionsByProject(data.sessions, nextDraftProjects);
       setGroups(nextGroups);
-      setExpandedGroups((prev) => {
-        if (nextGroups.length === 0) return {};
-        const next: Record<string, boolean> = { ...prev };
-        if (Object.keys(next).length === 0) {
-          next[nextGroups[0].key] = true;
-        }
-        return next;
-      });
     } catch {
       // Keep the existing tree if refresh fails.
     }
@@ -180,7 +241,28 @@ export function AppShellClient({ children }: { children: ReactNode }) {
     ? pathname.split("/")[2] ?? null
     : null;
 
-  const treeGroups = useMemo(() => groups, [groups]);
+  const treeGroups = useMemo(
+    () => sortGroupsForFocus(groups, selectedProject, currentSessionId),
+    [groups, selectedProject, currentSessionId],
+  );
+  const totalSessions = useMemo(
+    () => treeGroups.reduce((count, group) => count + group.sessions.length, 0),
+    [treeGroups],
+  );
+  const focusedGroupKey = useMemo(() => {
+    const selectedGroup = treeGroups.find(
+      (group) => selectedProject === routeProjectValue(group),
+    );
+    if (selectedGroup) return selectedGroup.key;
+
+    const currentGroup = treeGroups.find(
+      (group) =>
+        currentSessionId && group.sessions.some((session) => session.id === currentSessionId),
+    );
+    if (currentGroup) return currentGroup.key;
+
+    return treeGroups[0]?.key ?? null;
+  }, [treeGroups, selectedProject, currentSessionId]);
 
   async function handleLogout() {
     await logout();
@@ -198,6 +280,14 @@ export function AppShellClient({ children }: { children: ReactNode }) {
     );
   }
 
+  useEffect(() => {
+    if (!focusedGroupKey) return;
+    setExpandedGroups((prev) => {
+      if (prev[focusedGroupKey]) return prev;
+      return { ...prev, [focusedGroupKey]: true };
+    });
+  }, [focusedGroupKey]);
+
   if (isLoginPage) {
     return <main className="app-shell-main">{children}</main>;
   }
@@ -209,6 +299,19 @@ export function AppShellClient({ children }: { children: ReactNode }) {
           <div className="desktop-sidebar-brand">
             <div className="desktop-sidebar-eyebrow">CodexRemote</div>
             <h1>本地控制台</h1>
+            <p className="desktop-sidebar-copy">
+              精选项目导航 · {groups.length} 个项目 · {totalSessions} 个线程
+            </p>
+            <div className="desktop-sidebar-metrics">
+              <div className="desktop-sidebar-metric">
+                <span>焦点</span>
+                <strong>{selectedProject ? "当前项目" : "全部项目"}</strong>
+              </div>
+              <div className="desktop-sidebar-metric">
+                <span>状态</span>
+                <strong>{currentSessionId ? "当前会话" : "浏览中"}</strong>
+              </div>
+            </div>
           </div>
 
           <div className="desktop-tree-header">
@@ -221,6 +324,11 @@ export function AppShellClient({ children }: { children: ReactNode }) {
               const activeProject = selectedProject === routeProjectValue(group);
               const containsActiveSession = group.sessions.some(
                 (session) => session.id === currentSessionId,
+              );
+              const groupSignal = getGroupSignal(
+                group,
+                selectedProject,
+                currentSessionId,
               );
 
               return (
@@ -250,15 +358,36 @@ export function AppShellClient({ children }: { children: ReactNode }) {
                       );
                     }}
                   >
-                    <span className="desktop-tree-chevron">
-                      {expanded ? "▾" : "▸"}
-                    </span>
-                    <span className="desktop-tree-folder-name">{group.label}</span>
-                    {group.draftOnly && <span className="desktop-tree-tag">草稿</span>}
+                    <div className="desktop-tree-folder-top">
+                      <span className="desktop-tree-chevron">
+                        {expanded ? "▾" : "▸"}
+                      </span>
+                      <span className="desktop-tree-folder-name">{group.label}</span>
+                      <span className="desktop-tree-folder-count">
+                        {group.sessions.length}
+                      </span>
+                    </div>
+                    <div className="desktop-tree-folder-bottom">
+                      <span className="desktop-tree-folder-path">
+                        {shortenPath(group.path)}
+                      </span>
+                      <div className="desktop-tree-folder-badges">
+                        <span className={`desktop-tree-tag desktop-tree-tag-${groupSignal.tone}`}>
+                          {groupSignal.label}
+                        </span>
+                        {group.draftOnly && (
+                          <span className="desktop-tree-tag desktop-tree-tag-muted">
+                            草稿目录
+                          </span>
+                        )}
+                        {containsActiveSession && !activeProject && (
+                          <span className="desktop-tree-tag desktop-tree-tag-accent">
+                            当前会话
+                          </span>
+                        )}
+                      </div>
+                    </div>
                   </button>
-                  <div className="desktop-tree-folder-path">
-                    {shortenPath(group.path)}
-                  </div>
                   {expanded && (
                     <div className="desktop-tree-children">
                       {group.draftOnly ? (
@@ -277,25 +406,50 @@ export function AppShellClient({ children }: { children: ReactNode }) {
                           等待创建首个线程
                         </button>
                       ) : (
-                        group.sessions.map((session) => (
-                          <button
-                            key={session.id}
-                            type="button"
-                            className={`desktop-tree-session ${
-                              currentSessionId === session.id
-                                ? "desktop-tree-session-active"
-                                : ""
-                            }`}
-                            onClick={() => router.push(`/sessions/${session.id}`)}
-                          >
-                            <span className="desktop-tree-session-title">
-                              {session.title || session.id}
-                            </span>
-                            <span className="desktop-tree-session-meta">
-                              {timeAgo(session.updatedAt)}
-                            </span>
-                          </button>
-                        ))
+                        group.sessions.map((session) => {
+                          const sessionSignal = getSessionSignal(
+                            session,
+                            currentSessionId,
+                          );
+
+                          return (
+                            <button
+                              key={session.id}
+                              type="button"
+                              className={`desktop-tree-session ${
+                                currentSessionId === session.id
+                                  ? "desktop-tree-session-active"
+                                  : ""
+                              } ${
+                                session.archivedAt
+                                  ? "desktop-tree-session-archived"
+                                  : ""
+                              }`}
+                              onClick={() => router.push(`/sessions/${session.id}`)}
+                            >
+                              <div className="desktop-tree-session-top">
+                                <span className="desktop-tree-session-title">
+                                  {session.title || session.id}
+                                </span>
+                                <span
+                                  className={`desktop-tree-session-status desktop-tree-session-status-${sessionSignal.tone}`}
+                                >
+                                  {sessionSignal.label}
+                                </span>
+                              </div>
+                              <div className="desktop-tree-session-bottom">
+                                <span className="desktop-tree-session-meta">
+                                  {timeAgo(session.updatedAt)}
+                                </span>
+                                {session.lastPreview && (
+                                  <span className="desktop-tree-session-preview">
+                                    {session.lastPreview}
+                                  </span>
+                                )}
+                              </div>
+                            </button>
+                          );
+                        })
                       )}
                     </div>
                   )}

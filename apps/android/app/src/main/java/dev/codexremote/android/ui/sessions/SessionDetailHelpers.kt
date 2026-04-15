@@ -1,6 +1,7 @@
 package dev.codexremote.android.ui.sessions
 
 import dev.codexremote.android.data.model.SessionMessage
+import dev.codexremote.android.data.model.RepoStatus
 import java.time.Duration
 import java.time.Instant
 import java.time.ZoneId
@@ -58,6 +59,53 @@ internal fun formatRunElapsed(
 internal fun detailProjectLabel(path: String?): String = when {
     path.isNullOrBlank() -> "会话详情"
     else -> java.io.File(path).name.ifBlank { path }
+}
+
+internal fun repoStatusVisible(repoStatus: RepoStatus?): Boolean {
+    if (repoStatus == null) return false
+    if (repoStatus.isRepo == false) return false
+    return !repoStatus.branch.isNullOrBlank() ||
+        !repoStatus.rootPath.isNullOrBlank() ||
+        !repoStatus.cwd.isNullOrBlank() ||
+        repoStatus.detached == true ||
+        repoStatus.aheadBy != null ||
+        repoStatus.behindBy != null ||
+        repoStatus.dirtyCount != null ||
+        repoStatus.untrackedCount != null
+}
+
+internal fun repoBranchLabel(repoStatus: RepoStatus?): String? =
+    when {
+        repoStatus == null -> null
+        repoStatus.detached == true -> "Detached HEAD"
+        else -> repoStatus.branch?.trim()?.takeIf { it.isNotBlank() }
+    }
+
+internal fun repoRootLabel(repoStatus: RepoStatus?): String? {
+    val path = repoStatus?.rootPath?.trim()?.takeIf { it.isNotBlank() }
+        ?: repoStatus?.cwd?.trim()?.takeIf { it.isNotBlank() }
+        ?: return null
+    return java.io.File(path).name.ifBlank { path }
+}
+
+internal fun repoDirtyLabel(repoStatus: RepoStatus?): String? {
+    val status = repoStatus ?: return null
+    val parts = mutableListOf<String>()
+    val dirtyCount = status.dirtyCount ?: 0
+    val stagedCount = status.stagedCount ?: 0
+    val unstagedCount = status.unstagedCount ?: 0
+    val untrackedCount = status.untrackedCount ?: 0
+    if (stagedCount > 0) parts += "$stagedCount 处已暂存"
+    if (unstagedCount > 0) parts += "$unstagedCount 处未暂存"
+    if (untrackedCount > 0) parts += "$untrackedCount 个未跟踪"
+    status.aheadBy?.takeIf { it > 0 }?.let { parts += "领先 $it" }
+    status.behindBy?.takeIf { it > 0 }?.let { parts += "落后 $it" }
+    return when {
+        parts.isNotEmpty() -> parts.joinToString(" · ")
+        dirtyCount > 0 -> "$dirtyCount 处已修改"
+        status.isRepo == true -> "工作区干净"
+        else -> null
+    }
 }
 
 // ── Typewriter helpers ────────────────────────────────────────────
@@ -303,6 +351,50 @@ internal data class HistoryRound(
     val folded: Boolean,
     val isHistorical: Boolean,
 )
+
+internal enum class HistoryRoundTone {
+    Reasoning,
+    Folded,
+    Completed,
+    Active,
+}
+
+internal fun HistoryRound.isReasoningRound(): Boolean =
+    title == "Codex 思考" || (messages.isNotEmpty() && messages.all { it.kind == "reasoning" })
+
+internal fun HistoryRound.tone(): HistoryRoundTone = when {
+    isReasoningRound() -> HistoryRoundTone.Reasoning
+    foldedMessages.isNotEmpty() -> HistoryRoundTone.Folded
+    isHistorical -> HistoryRoundTone.Completed
+    else -> HistoryRoundTone.Active
+}
+
+internal fun HistoryRound.stateLabel(): String = when (tone()) {
+    HistoryRoundTone.Reasoning -> "思考"
+    HistoryRoundTone.Folded -> "中间步骤"
+    HistoryRoundTone.Completed -> "已完成"
+    HistoryRoundTone.Active -> "当前进行"
+}
+
+internal fun HistoryRound.messageCountLabel(): String = when (tone()) {
+    HistoryRoundTone.Reasoning -> "${messages.count { it.kind == "reasoning" }} 条思考"
+    HistoryRoundTone.Folded -> "${foldedMessages.size} 条折叠步骤"
+    HistoryRoundTone.Completed, HistoryRoundTone.Active -> "${messages.size} 条消息"
+}
+
+internal fun HistoryRound.summaryMetaLabel(): String {
+    val parts = mutableListOf<String>()
+    parts += stateLabel()
+    parts += messageCountLabel()
+    messages.firstOrNull()?.createdAt?.let(::formatDate)?.let { parts += it }
+    return parts.joinToString(" · ")
+}
+
+internal fun HistoryRound.previewLabel(maxChars: Int = 96): String {
+    val previewText = preview.replace(Regex("\\s+"), " ").trim()
+    if (previewText.length <= maxChars) return previewText
+    return "${previewText.take(maxChars)}…"
+}
 
 internal fun buildHistoryRounds(messages: List<SessionMessage>): List<HistoryRound> {
     val lastUserIndex = messages.indexOfLast { it.role == "user" }

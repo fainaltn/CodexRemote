@@ -25,6 +25,71 @@ export type SessionDetailResponse = z.infer<typeof SessionDetailResponse>;
 export const GetSessionResponse = SessionDetailResponse;
 export type GetSessionResponse = SessionDetailResponse;
 
+// --- GET /api/hosts/:hostId/sessions/:sessionId/repo-status ---
+
+export const RepoStatus = z.discriminatedUnion("isRepo", [
+  z.object({
+    isRepo: z.literal(true),
+    cwd: z.string(),
+    rootPath: z.string(),
+    branch: z.string().nullable(),
+    detached: z.boolean(),
+    aheadBy: z.number().int().nonnegative().nullable(),
+    behindBy: z.number().int().nonnegative().nullable(),
+    dirtyCount: z.number().int().nonnegative(),
+    stagedCount: z.number().int().nonnegative(),
+    unstagedCount: z.number().int().nonnegative(),
+    untrackedCount: z.number().int().nonnegative(),
+  }),
+  z.object({
+    isRepo: z.literal(false),
+    cwd: z.string(),
+    rootPath: z.null(),
+    branch: z.null(),
+    detached: z.literal(false),
+    aheadBy: z.null(),
+    behindBy: z.null(),
+    dirtyCount: z.literal(0),
+    stagedCount: z.literal(0),
+    unstagedCount: z.literal(0),
+    untrackedCount: z.literal(0),
+  }),
+]);
+export type RepoStatus = z.infer<typeof RepoStatus>;
+
+export const RepoStatusResponse = z.object({
+  repoStatus: RepoStatus,
+});
+export type RepoStatusResponse = z.infer<typeof RepoStatusResponse>;
+
+// --- POST /api/hosts/:hostId/sessions/:sessionId/repo-action ---
+
+export const RepoActionRequest = z.discriminatedUnion("action", [
+  z.object({
+    action: z.literal("checkout"),
+    branch: z.string().trim().min(1).max(MAX_PATH_LENGTH),
+  }),
+  z.object({
+    action: z.literal("createBranch"),
+    branch: z.string().trim().min(1).max(MAX_PATH_LENGTH),
+  }),
+  z.object({
+    action: z.literal("commit"),
+    message: z.string().trim().min(1).max(MAX_PROMPT_LENGTH),
+  }),
+  z.object({
+    action: z.literal("push"),
+  }),
+]);
+export type RepoActionRequest = z.infer<typeof RepoActionRequest>;
+
+export const RepoActionResponse = z.object({
+  ok: z.literal(true),
+  summary: z.string(),
+  repoStatus: RepoStatus,
+});
+export type RepoActionResponse = z.infer<typeof RepoActionResponse>;
+
 // --- POST /api/hosts/:hostId/sessions/:sessionId/message ---
 
 export const SendMessageRequest = z.object({

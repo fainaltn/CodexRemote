@@ -208,6 +208,108 @@ describe("codex session discovery", () => {
     });
   });
 
+  it("aggregates messages and latest meta across multiple rollout files for one session id", async () => {
+    const base = await mkdtemp(join(tmpdir(), "codexremote-sessions-"));
+    createdDirs.push(base);
+    process.env["CODEX_STATE_DIR"] = base;
+
+    await makeSessionFile(base, "2026/04/05", [
+      {
+        timestamp: "2026-04-05T10:00:00.000Z",
+        type: "session_meta",
+        payload: {
+          id: "multi-rollout-session-id",
+          timestamp: "2026-04-05T09:59:00.000Z",
+          cwd: "/workspace/CodexRemote",
+        },
+      },
+      {
+        timestamp: "2026-04-05T10:01:00.000Z",
+        type: "response_item",
+        payload: {
+          type: "message",
+          role: "user",
+          content: [{ type: "input_text", text: "第一轮问题" }],
+        },
+      },
+      {
+        timestamp: "2026-04-05T10:02:00.000Z",
+        type: "response_item",
+        payload: {
+          type: "message",
+          role: "assistant",
+          content: [{ type: "output_text", text: "第一轮回答" }],
+        },
+      },
+    ]);
+
+    await makeSessionFile(base, "2026/04/06", [
+      {
+        timestamp: "2026-04-06T12:00:00.000Z",
+        type: "session_meta",
+        payload: {
+          id: "multi-rollout-session-id",
+          timestamp: "2026-04-06T11:59:00.000Z",
+          cwd: "/workspace/CodexRemote",
+        },
+      },
+      {
+        timestamp: "2026-04-06T12:01:00.000Z",
+        type: "response_item",
+        payload: {
+          type: "message",
+          role: "user",
+          content: [{ type: "input_text", text: "第二轮问题" }],
+        },
+      },
+      {
+        timestamp: "2026-04-06T12:02:00.000Z",
+        type: "response_item",
+        payload: {
+          type: "message",
+          role: "assistant",
+          content: [{ type: "output_text", text: "第二轮回答" }],
+        },
+      },
+    ]);
+
+    const meta = await readSessionMeta("multi-rollout-session-id");
+    expect(meta).toMatchObject({
+      cwd: "/workspace/CodexRemote",
+      title: "第二轮问题",
+      lastPreview: "第二轮回答",
+      lastActivityAt: "2026-04-06T12:02:00.000Z",
+    });
+
+    const messages = await readSessionMessages("multi-rollout-session-id");
+    expect(messages).toEqual([
+      expect.objectContaining({
+        role: "user",
+        kind: "message",
+        text: "第一轮问题",
+        createdAt: "2026-04-05T10:01:00.000Z",
+      }),
+      expect.objectContaining({
+        role: "assistant",
+        kind: "message",
+        text: "第一轮回答",
+        createdAt: "2026-04-05T10:02:00.000Z",
+      }),
+      expect.objectContaining({
+        role: "user",
+        kind: "message",
+        text: "第二轮问题",
+        createdAt: "2026-04-06T12:01:00.000Z",
+      }),
+      expect.objectContaining({
+        role: "assistant",
+        kind: "message",
+        text: "第二轮回答",
+        createdAt: "2026-04-06T12:02:00.000Z",
+      }),
+    ]);
+  });
+
   it("keeps a parent session visible when subagent rollouts repeat the same thread id", async () => {
     const base = await mkdtemp(join(tmpdir(), "codexremote-sessions-"));
     createdDirs.push(base);

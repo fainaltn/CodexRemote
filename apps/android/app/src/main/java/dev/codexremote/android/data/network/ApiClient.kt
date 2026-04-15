@@ -13,6 +13,9 @@ import dev.codexremote.android.data.model.InboxItem
 import dev.codexremote.android.data.model.BrowseProjectsResponse
 import dev.codexremote.android.data.model.CreateSessionRequest
 import dev.codexremote.android.data.model.CreateSessionResponse
+import dev.codexremote.android.data.model.RepoActionRequest
+import dev.codexremote.android.data.model.RepoActionResponse
+import dev.codexremote.android.data.model.RepoStatusResponse
 import dev.codexremote.android.data.model.StartLiveRunRequest
 import dev.codexremote.android.data.model.StartLiveRunResponse
 import dev.codexremote.android.data.model.StopLiveRunResponse
@@ -258,6 +261,31 @@ class ApiClient(baseUrl: String) {
         return decodeResponse(response)
     }
 
+    suspend fun getRepoStatus(
+        token: String,
+        hostId: String,
+        sessionId: String,
+    ): RepoStatusResponse {
+        val response = http.get("$baseUrl/api/hosts/$hostId/sessions/${encode(sessionId)}/repo-status") {
+            bearerAuth(token)
+        }
+        return decodeResponse(response)
+    }
+
+    suspend fun performRepoAction(
+        token: String,
+        hostId: String,
+        sessionId: String,
+        action: RepoActionRequest,
+    ): RepoActionResponse {
+        val response = http.post("$baseUrl/api/hosts/$hostId/sessions/${encode(sessionId)}/repo-action") {
+            bearerAuth(token)
+            contentType(ContentType.Application.Json)
+            setBody(action)
+        }
+        return decodeResponse(response)
+    }
+
     suspend fun browseProjects(
         token: String,
         hostId: String,
@@ -324,11 +352,19 @@ class ApiClient(baseUrl: String) {
         hostId: String,
         sessionId: String,
         prompt: String,
+        model: String? = null,
+        reasoningEffort: String? = null,
     ): StartLiveRunResponse {
         return http.post("$baseUrl/api/hosts/$hostId/sessions/${encode(sessionId)}/live") {
             bearerAuth(token)
             contentType(ContentType.Application.Json)
-            setBody(StartLiveRunRequest(prompt = prompt))
+            setBody(
+                StartLiveRunRequest(
+                    prompt = prompt,
+                    model = model?.takeIf { it.isNotBlank() },
+                    reasoningEffort = reasoningEffort?.takeIf { it.isNotBlank() },
+                )
+            )
         }.body()
     }
 

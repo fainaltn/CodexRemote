@@ -25,15 +25,18 @@ import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.material3.rememberModalBottomSheetState
@@ -61,6 +64,7 @@ import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.isActive
 
 private enum class AttachmentTarget { Composer, Edit }
+private enum class RepoActionDialogTarget { CreateBranch, CheckoutBranch, Commit }
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
 @Composable
@@ -93,6 +97,9 @@ fun SessionDetailScreen(
     var previousLiveStatus by remember(stableDetailKey) { mutableStateOf<String?>(null) }
     var refreshedTerminalRunId by remember(stableDetailKey) { mutableStateOf<String?>(null) }
     var attachmentTarget by remember(stableDetailKey) { mutableStateOf(AttachmentTarget.Composer) }
+    var runtimeSheetTarget by remember(stableDetailKey) { mutableStateOf<RuntimeControlTarget?>(null) }
+    var repoActionDialogTarget by remember(stableDetailKey) { mutableStateOf<RepoActionDialogTarget?>(null) }
+    var repoActionInput by remember(stableDetailKey) { mutableStateOf("") }
     val composerAttachments = remember(uiState.pendingArtifacts, uiState.pendingLocalAttachments) {
         buildList {
             addAll(
@@ -116,6 +123,30 @@ fun SessionDetailScreen(
                         localOnly = true,
                     )
                 }
+            )
+        }
+    }
+    val queuedPromptItems = remember(uiState.queuedPrompts) {
+        uiState.queuedPrompts.map { queuedPrompt ->
+            QueuedPromptItem(
+                id = queuedPrompt.id,
+                preview = buildString {
+                    append(queuedPrompt.rawPrompt.trim().ifBlank { "待发送消息" })
+                    if (queuedPrompt.artifacts.isNotEmpty()) {
+                        append(" +${queuedPrompt.artifacts.size}附件")
+                    }
+                    queuedPrompt.model?.takeIf { it.isNotBlank() }?.let {
+                        append(" · ")
+                        append(runtimeControlLabel(RuntimeControlTarget.Model, it))
+                    }
+                    queuedPrompt.reasoningEffort?.takeIf { it.isNotBlank() }?.let {
+                        append(" · 思考 ")
+                        append(runtimeControlLabel(RuntimeControlTarget.ReasoningEffort, it))
+                    }
+                },
+                attachmentCount = queuedPrompt.artifacts.size,
+                model = queuedPrompt.model,
+                reasoningEffort = queuedPrompt.reasoningEffort,
             )
         }
     }
@@ -347,6 +378,40 @@ fun SessionDetailScreen(
                         LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
                     }
 
+                    SessionControlStrip(
+                        liveRun = uiState.liveRun,
+                        liveStreamConnected = uiState.liveStreamConnected,
+                        liveStreamStatus = uiState.liveStreamStatus,
+                        queuedPromptCount = uiState.queuedPrompts.size,
+                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                    )
+
+                    RepoStatusSurface(
+                        repoStatus = uiState.repoStatus,
+                        actionsEnabled = !isRunning,
+                        actionBusy = uiState.repoActionBusy,
+                        actionSummary = uiState.repoActionSummary,
+                        onCreateBranch = {
+                            repoActionDialogTarget = RepoActionDialogTarget.CreateBranch
+                            repoActionInput = ""
+                        },
+                        onCheckoutBranch = {
+                            repoActionDialogTarget = RepoActionDialogTarget.CheckoutBranch
+                            repoActionInput = ""
+                        },
+                        onCommit = {
+                            repoActionDialogTarget = RepoActionDialogTarget.Commit
+                            repoActionInput = ""
+                        },
+                        onPush = {
+                            if (!sessionId.isNullOrBlank()) {
+                                viewModel.pushRepo(serverId, sessionId)
+                            }
+                        },
+                        onDismissSummary = { viewModel.dismissRepoActionSummary() },
+                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp),
+                    )
+
                     PullToRefreshBox(
                         isRefreshing = uiState.refreshing,
                         onRefresh = {
@@ -426,7 +491,12 @@ fun SessionDetailScreen(
                         sending = uiState.sending,
                         stopping = uiState.stopping,
                         isRunning = isRunning,
+                        liveStreamConnected = uiState.liveStreamConnected,
+                        liveStreamStatus = uiState.liveStreamStatus,
+                        selectedModel = uiState.selectedModel,
+                        selectedReasoningEffort = uiState.selectedReasoningEffort,
                         attachments = composerAttachments,
+                        queuedPrompts = queuedPromptItems,
                         onPromptChange = { viewModel.setPrompt(it) },
                         onUploadClick = {
                             attachmentTarget = AttachmentTarget.Composer
@@ -439,13 +509,104 @@ fun SessionDetailScreen(
                                 viewModel.removeArtifact(attachment.id)
                             }
                         },
-                        onSend = { viewModel.sendPrompt(serverId, sessionId, initialCwd) },
+                        onRestoreQueuedPrompt = { queuedPrompt ->
+                            viewModel.restoreQueuedPrompt(queuedPrompt.id)
+                        },
+                        onModelClick = { runtimeSheetTarget = RuntimeControlTarget.Model },
+                        onReasoningEffortClick = {
+                            runtimeSheetTarget = RuntimeControlTarget.ReasoningEffort
+                        },
+                        onSend = {
+                            viewModel.sendPrompt(serverId, sessionId, initialCwd)
+                        },
+                        onQueue = {
+                            viewModel.queuePrompt(sessionId)
+                        },
                         onStop = { viewModel.stopRun(serverId, sessionId) },
                         sendContentDescription = if (isDraftSession) "发送首条消息并创建会话" else "发送消息",
                     )
                 }
             }
         }
+    }
+
+    if (runtimeSheetTarget != null) {
+        val target = runtimeSheetTarget ?: RuntimeControlTarget.Model
+        val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+        ModalBottomSheet(
+            onDismissRequest = { runtimeSheetTarget = null },
+            sheetState = sheetState,
+        ) {
+            RuntimeControlSheetContent(
+                target = target,
+                currentValue = when (target) {
+                    RuntimeControlTarget.Model -> uiState.selectedModel
+                    RuntimeControlTarget.ReasoningEffort -> uiState.selectedReasoningEffort
+                },
+                onSelect = { value ->
+                    when (target) {
+                        RuntimeControlTarget.Model -> viewModel.setSelectedModel(value)
+                        RuntimeControlTarget.ReasoningEffort -> viewModel.setSelectedReasoningEffort(value)
+                    }
+                    runtimeSheetTarget = null
+                },
+            )
+        }
+    }
+
+    if (repoActionDialogTarget != null) {
+        val target = repoActionDialogTarget ?: RepoActionDialogTarget.CreateBranch
+        AlertDialog(
+            onDismissRequest = { repoActionDialogTarget = null },
+            title = {
+                Text(
+                    when (target) {
+                        RepoActionDialogTarget.CreateBranch -> "新建分支"
+                        RepoActionDialogTarget.CheckoutBranch -> "切换分支"
+                        RepoActionDialogTarget.Commit -> "提交改动"
+                    },
+                )
+            },
+            text = {
+                OutlinedTextField(
+                    value = repoActionInput,
+                    onValueChange = { repoActionInput = it },
+                    singleLine = target != RepoActionDialogTarget.Commit,
+                    label = {
+                        Text(
+                            when (target) {
+                                RepoActionDialogTarget.CreateBranch -> "分支名"
+                                RepoActionDialogTarget.CheckoutBranch -> "目标分支"
+                                RepoActionDialogTarget.Commit -> "提交说明"
+                            },
+                        )
+                    },
+                )
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        val input = repoActionInput.trim()
+                        if (input.isNotEmpty()) {
+                            when (target) {
+                                RepoActionDialogTarget.CreateBranch -> viewModel.createBranch(serverId, sessionId, input)
+                                RepoActionDialogTarget.CheckoutBranch -> viewModel.checkoutBranch(serverId, sessionId, input)
+                                RepoActionDialogTarget.Commit -> viewModel.commitRepo(serverId, sessionId, input)
+                            }
+                            repoActionDialogTarget = null
+                        }
+                    },
+                    enabled = repoActionInput.trim().isNotEmpty() && !uiState.repoActionBusy,
+                ) {
+                    Text("执行")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { repoActionDialogTarget = null }) {
+                    Text("取消")
+                }
+            },
+        )
     }
 
     // Dev diagnostics bottom sheet (long-press TopAppBar title)

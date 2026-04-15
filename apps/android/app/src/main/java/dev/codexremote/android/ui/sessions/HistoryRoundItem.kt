@@ -5,6 +5,7 @@ import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.shrinkVertically
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -27,6 +28,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import dev.codexremote.android.data.model.SessionMessage
@@ -34,8 +36,8 @@ import dev.codexremote.android.data.model.SessionMessage
 /**
  * A single history round in the conversation timeline.
  *
- * **Collapsed** — one-line summary row:  "写一个登录页面 → ✓ 已完成"
- * **Expanded**  — full message bubbles for the round.
+ * **Collapsed** - a compact, scan-friendly summary that surfaces the round state.
+ * **Expanded**  - full message bubbles for the round with a short round header.
  */
 @Composable
 internal fun HistoryRoundItem(
@@ -46,16 +48,14 @@ internal fun HistoryRoundItem(
 ) {
     Column(
         modifier = modifier.fillMaxWidth(),
-        verticalArrangement = Arrangement.spacedBy(4.dp),
+        verticalArrangement = Arrangement.spacedBy(6.dp),
     ) {
-        // Collapsed summary — always shown, acts as toggle
         HistoryRoundSummary(
             round = round,
             expanded = expanded,
             onClick = onToggle,
         )
 
-        // Expanded content
         AnimatedVisibility(
             visible = expanded,
             enter = expandVertically(expandFrom = Alignment.Top) + fadeIn(),
@@ -67,14 +67,13 @@ internal fun HistoryRoundItem(
                     .padding(start = 4.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
-                // Render primary messages, inserting folded-messages toggle
-                // before the final assistant message (same position as old code).
-                round.primaryMessages.forEachIndexed { index, message ->
-                    val isLastAssistant = index == round.primaryMessages.lastIndex
-                            && message.role == "assistant"
-                            && message.kind != "reasoning"
+                HistoryRoundExpandedHeader(round = round)
 
-                    // Show folded messages toggle just before the final assistant reply
+                round.primaryMessages.forEachIndexed { index, message ->
+                    val isLastAssistant = index == round.primaryMessages.lastIndex &&
+                        message.role == "assistant" &&
+                        message.kind != "reasoning"
+
                     if (isLastAssistant && round.foldedMessages.isNotEmpty()) {
                         FoldedMessagesSection(foldedMessages = round.foldedMessages)
                     }
@@ -82,7 +81,6 @@ internal fun HistoryRoundItem(
                     RenderHistoryMessage(message)
                 }
 
-                // Edge case: folded messages exist but no final assistant in primaryMessages
                 if (round.foldedMessages.isNotEmpty() &&
                     round.primaryMessages.none { it.role == "assistant" && it.kind != "reasoning" }
                 ) {
@@ -101,41 +99,186 @@ private fun HistoryRoundSummary(
     expanded: Boolean,
     onClick: () -> Unit,
 ) {
+    val tone = round.tone()
+    val palette = tonePalette(tone)
+
     Surface(
         modifier = Modifier
             .fillMaxWidth()
             .clickable(onClick = onClick),
-        shape = RoundedCornerShape(14.dp),
-        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f),
+        shape = RoundedCornerShape(16.dp),
+        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.42f),
+        border = BorderStroke(1.dp, palette.border),
     ) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 14.dp, vertical = 10.dp),
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-            verticalAlignment = Alignment.CenterVertically,
+        Column(
+            modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                verticalAlignment = Alignment.Top,
+            ) {
+                Column(
+                    modifier = Modifier.weight(1f),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    Text(
+                        text = round.title,
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurface,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        SummaryBadge(
+                            text = round.stateLabel(),
+                            containerColor = palette.container,
+                            contentColor = palette.content,
+                        )
+                        SummaryBadge(
+                            text = round.messageCountLabel(),
+                            containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.9f),
+                            contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                }
+
+                Icon(
+                    imageVector = if (expanded) Icons.Filled.ExpandLess else Icons.Filled.ExpandMore,
+                    contentDescription = if (expanded) "收起" else "展开",
+                    modifier = Modifier.size(18.dp),
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+
             Text(
-                text = round.title,
-                modifier = Modifier.weight(1f),
-                style = MaterialTheme.typography.bodyMedium,
+                text = round.previewLabel(),
+                style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+            )
+
+            Text(
+                text = round.summaryMetaLabel(),
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.78f),
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
+        }
+    }
+}
+
+@Composable
+private fun HistoryRoundExpandedHeader(round: HistoryRound) {
+    val tone = round.tone()
+    val palette = tonePalette(tone)
+
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(14.dp),
+        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.34f),
+        border = BorderStroke(1.dp, palette.border.copy(alpha = 0.75f)),
+    ) {
+        Column(
+            modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    text = round.title,
+                    modifier = Modifier.weight(1f),
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurface,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+
+                SummaryBadge(
+                    text = round.stateLabel(),
+                    containerColor = palette.container,
+                    contentColor = palette.content,
+                )
+            }
+
             Text(
-                text = "${round.messages.size}条",
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
+                text = round.previewLabel(84).ifBlank { "暂无可预览内容" },
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
             )
-            Icon(
-                imageVector = if (expanded) Icons.Filled.ExpandLess else Icons.Filled.ExpandMore,
-                contentDescription = if (expanded) "收起" else "展开",
-                modifier = Modifier.size(18.dp),
-                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+
+            Text(
+                text = round.summaryMetaLabel(),
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.78f),
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
             )
         }
     }
+}
+
+@Composable
+private fun SummaryBadge(
+    text: String,
+    containerColor: Color,
+    contentColor: Color,
+) {
+    Surface(
+        shape = RoundedCornerShape(999.dp),
+        color = containerColor,
+    ) {
+        Text(
+            text = text,
+            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+            style = MaterialTheme.typography.labelSmall,
+            color = contentColor,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
+    }
+}
+
+private data class TonePalette(
+    val container: Color,
+    val content: Color,
+    val border: Color,
+)
+
+@Composable
+private fun tonePalette(tone: HistoryRoundTone): TonePalette = when (tone) {
+    HistoryRoundTone.Reasoning -> TonePalette(
+        container = MaterialTheme.colorScheme.tertiaryContainer.copy(alpha = 0.92f),
+        content = MaterialTheme.colorScheme.onTertiaryContainer,
+        border = MaterialTheme.colorScheme.tertiary.copy(alpha = 0.35f),
+    )
+    HistoryRoundTone.Folded -> TonePalette(
+        container = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.92f),
+        content = MaterialTheme.colorScheme.onSecondaryContainer,
+        border = MaterialTheme.colorScheme.secondary.copy(alpha = 0.32f),
+    )
+    HistoryRoundTone.Completed -> TonePalette(
+        container = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.92f),
+        content = MaterialTheme.colorScheme.onSurfaceVariant,
+        border = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.7f),
+    )
+    HistoryRoundTone.Active -> TonePalette(
+        container = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.92f),
+        content = MaterialTheme.colorScheme.onPrimaryContainer,
+        border = MaterialTheme.colorScheme.primary.copy(alpha = 0.32f),
+    )
 }
 
 // ── Render a single history message by role/kind ─────────────────
@@ -148,6 +291,7 @@ private fun RenderHistoryMessage(message: SessionMessage) {
             timestamp = message.createdAt,
             dimmed = true,
         )
+
         "assistant" -> {
             if (message.kind == "reasoning") {
                 ReasoningBubble(text = message.text)
@@ -158,6 +302,7 @@ private fun RenderHistoryMessage(message: SessionMessage) {
                 )
             }
         }
+
         else -> HistoryAssistantBubble(
             text = message.text,
             timestamp = message.createdAt,
@@ -177,8 +322,9 @@ private fun FoldedMessagesSection(
         modifier = Modifier
             .fillMaxWidth()
             .clickable { showFolded = !showFolded },
-        shape = RoundedCornerShape(10.dp),
-        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f),
+        shape = RoundedCornerShape(12.dp),
+        color = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.28f),
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.secondary.copy(alpha = 0.18f)),
     ) {
         Row(
             modifier = Modifier
@@ -188,7 +334,11 @@ private fun FoldedMessagesSection(
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Text(
-                text = if (showFolded) "收起中间过程" else "查看 ${foldedMessages.size} 条中间回复",
+                text = if (showFolded) {
+                    "收起 ${foldedMessages.size} 条中间步骤"
+                } else {
+                    "查看 ${foldedMessages.size} 条中间步骤"
+                },
                 modifier = Modifier.weight(1f),
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -211,6 +361,11 @@ private fun FoldedMessagesSection(
             modifier = Modifier.padding(start = 8.dp),
             verticalArrangement = Arrangement.spacedBy(6.dp),
         ) {
+            Text(
+                text = "中间步骤",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
             foldedMessages.forEach { message ->
                 RenderHistoryMessage(message)
             }
@@ -255,7 +410,8 @@ private fun ReasoningBubble(
     Surface(
         modifier = Modifier.fillMaxWidth(0.9f),
         shape = RoundedCornerShape(12.dp),
-        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f),
+        color = MaterialTheme.colorScheme.tertiaryContainer.copy(alpha = 0.42f),
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.tertiary.copy(alpha = 0.24f)),
     ) {
         Column(
             modifier = Modifier.padding(12.dp),

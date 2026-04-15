@@ -13,7 +13,6 @@ import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -62,13 +61,12 @@ internal fun ConversationTimeline(
         else -> latestAssistantReply ?: cleanedOutput
     }
 
-    val showAssistantReply = when {
-        isDraft -> true
-        !replyOutput.isNullOrBlank() -> true
-        liveRun?.error != null -> true
-        isActive -> true
-        else -> false
-    }
+    val showWaitingPlaceholder = liveRun == null && replyOutput.isNullOrBlank()
+    val showAssistantReply = isDraft ||
+        liveRun != null ||
+        !replyOutput.isNullOrBlank() ||
+        showWaitingPlaceholder
+    val showStreamDegradedCard = isActive && !liveStreamConnected && !liveStreamStatus.isNullOrBlank()
 
     // Only show historical rounds in the history section;
     // the current (non-historical) round is rendered separately below.
@@ -111,13 +109,28 @@ internal fun ConversationTimeline(
                 }
             }
 
-            // ③ AI reply (hero block)
+            // ③ Connection degradation notice (only when SSE lost during active run)
+            if (showStreamDegradedCard) {
+                item(key = "connection-notice") {
+                    TimelineNoticeCard(
+                        title = "实时流已降级",
+                        message = liveStreamStatus.orEmpty(),
+                        footer = "会话仍在继续，界面会自动刷新补齐内容。",
+                        tone = TimelineNoticeTone.Warning,
+                    )
+                }
+            }
+
+            // ④ AI reply (hero block)
             if (showAssistantReply) {
                 item(key = "assistant-reply") {
-                    if (replyOutput != null || liveRun != null) {
+                    if (showWaitingPlaceholder) {
+                        WaitingReplyPlaceholder(draft = isDraft)
+                    } else {
                         AssistantReplyBlock(
                             output = replyOutput,
                             isActive = isActive,
+                            status = liveRun?.status,
                             model = liveRun?.model,
                             startedAt = liveRun?.startedAt,
                             finishedAt = liveRun?.finishedAt,
@@ -134,23 +147,7 @@ internal fun ConversationTimeline(
                                 null
                             },
                         )
-                    } else {
-                        WaitingReplyPlaceholder(draft = isDraft)
                     }
-                }
-            }
-
-            // ④ Connection degradation notice (only when SSE lost during active run)
-            if (isActive && !liveStreamConnected && liveStreamStatus != null) {
-                item(key = "connection-notice") {
-                    Text(
-                        text = liveStreamStatus,
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 4.dp),
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
                 }
             }
 

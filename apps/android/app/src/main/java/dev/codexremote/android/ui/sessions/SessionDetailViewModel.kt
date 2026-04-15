@@ -6,7 +6,10 @@ import android.provider.OpenableColumns
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import dev.codexremote.android.data.model.Artifact
+import dev.codexremote.android.data.model.RepoActionRequest
+import dev.codexremote.android.data.model.RepoActionResponse
 import dev.codexremote.android.data.model.Run
+import dev.codexremote.android.data.model.RepoStatus
 import dev.codexremote.android.data.model.Session
 import dev.codexremote.android.data.model.SessionDetailResponse
 import dev.codexremote.android.data.model.SessionMessage
@@ -38,16 +41,23 @@ data class SessionDetailUiState(
     val archiving: Boolean = false,
     val archived: Boolean = false,
     val session: Session? = null,
+    val repoStatus: RepoStatus? = null,
     val messages: List<SessionMessage> = emptyList(),
     val liveRun: Run? = null,
     val prompt: String = "",
     val lastSubmittedPrompt: String? = null,
     val lastSubmittedPromptWithAttachments: String? = null,
+    val selectedModel: String? = null,
+    val selectedReasoningEffort: String? = null,
+    val runtimeControlsInitialized: Boolean = false,
     val pendingArtifacts: List<Artifact> = emptyList(),
     val pendingLocalAttachments: List<PendingLocalAttachment> = emptyList(),
+    val queuedPrompts: List<QueuedPrompt> = emptyList(),
     val uploading: Boolean = false,
     val sending: Boolean = false,
     val stopping: Boolean = false,
+    val repoActionBusy: Boolean = false,
+    val repoActionSummary: String? = null,
     val error: String? = null,
     val createdSessionId: String? = null,
     val liveStreamConnected: Boolean = false,
@@ -60,6 +70,19 @@ data class PendingLocalAttachment(
     val mimeType: String,
     val sizeBytes: Long,
     val bytes: ByteArray,
+)
+
+private data class RuntimeControls(
+    val model: String? = null,
+    val reasoningEffort: String? = null,
+)
+
+data class QueuedPrompt(
+    val id: String,
+    val rawPrompt: String,
+    val artifacts: List<Artifact> = emptyList(),
+    val model: String? = null,
+    val reasoningEffort: String? = null,
 )
 
 private data class ServerHandle(
@@ -96,6 +119,9 @@ private fun sanitizePromptDisplay(prompt: String?): String? {
     return trimmed
 }
 
+private fun normalizeRuntimeControl(value: String?): String? =
+    value?.trim()?.takeIf { it.isNotBlank() }
+
 class SessionDetailViewModel(application: Application) : AndroidViewModel(application) {
     private val repo = ServerRepository(application)
 
@@ -119,6 +145,7 @@ class SessionDetailViewModel(application: Application) : AndroidViewModel(applic
         .map { it.liveRun?.lastOutput to it.liveRun?.prompt }.distinctUntilChanged()
         .map { (output, prompt) -> cleanLiveOutput(output, prompt) }
     private var liveStreamJob: Job? = null
+    private var queuedDispatchJob: Job? = null
     private var liveStreamKey: Pair<String, String>? = null
     private var liveStreamLastEventId: Long? = null
 
@@ -180,7 +207,13 @@ class SessionDetailViewModel(application: Application) : AndroidViewModel(applic
 
     fun prepareDraft() {
         stopLiveRunStream()
-        _uiState.value = SessionDetailUiState(loading = false)
+        val snapshot = _uiState.value
+        _uiState.value = SessionDetailUiState(
+            loading = false,
+            selectedModel = snapshot.selectedModel,
+            selectedReasoningEffort = snapshot.selectedReasoningEffort,
+            runtimeControlsInitialized = snapshot.runtimeControlsInitialized,
+        )
     }
 
     fun refresh(serverId: String, sessionId: String) {
@@ -227,6 +260,7 @@ class SessionDetailViewModel(application: Application) : AndroidViewModel(applic
                     handle.client.getLiveRun(handle.token, SESSION_HOST_ID, sessionId)
                 }
                 _uiState.update { it.copy(liveRun = liveRun) }
+                seedRuntimeControlsFromRun(liveRun)
             } catch (_: Exception) {
                 // Keep the last visible live state when polling blips.
             }
@@ -282,9 +316,11 @@ class SessionDetailViewModel(application: Application) : AndroidViewModel(applic
                                         },
                                     )
                                 }
+                                seedRuntimeControlsFromRun(event.run)
                                 // Auto-refresh full session when run reaches terminal state
                                 if (isTerminal) {
                                     silentRefreshSessionAndLive(serverId, sessionId)
+                                    maybeDispatchQueuedPrompt(serverId, sessionId)
                                 }
                             }
                             is LiveRunStreamEvent.Gap -> {
@@ -307,6 +343,7 @@ class SessionDetailViewModel(application: Application) : AndroidViewModel(applic
                                 }
                                 // Run ended — pull final messages and run state
                                 silentRefreshSessionAndLive(serverId, sessionId)
+                                maybeDispatchQueuedPrompt(serverId, sessionId)
                             }
                             is LiveRunStreamEvent.IdleTimeout -> {
                                 _uiState.update {
@@ -360,12 +397,165 @@ class SessionDetailViewModel(application: Application) : AndroidViewModel(applic
         _uiState.update { it.copy(prompt = prompt) }
     }
 
+    fun setSelectedModel(model: String?) {
+        _uiState.update {
+            it.copy(
+                selectedModel = normalizeRuntimeControl(model),
+                runtimeControlsInitialized = true,
+            )
+        }
+    }
+
+    fun setSelectedReasoningEffort(reasoningEffort: String?) {
+        _uiState.update {
+            it.copy(
+                selectedReasoningEffort = normalizeRuntimeControl(reasoningEffort),
+                runtimeControlsInitialized = true,
+            )
+        }
+    }
+
+    fun setRuntimeControls(
+        model: String?,
+        reasoningEffort: String?,
+    ) {
+        _uiState.update { state ->
+            state.copy(
+                selectedModel = normalizeRuntimeControl(model),
+                selectedReasoningEffort = normalizeRuntimeControl(reasoningEffort),
+                runtimeControlsInitialized = true,
+            )
+        }
+    }
+
+    fun queuePrompt(
+        sessionId: String?,
+        model: String? = null,
+        reasoningEffort: String? = null,
+    ) {
+        val snapshot = _uiState.value
+        val runtimeControls = resolveRuntimeControls(
+            snapshot = snapshot,
+            model = model,
+            reasoningEffort = reasoningEffort,
+        )
+        if (model != null || reasoningEffort != null) {
+            _uiState.update { state ->
+                state.copy(
+                    selectedModel = runtimeControls.model,
+                    selectedReasoningEffort = runtimeControls.reasoningEffort,
+                    runtimeControlsInitialized = true,
+                )
+            }
+        }
+        if (sessionId.isNullOrBlank()) {
+            _uiState.update { it.copy(error = "请先创建会话后再使用待发送队列") }
+            return
+        }
+        if (snapshot.liveRun?.status !in activeRunStatuses) {
+            _uiState.update { it.copy(error = "当前没有运行中的任务，无需排队") }
+            return
+        }
+
+        val rawPrompt = snapshot.prompt.trim()
+        if (rawPrompt.isBlank()) return
+
+        val queuedPrompt = QueuedPrompt(
+            id = java.util.UUID.randomUUID().toString(),
+            rawPrompt = rawPrompt,
+            artifacts = snapshot.pendingArtifacts,
+            model = runtimeControls.model,
+            reasoningEffort = runtimeControls.reasoningEffort,
+        )
+        _uiState.update {
+            it.copy(
+                prompt = "",
+                pendingArtifacts = emptyList(),
+                queuedPrompts = it.queuedPrompts + queuedPrompt,
+                error = null,
+            )
+        }
+    }
+
+    fun removeQueuedPrompt(queuedPromptId: String) {
+        _uiState.update { state ->
+            state.copy(
+                queuedPrompts = state.queuedPrompts.filterNot { it.id == queuedPromptId },
+            )
+        }
+    }
+
+    fun restoreQueuedPrompt(queuedPromptId: String): QueuedPrompt? {
+        val queuedPrompt = _uiState.value.queuedPrompts.firstOrNull { it.id == queuedPromptId } ?: return null
+        _uiState.update { state ->
+            state.copy(
+                prompt = queuedPrompt.rawPrompt,
+                pendingArtifacts = queuedPrompt.artifacts,
+                selectedModel = queuedPrompt.model,
+                selectedReasoningEffort = queuedPrompt.reasoningEffort,
+                runtimeControlsInitialized = true,
+                queuedPrompts = state.queuedPrompts.filterNot { it.id == queuedPromptId },
+                error = null,
+            )
+        }
+        return queuedPrompt
+    }
+
     fun clearError() {
         _uiState.update { it.copy(error = null) }
     }
 
+    fun dismissRepoActionSummary() {
+        _uiState.update { it.copy(repoActionSummary = null) }
+    }
+
     fun showError(message: String) {
         _uiState.update { it.copy(error = message) }
+    }
+
+    fun createBranch(serverId: String, sessionId: String?, branch: String) {
+        if (sessionId.isNullOrBlank()) return
+        performRepoAction(
+            serverId = serverId,
+            sessionId = sessionId,
+            action = RepoActionRequest(
+                action = "createBranch",
+                branch = branch.trim(),
+            ),
+        )
+    }
+
+    fun checkoutBranch(serverId: String, sessionId: String?, branch: String) {
+        if (sessionId.isNullOrBlank()) return
+        performRepoAction(
+            serverId = serverId,
+            sessionId = sessionId,
+            action = RepoActionRequest(
+                action = "checkout",
+                branch = branch.trim(),
+            ),
+        )
+    }
+
+    fun commitRepo(serverId: String, sessionId: String?, message: String) {
+        if (sessionId.isNullOrBlank()) return
+        performRepoAction(
+            serverId = serverId,
+            sessionId = sessionId,
+            action = RepoActionRequest(
+                action = "commit",
+                message = message.trim(),
+            ),
+        )
+    }
+
+    fun pushRepo(serverId: String, sessionId: String?) {
+        if (sessionId.isNullOrBlank()) return
+        performRepoAction(
+            serverId = serverId,
+            sessionId = sessionId,
+            action = RepoActionRequest(action = "push"),
+        )
     }
 
     fun consumeArchived() {
@@ -448,6 +638,7 @@ class SessionDetailViewModel(application: Application) : AndroidViewModel(applic
         rawPrompt: String,
         composedPrompt: String,
         clearComposer: Boolean,
+        runtimeControls: RuntimeControls? = null,
     ): Boolean {
         val snapshot = _uiState.value
         if (
@@ -460,7 +651,14 @@ class SessionDetailViewModel(application: Application) : AndroidViewModel(applic
 
         _uiState.update { it.copy(sending = true, error = null) }
         try {
-            sendPromptInternal(serverId, sessionId, composedPrompt.trim())
+            val controls = runtimeControls ?: currentRuntimeControls(snapshot)
+            sendPromptInternal(
+                serverId = serverId,
+                sessionId = sessionId,
+                composedPrompt = composedPrompt.trim(),
+                model = controls.model,
+                reasoningEffort = controls.reasoningEffort,
+            )
             _uiState.update {
                 val afterComposer =
                     if (clearComposer) {
@@ -599,9 +797,25 @@ class SessionDetailViewModel(application: Application) : AndroidViewModel(applic
         serverId: String,
         sessionId: String?,
         draftCwd: String? = null,
+        model: String? = null,
+        reasoningEffort: String? = null,
     ) {
         viewModelScope.launch {
             val snapshot = _uiState.value
+            val runtimeControls = resolveRuntimeControls(
+                snapshot = snapshot,
+                model = model,
+                reasoningEffort = reasoningEffort,
+            )
+            if (model != null || reasoningEffort != null) {
+                _uiState.update { state ->
+                    state.copy(
+                        selectedModel = runtimeControls.model,
+                        selectedReasoningEffort = runtimeControls.reasoningEffort,
+                        runtimeControlsInitialized = true,
+                    )
+                }
+            }
             val rawPrompt = snapshot.prompt.trim()
             if (rawPrompt.isBlank() || snapshot.sending || snapshot.liveRun?.status == "running" || snapshot.liveRun?.status == "pending") {
                 return@launch
@@ -617,6 +831,14 @@ class SessionDetailViewModel(application: Application) : AndroidViewModel(applic
                         cwd = draftCwd,
                         rawPrompt = rawPrompt,
                         localAttachments = snapshot.pendingLocalAttachments,
+                        runtimeControls = runtimeControls,
+                    )
+                } else if (hasExplicitRuntimeControls(snapshot, model, reasoningEffort)) {
+                    createSession(
+                        serverId = serverId,
+                        cwd = draftCwd,
+                        prompt = rawPrompt,
+                        runtimeControls = runtimeControls,
                     )
                 } else {
                     createSession(serverId, draftCwd, rawPrompt)
@@ -630,6 +852,7 @@ class SessionDetailViewModel(application: Application) : AndroidViewModel(applic
                 rawPrompt = rawPrompt,
                 composedPrompt = buildAttachmentPrompt(rawPrompt, snapshot.pendingArtifacts),
                 clearComposer = true,
+                runtimeControls = runtimeControls,
             )
         }
     }
@@ -638,6 +861,8 @@ class SessionDetailViewModel(application: Application) : AndroidViewModel(applic
         serverId: String,
         sessionId: String,
         composedPrompt: String,
+        model: String? = null,
+        reasoningEffort: String? = null,
     ) {
         withServerClient(serverId) { handle ->
             handle.client.startLiveRun(
@@ -645,6 +870,8 @@ class SessionDetailViewModel(application: Application) : AndroidViewModel(applic
                 hostId = SESSION_HOST_ID,
                 sessionId = sessionId,
                 prompt = composedPrompt,
+                model = model,
+                reasoningEffort = reasoningEffort,
             )
         }
     }
@@ -682,22 +909,115 @@ class SessionDetailViewModel(application: Application) : AndroidViewModel(applic
                 val liveDeferred = async(Dispatchers.IO) {
                     handle.client.getLiveRun(handle.token, SESSION_HOST_ID, sessionId)
                 }
+                val repoDeferred = async(Dispatchers.IO) {
+                    runCatching {
+                        handle.client.getRepoStatus(handle.token, SESSION_HOST_ID, sessionId).repoStatus
+                    }.getOrNull()
+                }
                 val session = sessionDeferred.await()
                 val liveRun = liveDeferred.await()
+                val repoStatus = repoDeferred.await()
                 _uiState.update { state ->
                     state.copy(
                         session = session.session,
+                        repoStatus = repoStatus,
                         messages = session.messages,
                         liveRun = liveRun,
                     )
                 }
+                seedRuntimeControlsFromRun(liveRun)
                 session
+            }
+            if (_uiState.value.liveRun?.status !in activeRunStatuses) {
+                maybeDispatchQueuedPrompt(serverId, sessionId)
             }
             if (_uiState.value.session == null) {
                 _uiState.update { state ->
                     state.copy(
                         session = detail.session,
                         messages = detail.messages,
+                    )
+                }
+            }
+        }
+    }
+
+    private fun performRepoAction(
+        serverId: String,
+        sessionId: String,
+        action: RepoActionRequest,
+    ) {
+        viewModelScope.launch {
+            _uiState.update {
+                it.copy(
+                    repoActionBusy = true,
+                    repoActionSummary = null,
+                    error = null,
+                )
+            }
+            try {
+                val response = withServerClient(serverId) { handle ->
+                    handle.client.performRepoAction(
+                        token = handle.token,
+                        hostId = SESSION_HOST_ID,
+                        sessionId = sessionId,
+                        action = action,
+                    )
+                }
+                applyRepoActionResponse(response)
+            } catch (e: Exception) {
+                _uiState.update {
+                    it.copy(error = userFacingMessage(e, "仓库操作失败"))
+                }
+            } finally {
+                _uiState.update { it.copy(repoActionBusy = false) }
+            }
+        }
+    }
+
+    private fun applyRepoActionResponse(response: RepoActionResponse) {
+        _uiState.update {
+            it.copy(
+                repoStatus = response.repoStatus,
+                repoActionSummary = response.summary,
+                error = null,
+            )
+        }
+    }
+
+    private fun maybeDispatchQueuedPrompt(serverId: String, sessionId: String) {
+        val snapshot = _uiState.value
+        if (queuedDispatchJob?.isActive == true) return
+        if (snapshot.sending) return
+        if (snapshot.liveRun?.status in activeRunStatuses) return
+        val nextQueuedPrompt = snapshot.queuedPrompts.firstOrNull() ?: return
+
+        queuedDispatchJob = viewModelScope.launch {
+            _uiState.update { state ->
+                state.copy(
+                    queuedPrompts = state.queuedPrompts.filterNot { it.id == nextQueuedPrompt.id },
+                )
+            }
+
+            val success = submitPrompt(
+                serverId = serverId,
+                sessionId = sessionId,
+                rawPrompt = nextQueuedPrompt.rawPrompt,
+                composedPrompt = buildAttachmentPrompt(
+                    nextQueuedPrompt.rawPrompt,
+                    nextQueuedPrompt.artifacts,
+                ),
+                clearComposer = false,
+                runtimeControls = RuntimeControls(
+                    model = nextQueuedPrompt.model,
+                    reasoningEffort = nextQueuedPrompt.reasoningEffort,
+                ),
+            )
+
+            if (!success) {
+                _uiState.update { state ->
+                    state.copy(
+                        queuedPrompts = listOf(nextQueuedPrompt) + state.queuedPrompts,
                     )
                 }
             }
@@ -726,23 +1046,35 @@ class SessionDetailViewModel(application: Application) : AndroidViewModel(applic
         serverId: String,
         cwd: String,
         prompt: String,
+        runtimeControls: RuntimeControls? = null,
     ): String? {
         _uiState.update { it.copy(sending = true, error = null) }
         return try {
+            val snapshot = _uiState.value
+            val effectiveRuntimeControls = runtimeControls ?: currentRuntimeControls(snapshot)
+            val composedPrompt = buildAttachmentPrompt(prompt, snapshot.pendingArtifacts)
             val createdSessionId = withServerClient(serverId) { handle ->
                 handle.client.createSession(
                     token = handle.token,
                     hostId = SESSION_HOST_ID,
                     cwd = cwd,
-                    prompt = prompt,
+                    prompt = null,
                 ).sessionId
             }
+            _uiState.update { it.copy(createdSessionId = createdSessionId) }
+            sendPromptInternal(
+                serverId = serverId,
+                sessionId = createdSessionId,
+                composedPrompt = composedPrompt,
+                model = effectiveRuntimeControls.model,
+                reasoningEffort = effectiveRuntimeControls.reasoningEffort,
+            )
             refreshSessionAndLive(serverId, createdSessionId)
             _uiState.update {
                 it.copy(
                     createdSessionId = createdSessionId,
                     lastSubmittedPrompt = prompt.trim(),
-                    lastSubmittedPromptWithAttachments = prompt.trim(),
+                    lastSubmittedPromptWithAttachments = composedPrompt.trim(),
                     prompt = "",
                     pendingArtifacts = emptyList(),
                 )
@@ -766,6 +1098,7 @@ class SessionDetailViewModel(application: Application) : AndroidViewModel(applic
         cwd: String,
         rawPrompt: String,
         localAttachments: List<PendingLocalAttachment>,
+        runtimeControls: RuntimeControls? = null,
     ): String? {
         _uiState.update { it.copy(sending = true, uploading = true, error = null) }
         return try {
@@ -794,7 +1127,14 @@ class SessionDetailViewModel(application: Application) : AndroidViewModel(applic
             }
 
             val composedPrompt = buildAttachmentPrompt(rawPrompt, uploadedArtifacts)
-            sendPromptInternal(serverId, createdSessionId, composedPrompt)
+            val effectiveRuntimeControls = runtimeControls ?: currentRuntimeControls(_uiState.value)
+            sendPromptInternal(
+                serverId = serverId,
+                sessionId = createdSessionId,
+                composedPrompt = composedPrompt,
+                model = effectiveRuntimeControls.model,
+                reasoningEffort = effectiveRuntimeControls.reasoningEffort,
+            )
             refreshSessionAndLive(serverId, createdSessionId)
 
             _uiState.update {
@@ -821,7 +1161,63 @@ class SessionDetailViewModel(application: Application) : AndroidViewModel(applic
     }
 
     override fun onCleared() {
+        queuedDispatchJob?.cancel()
         stopLiveRunStream()
         super.onCleared()
+    }
+
+    private fun resolveRuntimeControls(
+        snapshot: SessionDetailUiState,
+        model: String?,
+        reasoningEffort: String?,
+    ): RuntimeControls {
+        val normalizedModel = normalizeRuntimeControl(model)
+        val normalizedReasoningEffort = normalizeRuntimeControl(reasoningEffort)
+        return RuntimeControls(
+            model = normalizedModel ?: currentRuntimeControls(snapshot).model,
+            reasoningEffort = normalizedReasoningEffort ?: currentRuntimeControls(snapshot).reasoningEffort,
+        )
+    }
+
+    private fun hasExplicitRuntimeControls(
+        snapshot: SessionDetailUiState,
+        model: String?,
+        reasoningEffort: String?,
+    ): Boolean {
+        val controls = resolveRuntimeControls(snapshot, model, reasoningEffort)
+        return controls.model != null || controls.reasoningEffort != null
+    }
+
+    private fun currentRuntimeControls(snapshot: SessionDetailUiState): RuntimeControls {
+        val selectedModel = normalizeRuntimeControl(snapshot.selectedModel)
+        val selectedReasoningEffort = normalizeRuntimeControl(snapshot.selectedReasoningEffort)
+        return if (snapshot.runtimeControlsInitialized) {
+            RuntimeControls(
+                model = selectedModel,
+                reasoningEffort = selectedReasoningEffort,
+            )
+        } else {
+            RuntimeControls(
+                model = selectedModel ?: normalizeRuntimeControl(snapshot.liveRun?.model),
+                reasoningEffort = selectedReasoningEffort ?: normalizeRuntimeControl(snapshot.liveRun?.reasoningEffort),
+            )
+        }
+    }
+
+    private fun seedRuntimeControlsFromRun(liveRun: Run?) {
+        if (liveRun == null) return
+        _uiState.update { state ->
+            if (state.runtimeControlsInitialized) {
+                state
+            } else {
+                val seededModel = state.selectedModel ?: normalizeRuntimeControl(liveRun.model)
+                val seededReasoningEffort = state.selectedReasoningEffort ?: normalizeRuntimeControl(liveRun.reasoningEffort)
+                state.copy(
+                    selectedModel = seededModel,
+                    selectedReasoningEffort = seededReasoningEffort,
+                    runtimeControlsInitialized = true,
+                )
+            }
+        }
     }
 }

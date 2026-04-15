@@ -46,3 +46,37 @@ data class StartLiveRunResponse(
 data class StopLiveRunResponse(
     val ok: Boolean,
 )
+
+@Serializable
+data class RepoStatus(
+    val isRepo: Boolean? = null,
+    val branch: String? = null,
+    val rootPath: String? = null,
+    val cwd: String? = null,
+    val detached: Boolean? = null,
+    val aheadBy: Int? = null,
+    val behindBy: Int? = null,
+    val dirtyCount: Int? = null,
+    val stagedCount: Int? = null,
+    val unstagedCount: Int? = null,
+    val untrackedCount: Int? = null,
+)
+
+@Serializable
+data class RepoStatusResponse(
+    val repoStatus: RepoStatus,
+)
+
+@Serializable
+data class RepoActionRequest(
+    val action: String,
+    val branch: String? = null,
+    val message: String? = null,
+)
+
+@Serializable
+data class RepoActionResponse(
+    val ok: Boolean,
+    val summary: String,
+    val repoStatus: RepoStatus,
+)

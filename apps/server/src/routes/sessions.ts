@@ -1,5 +1,7 @@
 import crypto from "node:crypto";
+import { execFile } from "node:child_process";
 import type { FastifyInstance, FastifyRequest, FastifyReply } from "fastify";
+import { promisify } from "node:util";
 import {
   ListSessionsParams,
   SessionParams,
@@ -7,6 +9,11 @@ import {
   UpdateSessionTitleRequest,
   ArchiveSessionsRequest,
   SessionDetailResponse,
+  RepoActionRequest,
+  RepoActionResponse,
+  RepoStatusResponse,
+  type RepoStatus,
+  type RepoActionRequest as RepoActionRequestBody,
   type ListSessionsResponse,
   type CreateSessionResponse,
   type UpdateSessionTitleResponse,
@@ -24,6 +31,7 @@ const EMPTY_SESSION_BOOTSTRAP_PROMPT =
 const SESSION_READY_TIMEOUT_MS = 5_000;
 const SESSION_READY_POLL_MS = 150;
 const SESSION_SHELL_EXIT_TIMEOUT_MS = 5_000;
+const execFileAsync = promisify(execFile);
 
 /**
  * Session route group — list and detail for Phase 1 single-host.
@@ -123,6 +131,77 @@ export function sessionRoutes(adapter: CodexAdapter, runManager?: RunManager) {
         };
 
         return reply.send(SessionDetailResponse.parse(body));
+      },
+    );
+
+    // --- GET /api/hosts/:hostId/sessions/:sessionId/repo-status ---
+    app.get(
+      "/api/hosts/:hostId/sessions/:sessionId/repo-status",
+      async (request: FastifyRequest, reply: FastifyReply) => {
+        const parsed = SessionParams.safeParse(request.params);
+        if (!parsed.success) {
+          return reply.status(400).send({ error: "Invalid route params" });
+        }
+
+        if (parsed.data.hostId !== LOCAL_HOST_ID) {
+          return reply
+            .status(404)
+            .send({ error: `Host '${parsed.data.hostId}' not found` });
+        }
+
+        const detail = await adapter.getSessionDetail(parsed.data.sessionId);
+        if (!detail) {
+          return reply.status(404).send({
+            error: `Session '${parsed.data.sessionId}' not found`,
+          });
+        }
+
+        const repoStatus = await getRepoStatusForCwd(detail.cwd);
+        const body = RepoStatusResponse.parse({ repoStatus });
+        return reply.send(body);
+      },
+    );
+
+    // --- POST /api/hosts/:hostId/sessions/:sessionId/repo-action ---
+    app.post(
+      "/api/hosts/:hostId/sessions/:sessionId/repo-action",
+      async (request: FastifyRequest, reply: FastifyReply) => {
+        const parsed = SessionParams.safeParse(request.params);
+        if (!parsed.success) {
+          return reply.status(400).send({ error: "Invalid route params" });
+        }
+
+        if (parsed.data.hostId !== LOCAL_HOST_ID) {
+          return reply
+            .status(404)
+            .send({ error: `Host '${parsed.data.hostId}' not found` });
+        }
+
+        const detail = await adapter.getSessionDetail(parsed.data.sessionId);
+        if (!detail) {
+          return reply.status(404).send({
+            error: `Session '${parsed.data.sessionId}' not found`,
+          });
+        }
+
+        const bodyParsed = RepoActionRequest.safeParse(request.body);
+        if (!bodyParsed.success) {
+          return reply.status(400).send({ error: "Invalid request body" });
+        }
+
+        try {
+          const result = await performRepoAction(detail.cwd, bodyParsed.data);
+          const body = RepoActionResponse.parse({
+            ok: true,
+            summary: result.summary,
+            repoStatus: result.repoStatus,
+          });
+          return reply.send(body);
+        } catch (error) {
+          const message =
+            error instanceof Error ? error.message : "Repo action failed";
+          return reply.status(409).send({ error: message });
+        }
       },
     );
 
@@ -349,4 +428,206 @@ function getPreferredTitle(
 ): string | null {
   if (!storedTitle) return null;
   return storedTitle === sessionId ? null : storedTitle;
+}
+
+async function getRepoStatusForCwd(cwd: string | null): Promise<RepoStatus> {
+  const safeCwd = cwd?.trim();
+  if (!safeCwd) {
+    return nonRepoStatus(safeCwd ?? "");
+  }
+
+  const rootPath = await runGitCommand(safeCwd, ["rev-parse", "--show-toplevel"]);
+  if (!rootPath) {
+    return nonRepoStatus(safeCwd);
+  }
+
+  const porcelain = await runGitCommand(safeCwd, [
+    "status",
+    "--porcelain=v1",
+    "--branch",
+    "--untracked-files=all",
+  ]);
+  if (!porcelain) {
+    return nonRepoStatus(safeCwd);
+  }
+
+  return parseRepoStatus(safeCwd, rootPath, porcelain);
+}
+
+async function runGitCommand(
+  cwd: string,
+  args: string[],
+): Promise<string | null> {
+  try {
+    const { stdout } = await execFileAsync("git", args, {
+      cwd,
+      encoding: "utf8",
+      maxBuffer: 1024 * 1024,
+      timeout: 5_000,
+    });
+    return stdout.trimEnd();
+  } catch {
+    return null;
+  }
+}
+
+function parseRepoStatus(
+  cwd: string,
+  rootPath: string,
+  porcelain: string,
+): RepoStatus {
+  const lines = porcelain.split(/\r?\n/).filter((line) => line.length > 0);
+  const branchLine = lines[0] ?? "##";
+  const branchInfo = branchLine.startsWith("## ") ? branchLine.slice(3) : branchLine;
+
+  const detached = branchInfo.startsWith("HEAD");
+  const branch = detached
+    ? null
+    : branchInfo.split("...")[0].split(" [")[0].trim() || null;
+
+  let aheadBy: number | null = null;
+  let behindBy: number | null = null;
+  if (!detached) {
+    const aheadMatch = branchInfo.match(/ahead (\d+)/);
+    const behindMatch = branchInfo.match(/behind (\d+)/);
+    aheadBy = aheadMatch ? Number(aheadMatch[1]) : null;
+    behindBy = behindMatch ? Number(behindMatch[1]) : null;
+  }
+
+  let dirtyCount = 0;
+  let stagedCount = 0;
+  let unstagedCount = 0;
+  let untrackedCount = 0;
+  for (const line of lines.slice(1)) {
+    if (line.startsWith("??")) {
+      untrackedCount += 1;
+    } else {
+      dirtyCount += 1;
+      const indexStatus = line[0] ?? " ";
+      const worktreeStatus = line[1] ?? " ";
+      if (indexStatus !== " " && indexStatus !== "?") {
+        stagedCount += 1;
+      }
+      if (worktreeStatus !== " " && worktreeStatus !== "?") {
+        unstagedCount += 1;
+      }
+    }
+  }
+
+  return {
+    isRepo: true,
+    cwd,
+    rootPath,
+    branch,
+    detached,
+    aheadBy,
+    behindBy,
+    dirtyCount,
+    stagedCount,
+    unstagedCount,
+    untrackedCount,
+  };
+}
+
+function nonRepoStatus(cwd: string): RepoStatus {
+  return {
+    isRepo: false,
+    cwd,
+    rootPath: null,
+    branch: null,
+    detached: false,
+    aheadBy: null,
+    behindBy: null,
+    dirtyCount: 0,
+    stagedCount: 0,
+    unstagedCount: 0,
+    untrackedCount: 0,
+  };
+}
+
+async function performRepoAction(
+  cwd: string | null,
+  action: RepoActionRequestBody,
+): Promise<{ summary: string; repoStatus: RepoStatus }> {
+  const safeCwd = cwd?.trim();
+  if (!safeCwd) {
+    throw new Error("会话没有可用的项目目录");
+  }
+
+  const currentStatus = await getRepoStatusForCwd(safeCwd);
+  if (!currentStatus.isRepo) {
+    throw new Error("当前会话目录不是 Git 仓库");
+  }
+
+  switch (action.action) {
+    case "checkout": {
+      await assertValidBranchName(safeCwd, action.branch);
+      await runGitCommandStrict(safeCwd, ["checkout", action.branch]);
+      break;
+    }
+    case "createBranch": {
+      await assertValidBranchName(safeCwd, action.branch);
+      await runGitCommandStrict(safeCwd, ["checkout", "-b", action.branch]);
+      break;
+    }
+    case "commit": {
+      if ((currentStatus.dirtyCount ?? 0) === 0 && (currentStatus.untrackedCount ?? 0) === 0) {
+        throw new Error("当前没有可提交的改动");
+      }
+      await runGitCommandStrict(safeCwd, ["add", "-A"]);
+      await runGitCommandStrict(safeCwd, ["commit", "-m", action.message]);
+      break;
+    }
+    case "push": {
+      if (currentStatus.detached || !currentStatus.branch) {
+        throw new Error("Detached HEAD 状态下不能直接推送");
+      }
+      await runGitCommandStrict(safeCwd, ["push", "-u", "origin", currentStatus.branch]);
+      break;
+    }
+  }
+
+  const repoStatus = await getRepoStatusForCwd(safeCwd);
+  return {
+    summary: repoActionSummary(action),
+    repoStatus,
+  };
+}
+
+async function assertValidBranchName(cwd: string, branch: string): Promise<void> {
+  await runGitCommandStrict(cwd, ["check-ref-format", "--branch", branch]);
+}
+
+async function runGitCommandStrict(
+  cwd: string,
+  args: string[],
+): Promise<string> {
+  try {
+    const { stdout } = await execFileAsync("git", args, {
+      cwd,
+      encoding: "utf8",
+      maxBuffer: 1024 * 1024,
+      timeout: 10_000,
+    });
+    return stdout.trim();
+  } catch (error) {
+    const stderr = (error as { stderr?: string }).stderr?.trim();
+    const stdout = (error as { stdout?: string }).stdout?.trim();
+    const message = stderr || stdout || (error instanceof Error ? error.message : "Git 命令执行失败");
+    throw new Error(message);
+  }
+}
+
+function repoActionSummary(action: RepoActionRequestBody): string {
+  switch (action.action) {
+    case "checkout":
+      return `已切换到分支 ${action.branch}`;
+    case "createBranch":
+      return `已创建并切换到 ${action.branch}`;
+    case "commit":
+      return "已提交当前改动";
+    case "push":
+      return "已推送当前分支";
+  }
+  return "已执行仓库操作";
 }

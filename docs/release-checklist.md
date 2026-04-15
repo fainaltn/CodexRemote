@@ -1,15 +1,17 @@
 # Release Checklist
 
-## Release focus for v0.1.2
+## Release focus for v0.1.3
 
-- Android session detail is now a native Compose experience rather than a WebView-backed detail page
-- Android can change the current service password in-app and re-align the connection after restart
-- launchd startup now uses launcher scripts under `~/Library/Application Support/CodexRemote/launchd/`
-- Android APK publish flow now produces a dated raw APK (`CodexRemote_v*.apk`) instead of a zip wrapper
+- Android session detail now behaves like a stronger mobile control console rather than a plain chat view
+- Android supports runtime controls for model and reasoning effort before sending a turn
+- Android session detail shows read-only repo status plus repo actions for branch create/switch, commit, and push
+- Session timeline readability is improved with clearer waiting, degraded-stream, failure, and history-round states
+- Codex session discovery now aggregates metadata and messages across multiple rollout files for one session id
 
 ## Verified in this workspace
 
 - `cd apps/server && ../../node_modules/.bin/vitest run src/__tests__/codex-cli-spawn.test.ts src/__tests__/codex-local-new-session.test.ts src/__tests__/codex-local-start-run.test.ts`
+- `cd apps/server && ../../node_modules/.bin/vitest run src/__tests__/codex-sessions.test.ts src/__tests__/repo-status.test.ts src/__tests__/repo-actions.test.ts`
 - `cd apps/server && ../../node_modules/.bin/tsc --noEmit`
 - `npm run build --workspace @codexremote/shared`
 - `npm test --workspace @codexremote/web`
@@ -18,6 +20,9 @@
 - `cd apps/android && ANDROID_HOME=/opt/homebrew/share/android-commandlinetools ANDROID_SDK_ROOT=/opt/homebrew/share/android-commandlinetools ./gradlew :app:assembleDebug`
 - resumed-session manual check: resume an existing thread and verify it can create a file under the project root
 - Android manual check: session detail shows final replies without requiring re-entry after a completed run
+- Android manual check: queued follow-up prompt sends after the active run finishes
+- Android manual check: runtime control chips change the next run's model / reasoning settings
+- Android manual check: repo surface shows branch / dirty-state and repo actions complete successfully when no run is active
 - Android manual check: settings can change the server password, the service restarts, and the app can reconnect with the new password
 
 ## Before publishing to GitHub

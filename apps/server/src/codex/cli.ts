@@ -305,7 +305,7 @@ async function findSessionFiles(dir: string): Promise<string[]> {
  * session-state tree.
  */
 export async function sessionDirExists(codexSessionId: string): Promise<boolean> {
-  return (await findSessionFileById(codexSessionId)) !== null;
+  return (await findSessionFilesById(codexSessionId)).length > 0;
 }
 
 /**
@@ -317,8 +317,8 @@ export async function readSessionMeta(codexSessionId: string): Promise<{
   cwd: string | null;
   lastActivityAt: string | null;
 }> {
-  const filePath = await findSessionFileById(codexSessionId);
-  if (!filePath) {
+  const matches = await findSessionFilesById(codexSessionId);
+  if (matches.length === 0) {
     return {
       title: null,
       lastPreview: null,
@@ -327,121 +327,70 @@ export async function readSessionMeta(codexSessionId: string): Promise<{
     };
   }
 
-  const parsed = await readSessionFile(filePath);
+  let merged: RawSessionEntry | undefined;
+  for (const match of matches) {
+    const next: RawSessionEntry = {
+      id: match.parsed.id ?? codexSessionId,
+      cwd: match.parsed.cwd,
+      title: match.parsed.title,
+      lastPreview: match.parsed.lastPreview,
+      lastActivityAt: match.lastActivityAt,
+      isSubagent: match.parsed.isSubagent,
+    };
+    merged = mergeSessionEntries(merged, next);
+  }
+
   return {
-    title: parsed.title,
-    lastPreview: parsed.lastPreview,
-    cwd: parsed.cwd,
-    lastActivityAt: parsed.lastActivityAt,
+    title: merged?.title ?? null,
+    lastPreview: merged?.lastPreview ?? null,
+    cwd: merged?.cwd ?? null,
+    lastActivityAt: merged?.lastActivityAt ?? null,
   };
 }
 
-async function findSessionFileById(codexSessionId: string): Promise<string | null> {
+interface MatchedSessionFile {
+  filePath: string;
+  parsed: ParsedSessionFile;
+  lastActivityAt: string | null;
+}
+
+async function findSessionFilesById(
+  codexSessionId: string,
+): Promise<MatchedSessionFile[]> {
   const files = await findSessionFiles(codexStateDir());
+  const matches: MatchedSessionFile[] = [];
   for (const filePath of files) {
     try {
       const parsed = await readSessionFile(filePath);
-      if (parsed.id === codexSessionId) return filePath;
+      if (parsed.id !== codexSessionId) continue;
+      const fileStat = await stat(filePath);
+      matches.push({
+        filePath,
+        parsed,
+        lastActivityAt: parsed.lastActivityAt ?? fileStat.mtime.toISOString(),
+      });
     } catch {
       // ignore malformed files
     }
   }
-  return null;
+  matches.sort((a, b) =>
+    (a.lastActivityAt ?? "").localeCompare(b.lastActivityAt ?? ""),
+  );
+  return matches;
 }
 
 export async function readSessionMessages(
   codexSessionId: string,
   limit = 80,
 ): Promise<RawSessionMessage[]> {
-  const filePath = await findSessionFileById(codexSessionId);
-  if (!filePath) return [];
+  const matches = await findSessionFilesById(codexSessionId);
+  if (matches.length === 0) return [];
 
   try {
-    const raw = await readFile(filePath, "utf-8");
     const messages: ParsedHistoryMessage[] = [];
-
-    for (const line of raw.split("\n")) {
-      if (!line.trim()) continue;
-      try {
-        const parsed = JSON.parse(line) as {
-          timestamp?: unknown;
-          type?: unknown;
-          payload?: Record<string, unknown>;
-        };
-        const timestamp =
-          typeof parsed.timestamp === "string"
-            ? parsed.timestamp
-            : new Date().toISOString();
-
-        if (parsed.type === "event_msg" && parsed.payload) {
-          const eventType = parsed.payload["type"];
-          if (
-            eventType === "user_message" ||
-            eventType === "agent_message" ||
-            eventType === "system_message"
-          ) {
-            const role =
-              eventType === "user_message"
-              ? "user"
-              : eventType === "agent_message"
-                ? "assistant"
-                : "system";
-            const text = extractVisibleTextRaw(parsed.payload["message"]);
-            if (!text) continue;
-            const displayText = normalizeDisplayMessage(role, text);
-            if (!displayText) continue;
-            pushParsedMessage(messages, {
-              id: `${timestamp}-${messages.length}`,
-              role,
-              kind: "message",
-              text: displayText,
-              createdAt: timestamp,
-              source: "event_msg",
-            });
-            continue;
-          }
-
-          if (eventType === "agent_reasoning") {
-            const text = extractVisibleTextRaw(parsed.payload["text"]);
-            if (!text) continue;
-            pushParsedMessage(messages, {
-              id: `${timestamp}-${messages.length}`,
-              role: "assistant",
-              kind: "reasoning",
-              text,
-              createdAt: timestamp,
-              source: "event_msg",
-            });
-            continue;
-          }
-        }
-
-        if (parsed.type === "response_item" && parsed.payload) {
-          const payloadType = parsed.payload["type"];
-          const payloadRole = parsed.payload["role"];
-          if (payloadType === "message") {
-            const role =
-              payloadRole === "user" || payloadRole === "assistant"
-                ? payloadRole
-                : "system";
-            const text = extractVisibleTextRaw(parsed.payload["content"]);
-            if (!text) continue;
-            const displayText = normalizeDisplayMessage(role, text);
-            if (!displayText) continue;
-            pushParsedMessage(messages, {
-              id: `${timestamp}-${messages.length}`,
-              role,
-              kind: "message",
-              text: displayText,
-              createdAt: timestamp,
-              source: "response_item",
-            });
-            continue;
-          }
-        }
-      } catch {
-        // ignore malformed lines
-      }
+    for (const match of matches) {
+      const raw = await readFile(match.filePath, "utf-8");
+      appendParsedMessages(messages, raw);
     }
 
     return collapseSessionMessages(messages)
@@ -451,6 +400,95 @@ export async function readSessionMessages(
       .slice(-limit);
   } catch {
     return [];
+  }
+}
+
+function appendParsedMessages(
+  messages: ParsedHistoryMessage[],
+  raw: string,
+): void {
+  for (const line of raw.split("\n")) {
+    if (!line.trim()) continue;
+    try {
+      const parsed = JSON.parse(line) as {
+        timestamp?: unknown;
+        type?: unknown;
+        payload?: Record<string, unknown>;
+      };
+      const timestamp =
+        typeof parsed.timestamp === "string"
+          ? parsed.timestamp
+          : new Date().toISOString();
+
+      if (parsed.type === "event_msg" && parsed.payload) {
+        const eventType = parsed.payload["type"];
+        if (
+          eventType === "user_message" ||
+          eventType === "agent_message" ||
+          eventType === "system_message"
+        ) {
+          const role =
+            eventType === "user_message"
+              ? "user"
+              : eventType === "agent_message"
+                ? "assistant"
+                : "system";
+          const text = extractVisibleTextRaw(parsed.payload["message"]);
+          if (!text) continue;
+          const displayText = normalizeDisplayMessage(role, text);
+          if (!displayText) continue;
+          pushParsedMessage(messages, {
+            id: `${timestamp}-${messages.length}`,
+            role,
+            kind: "message",
+            text: displayText,
+            createdAt: timestamp,
+            source: "event_msg",
+          });
+          continue;
+        }
+
+        if (eventType === "agent_reasoning") {
+          const text = extractVisibleTextRaw(parsed.payload["text"]);
+          if (!text) continue;
+          pushParsedMessage(messages, {
+            id: `${timestamp}-${messages.length}`,
+            role: "assistant",
+            kind: "reasoning",
+            text,
+            createdAt: timestamp,
+            source: "event_msg",
+          });
+          continue;
+        }
+      }
+
+      if (parsed.type === "response_item" && parsed.payload) {
+        const payloadType = parsed.payload["type"];
+        const payloadRole = parsed.payload["role"];
+        if (payloadType === "message") {
+          const role =
+            payloadRole === "user" || payloadRole === "assistant"
+              ? payloadRole
+              : "system";
+          const text = extractVisibleTextRaw(parsed.payload["content"]);
+          if (!text) continue;
+          const displayText = normalizeDisplayMessage(role, text);
+          if (!displayText) continue;
+          pushParsedMessage(messages, {
+            id: `${timestamp}-${messages.length}`,
+            role,
+            kind: "message",
+            text: displayText,
+            createdAt: timestamp,
+            source: "response_item",
+          });
+          continue;
+        }
+      }
+    } catch {
+      // ignore malformed lines
+    }
   }
 }
 

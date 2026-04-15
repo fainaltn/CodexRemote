@@ -46,7 +46,6 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.FilledTonalIconButton
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -529,7 +528,7 @@ fun SessionListScreen(
                             themePreference = themePreference,
                             onToggle = onToggleTheme,
                         )
-                        FilledTonalIconButton(
+                        IconButton(
                             onClick = onNewProject,
                             modifier = Modifier.size(52.dp),
                         ) {

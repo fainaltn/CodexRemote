@@ -166,6 +166,7 @@ internal fun UserMessageBubble(
 internal fun AssistantReplyBlock(
     output: String?,
     isActive: Boolean,
+    status: String? = null,
     model: String? = null,
     startedAt: String? = null,
     finishedAt: String? = null,
@@ -175,7 +176,12 @@ internal fun AssistantReplyBlock(
     onReusePrompt: (() -> Unit)? = null,
     modifier: Modifier = Modifier,
 ) {
-    val accentColor = MaterialTheme.colorScheme.primary
+    val terminalStatus = status?.takeIf { it in terminalRunStatuses && it != "completed" }
+    val accentColor = when (terminalStatus) {
+        null -> MaterialTheme.colorScheme.primary
+        else -> MaterialTheme.colorScheme.error
+    }
+    val renderOutput = terminalStatus == null || !output.isNullOrBlank()
     var showSheet by remember { mutableStateOf(false) }
     val clipboardManager = LocalClipboardManager.current
 
@@ -200,7 +206,7 @@ internal fun AssistantReplyBlock(
                     .width(3.dp)
                     .heightIn(min = 48.dp)
                     .drawBehind {
-                        if (isActive) {
+                        if (isActive || terminalStatus != null) {
                             drawRect(accentColor)
                         }
                     }
@@ -212,26 +218,38 @@ internal fun AssistantReplyBlock(
                 modifier = Modifier.weight(1f),
                 verticalArrangement = Arrangement.spacedBy(4.dp),
             ) {
-                // Streaming text with typewriter
-                StreamingTextRenderer(
-                    targetText = output.orEmpty(),
-                    active = isActive,
-                    modifier = Modifier.fillMaxWidth(),
-                )
+                terminalStatus?.let { statusValue ->
+                    TimelineNoticeCard(
+                        title = terminalRunTitle(statusValue),
+                        message = terminalRunMessage(statusValue, error),
+                        tone = TimelineNoticeTone.Error,
+                    )
+                }
 
-                // Error inline
-                error?.let { errorMsg ->
-                    Surface(
+                // Streaming text with typewriter
+                if (renderOutput) {
+                    StreamingTextRenderer(
+                        targetText = output.orEmpty(),
+                        active = isActive,
                         modifier = Modifier.fillMaxWidth(),
-                        shape = RoundedCornerShape(12.dp),
-                        color = MaterialTheme.colorScheme.errorContainer,
-                    ) {
-                        Text(
-                            text = errorMsg,
-                            modifier = Modifier.padding(12.dp),
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.onErrorContainer,
-                        )
+                    )
+                }
+
+                if (terminalStatus == null) {
+                    // Error inline
+                    error?.let { errorMsg ->
+                        Surface(
+                            modifier = Modifier.fillMaxWidth(),
+                            shape = RoundedCornerShape(12.dp),
+                            color = MaterialTheme.colorScheme.errorContainer,
+                        ) {
+                            Text(
+                                text = errorMsg,
+                                modifier = Modifier.padding(12.dp),
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onErrorContainer,
+                            )
+                        }
                     }
                 }
 
@@ -484,21 +502,26 @@ internal fun WaitingReplyPlaceholder(
     Column(
         modifier = modifier
             .fillMaxWidth()
-            .padding(4.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp),
+            .padding(top = 4.dp),
+        verticalArrangement = Arrangement.spacedBy(10.dp),
     ) {
-        Text(
-            text = if (draft) {
-                "输入首条消息后会立即开始处理"
+        TimelineNoticeCard(
+            title = if (draft) "等待首条消息" else "等待新的回复",
+            message = if (draft) {
+                "输入首条消息后，这里会开始显示当前会话的运行过程。"
             } else {
-                "发送一条消息来继续对话"
+                "发送一条消息后，回复和运行状态会在这里展开。"
             },
-            style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            footer = if (draft) {
+                "首条消息会创建会话并立即进入处理流程。"
+            } else {
+                "当前没有活跃运行时，这里会保持安静而不突兀。"
+            },
+            tone = TimelineNoticeTone.Neutral,
+            content = {
+                ShimmerBlock(lines = if (draft) 2 else 3)
+            },
         )
-        if (!draft) {
-            ShimmerBlock(lines = 2)
-        }
     }
 }
 

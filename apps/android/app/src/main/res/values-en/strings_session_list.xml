@@ -30,6 +30,16 @@
     <string name="session_list_error_hint">Please refresh and try again, or check the network connection.</string>
     <string name="session_list_error_retry">Reconnect</string>
     <string name="session_list_empty_projects_title">No project folders yet</string>
+    <string name="session_list_empty_projects_message">Add a project path first, and the console will organize the sessions on this host.</string>
+    <string name="session_list_empty_projects_footer">You can also refresh from the top-right menu to confirm the current host status.</string>
+    <string name="session_list_empty_projects_action">New project</string>
+    <string name="session_list_loading_title">Organizing workspace navigation</string>
+    <string name="session_list_loading_message">Syncing project folders, recent sessions, and the current host control state.</string>
+    <string name="session_list_loading_footer">This usually only takes a few seconds.</string>
+    <string name="session_list_loading_state_label">Loading</string>
+    <string name="session_list_error_title">Workspace navigation failed to load</string>
+    <string name="session_list_error_footer">Once the host is reachable again, the list usually recovers after a refresh.</string>
+    <string name="session_list_error_state_label">Error</string>
 
     <string name="session_list_dialog_rename_title">Rename session</string>
     <string name="session_list_dialog_rename_label">Topic name</string>

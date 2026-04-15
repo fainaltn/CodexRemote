@@ -145,7 +145,19 @@ fun ServerListScreen(
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text(stringResource(R.string.app_name)) },
+                title = {
+                    Column {
+                        Text(
+                            text = stringResource(R.string.console_brand_label),
+                            style = MaterialTheme.typography.titleLarge,
+                        )
+                        Text(
+                            text = stringResource(R.string.server_list_top_subtitle),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                },
                 actions = {
                     ThemeToggleAction(
                         themePreference = themePreference,
@@ -185,25 +197,39 @@ fun ServerListScreen(
                 )
             }
         } else {
-            LazyColumn(
-                modifier = Modifier.padding(padding),
-                verticalArrangement = Arrangement.spacedBy(8.dp),
-                contentPadding = PaddingValues(16.dp),
-            ) {
-                items(servers, key = { it.id }) { server ->
-                    ServerCard(
-                        server = server,
-                        connectionState = connectionStates[server.id],
-                        onTap = {
-                            if (server.token != null) {
-                                onServerAuthenticated(server.id)
-                            } else {
-                                onSelectServer(server.id)
-                            }
-                        },
-                        onLogin = { onSelectServer(server.id) },
-                        onRefresh = { viewModel.refreshServer(server) },
-                    )
+            Column(modifier = Modifier.padding(padding)) {
+                TimelineNoticeCard(
+                    title = stringResource(R.string.server_list_intro_title),
+                    message = stringResource(R.string.server_list_intro_message),
+                    tone = TimelineNoticeTone.Neutral,
+                    modifier = Modifier.padding(start = 16.dp, top = 12.dp, end = 16.dp, bottom = 10.dp),
+                    footer = stringResource(R.string.server_list_intro_footer),
+                    content = {
+                        Button(onClick = onAddServer) {
+                            Text(stringResource(R.string.server_add_button))
+                        }
+                    },
+                )
+                LazyColumn(
+                    modifier = Modifier.fillMaxSize(),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                    contentPadding = PaddingValues(start = 16.dp, end = 16.dp, bottom = 16.dp),
+                ) {
+                    items(servers, key = { it.id }) { server ->
+                        ServerCard(
+                            server = server,
+                            connectionState = connectionStates[server.id],
+                            onTap = {
+                                if (server.token != null) {
+                                    onServerAuthenticated(server.id)
+                                } else {
+                                    onSelectServer(server.id)
+                                }
+                            },
+                            onLogin = { onSelectServer(server.id) },
+                            onRefresh = { viewModel.refreshServer(server) },
+                        )
+                    }
                 }
             }
         }

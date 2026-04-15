@@ -25,6 +25,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.Button
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
@@ -568,13 +569,17 @@ fun SessionListScreen(
                     )
                     Column {
                         Text(
+                            text = stringResource(R.string.console_brand_label),
+                            style = MaterialTheme.typography.titleLarge,
+                        )
+                        Text(
                             text = if (selectionMode) {
                                 stringResource(R.string.session_list_title_selected_sessions, selectedSessionIds.size)
                             } else {
                                 stringResource(R.string.session_list_title_project_folders)
                             },
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
+                            style = MaterialTheme.typography.labelLarge,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
                         Text(
                             text = when {
@@ -584,8 +589,6 @@ fun SessionListScreen(
                             },
                             style = MaterialTheme.typography.labelMedium,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
                         )
                     }
                 },
@@ -706,7 +709,20 @@ fun SessionListScreen(
                         .padding(padding),
                     contentAlignment = Alignment.Center,
                 ) {
-                    CircularProgressIndicator()
+                    TimelineNoticeCard(
+                        modifier = Modifier.padding(horizontal = 16.dp),
+                        title = stringResource(R.string.session_list_loading_title),
+                        message = stringResource(R.string.session_list_loading_message),
+                        footer = stringResource(R.string.session_list_loading_footer),
+                        tone = TimelineNoticeTone.Neutral,
+                        stateLabel = stringResource(R.string.session_list_loading_state_label),
+                        content = {
+                            CircularProgressIndicator(
+                                modifier = Modifier.size(22.dp),
+                                strokeWidth = 2.dp,
+                            )
+                        },
+                    )
                 }
             }
 
@@ -717,23 +733,19 @@ fun SessionListScreen(
                         .padding(padding),
                     contentAlignment = Alignment.Center,
                 ) {
-                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        Text(
-                            text = error ?: stringResource(R.string.session_list_error_unknown),
-                            style = MaterialTheme.typography.bodyLarge,
-                            color = MaterialTheme.colorScheme.error,
-                        )
-                        Spacer(modifier = Modifier.height(8.dp))
-                        Text(
-                            text = stringResource(R.string.session_list_error_hint),
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                        Spacer(modifier = Modifier.height(12.dp))
-                        TextButton(onClick = { viewModel.loadSessions(serverId) }) {
-                            Text(stringResource(R.string.session_list_error_retry))
-                        }
-                    }
+                    TimelineNoticeCard(
+                        modifier = Modifier.padding(horizontal = 16.dp),
+                        title = stringResource(R.string.session_list_error_title),
+                        message = error ?: stringResource(R.string.session_list_error_unknown),
+                        tone = TimelineNoticeTone.Error,
+                        footer = stringResource(R.string.session_list_error_footer),
+                        stateLabel = stringResource(R.string.session_list_error_state_label),
+                        content = {
+                            TextButton(onClick = { viewModel.loadSessions(serverId) }) {
+                                Text(stringResource(R.string.session_list_error_retry))
+                            }
+                        },
+                    )
                 }
             }
 
@@ -744,20 +756,19 @@ fun SessionListScreen(
                         .padding(padding),
                     contentAlignment = Alignment.Center,
                 ) {
-                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        Icon(
-                            imageVector = Icons.Filled.Code,
-                            contentDescription = null,
-                            modifier = Modifier.size(48.dp),
-                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                        Spacer(modifier = Modifier.height(12.dp))
-                        Text(
-                            text = stringResource(R.string.session_list_empty_projects_title),
-                            style = MaterialTheme.typography.bodyLarge,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                    }
+                    TimelineNoticeCard(
+                        modifier = Modifier.padding(horizontal = 16.dp),
+                        title = stringResource(R.string.session_list_empty_projects_title),
+                        message = stringResource(R.string.session_list_empty_projects_message),
+                        tone = TimelineNoticeTone.Neutral,
+                        footer = stringResource(R.string.session_list_empty_projects_footer),
+                        stateLabel = stringResource(R.string.session_list_empty_projects_action),
+                        content = {
+                            Button(onClick = onNewProject) {
+                                Text(stringResource(R.string.session_list_empty_projects_action))
+                            }
+                        },
+                    )
                 }
             }
 
@@ -992,6 +1003,17 @@ private fun SessionNavigationSummary(
             modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
+            Surface(
+                shape = RoundedCornerShape(999.dp),
+                color = MaterialTheme.colorScheme.secondaryContainer,
+            ) {
+                Text(
+                    text = stringResource(R.string.console_brand_label),
+                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSecondaryContainer,
+                )
+            }
             Text(
                 text = if (selectionMode) {
                     stringResource(R.string.session_list_navigation_title_selected)

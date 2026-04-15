@@ -1,6 +1,7 @@
 package dev.codexremote.android.ui.splash
 
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -23,7 +24,9 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import dev.codexremote.android.R
@@ -44,14 +47,41 @@ fun SplashScreen(onNavigateToServers: () -> Unit) {
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(320.dp)
+                    .height(360.dp)
                     .clip(RoundedCornerShape(bottomStart = 40.dp, bottomEnd = 40.dp))
                     .align(Alignment.TopCenter)
             ) {
                 Surface(
                     modifier = Modifier.fillMaxSize(),
-                    color = MaterialTheme.colorScheme.primary.copy(alpha = 0.08f),
+                    color = MaterialTheme.colorScheme.primary.copy(alpha = 0.06f),
                 ) {}
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .background(
+                            Brush.radialGradient(
+                                colors = listOf(
+                                    MaterialTheme.colorScheme.primary.copy(alpha = 0.18f),
+                                    Color.Transparent,
+                                ),
+                                center = Offset(540f, 120f),
+                                radius = 620f,
+                            )
+                        )
+                )
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .background(
+                            Brush.linearGradient(
+                                colors = listOf(
+                                    Color.Transparent,
+                                    MaterialTheme.colorScheme.secondary.copy(alpha = 0.08f),
+                                    Color.Transparent,
+                                ),
+                            )
+                        )
+                )
             }
 
             Column(
@@ -62,17 +92,18 @@ fun SplashScreen(onNavigateToServers: () -> Unit) {
                 horizontalAlignment = Alignment.CenterHorizontally,
             ) {
                 Surface(
-                    shape = RoundedCornerShape(28.dp),
-                    color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.9f),
-                    tonalElevation = 8.dp,
-                    shadowElevation = 18.dp,
+                    shape = RoundedCornerShape(32.dp),
+                    color = MaterialTheme.colorScheme.surface.copy(alpha = 0.92f),
+                    tonalElevation = 10.dp,
+                    shadowElevation = 20.dp,
                 ) {
                     Column(
-                        modifier = Modifier.padding(horizontal = 28.dp, vertical = 26.dp),
+                        modifier = Modifier.padding(horizontal = 28.dp, vertical = 28.dp),
                         horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.spacedBy(16.dp),
                     ) {
                         Surface(
-                            modifier = Modifier.size(88.dp),
+                            modifier = Modifier.size(92.dp),
                             shape = CircleShape,
                             color = MaterialTheme.colorScheme.primary.copy(alpha = 0.14f),
                         ) {
@@ -80,47 +111,53 @@ fun SplashScreen(onNavigateToServers: () -> Unit) {
                                 Icon(
                                     imageVector = Icons.Filled.Terminal,
                                     contentDescription = stringResource(R.string.app_name),
-                                    modifier = Modifier.size(42.dp),
+                                    modifier = Modifier.size(44.dp),
                                     tint = MaterialTheme.colorScheme.primary,
                                 )
                             }
                         }
-
-                        Spacer(modifier = Modifier.height(18.dp))
 
                         Surface(
                             shape = RoundedCornerShape(999.dp),
                             color = MaterialTheme.colorScheme.secondaryContainer,
                         ) {
                             Text(
-                                text = stringResource(R.string.splash_brand_chip),
+                                text = stringResource(R.string.console_brand_label),
                                 modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
                                 style = MaterialTheme.typography.labelSmall,
                                 color = MaterialTheme.colorScheme.onSecondaryContainer,
                             )
                         }
 
-                        Spacer(modifier = Modifier.height(18.dp))
-
                         Text(
                             text = stringResource(R.string.app_name),
                             style = MaterialTheme.typography.displayLarge,
                             color = MaterialTheme.colorScheme.onBackground,
                         )
-                        Spacer(modifier = Modifier.height(8.dp))
                         Text(
                             text = stringResource(R.string.splash_tagline),
                             style = MaterialTheme.typography.titleMedium,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
-                        Spacer(modifier = Modifier.height(18.dp))
                         Text(
                             text = stringResource(R.string.splash_description),
                             style = MaterialTheme.typography.bodyMedium,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
 
-                        Spacer(modifier = Modifier.height(20.dp))
+                        Row(
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            MiniPill(text = stringResource(R.string.console_brand_label))
+                            MiniPill(text = stringResource(R.string.splash_bootstrap_state))
+                        }
+
+                        Text(
+                            text = stringResource(R.string.splash_bootstrap_note),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.8f),
+                        )
 
                         Row(
                             verticalAlignment = Alignment.CenterVertically,
@@ -146,5 +183,20 @@ fun SplashScreen(onNavigateToServers: () -> Unit) {
                 }
             }
         }
+    }
+}
+
+@Composable
+private fun MiniPill(text: String) {
+    Surface(
+        shape = RoundedCornerShape(999.dp),
+        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.75f),
+    ) {
+        Text(
+            text = text,
+            modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp),
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
     }
 }

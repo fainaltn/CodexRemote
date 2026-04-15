@@ -1,7 +1,13 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="notification_channel_run_completed_name">运行完成提醒</string>
-    <string name="notification_channel_run_completed_description">当后台会话运行结束时显示本地通知。</string>
+    <string name="notification_channel_run_completed_name">会话状态提醒</string>
+    <string name="notification_channel_run_completed_description">当后台会话完成、失败、需要注意或恢复同步时显示本地通知。</string>
     <string name="notification_run_completed_title">运行已完成</string>
     <string name="notification_run_completed_body">会话 %1$s 已在服务器 %2$s 的主机 %3$s 上结束。</string>
+    <string name="notification_run_failed_title">运行失败</string>
+    <string name="notification_run_failed_body">会话 %1$s 在服务器 %2$s 的主机 %3$s 上遇到了错误。</string>
+    <string name="notification_run_attention_title">运行需要注意</string>
+    <string name="notification_run_attention_body">会话 %1$s 在服务器 %2$s 的主机 %3$s 上需要你回到工作区处理。</string>
+    <string name="notification_run_recovered_title">同步已恢复</string>
+    <string name="notification_run_recovered_body">会话 %1$s 已在服务器 %2$s 的主机 %3$s 上恢复同步。</string>
 </resources>

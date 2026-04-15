@@ -39,8 +39,13 @@
     <string name="session_controls_runtime_reasoning_high_detail">更强推理</string>
     <string name="session_controls_runtime_model_chip_title">模型</string>
     <string name="session_controls_runtime_reasoning_chip_title">思考</string>
+    <string name="session_controls_runtime_section_title">当前运行配置</string>
+    <string name="session_controls_runtime_inherited_detail">沿用服务端默认</string>
+    <string name="session_controls_runtime_explicit_detail">已显式设置</string>
     <string name="session_controls_runtime_model_sheet_summary">选一个更适合当前任务的模型。</string>
     <string name="session_controls_runtime_reasoning_sheet_summary">选一个更适合当前任务的思考强度。</string>
     <string name="session_controls_runtime_next_send_note">选择会作用于下一次发送。</string>
+    <string name="session_control_model_format">模型 · %1$s</string>
+    <string name="session_control_reasoning_format">思考 · %1$s</string>
     <string name="session_controls_micro_status_active">生成中</string>
 </resources>

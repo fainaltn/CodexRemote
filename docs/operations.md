@@ -13,10 +13,11 @@ Copy `.env.example` to `.env.local` and set:
 
 ```bash
 npm install
-npm run build --workspace @codexremote/shared
-npm run build --workspace @codexremote/server
-npm run build --workspace @codexremote/web
+npm run codexremote -- doctor
+npm run codexremote -- up
 ```
+
+The unified helper will build missing production artifacts before installing or refreshing the local launchd services on macOS.
 
 Development:
 
@@ -32,19 +33,44 @@ Production-style local run:
 ./scripts/codexremote-web.sh
 ```
 
+## Unified Control
+
+The repo-local operator entrypoint is:
+
+```bash
+npm run codexremote -- <command>
+```
+
+Supported commands:
+
+- `up`
+- `status`
+- `logs`
+- `restart`
+- `web`
+- `doctor`
+
+Examples:
+
+```bash
+npm run codexremote -- status
+npm run codexremote -- logs
+npm run codexremote -- web
+```
+
 ## launchd
 
 Install launch agents:
 
 ```bash
-./scripts/install-launchd.sh
+npm run codexremote -- up
 ```
 
 Inspect services:
 
 ```bash
-./scripts/codexremotectl.sh status
-./scripts/codexremotectl.sh logs
+npm run codexremote -- status
+npm run codexremote -- logs
 ```
 
 launchd launchers and logs live under:

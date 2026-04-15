@@ -225,7 +225,7 @@ internal fun currentRunStateLabel(
     liveRunStatus == "pending" -> if (sending) localizedSessionText("等待调度", "Scheduling") else localizedSessionText("等待中", "Waiting")
     liveRunStatus == "running" && !hasVisibleOutput && liveStreamConnected -> localizedSessionText("思考中", "Thinking")
     liveRunStatus == "running" && hasVisibleOutput && liveStreamConnected -> localizedSessionText("流式输出", "Streaming output")
-    liveRunStatus == "running" && !liveStreamConnected -> localizedSessionText("后台执行", "Running in background")
+    liveRunStatus == "running" && !liveStreamConnected -> localizedSessionText("恢复中", "Recovering")
     liveRunStatus == "completed" -> localizedSessionText("已完成", "Completed")
     liveRunStatus == "failed" -> localizedSessionText("失败", "Failed")
     liveRunStatus == "stopped" -> localizedSessionText("已停止", "Stopped")
@@ -284,8 +284,8 @@ internal fun currentRunSummaryMessage(
         )
     liveRunStatus == "running" && !liveStreamConnected ->
         localizedSessionText(
-            "实时流暂时不可用，界面会继续刷新补齐内容。",
-            "The live stream is temporarily unavailable, and the UI will keep refreshing to catch up.",
+            "实时连接暂时断开，界面会继续恢复并自动补齐内容。",
+            "The live connection is temporarily interrupted, and the UI will keep recovering and auto-filling content.",
         )
     liveRunStatus == "completed" ->
         localizedSessionText(

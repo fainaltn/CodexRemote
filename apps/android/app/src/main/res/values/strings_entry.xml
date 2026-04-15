@@ -1,11 +1,14 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="common_back">返回</string>
+    <string name="console_brand_label">精准控制台</string>
 
     <string name="splash_brand_chip">精准控制台</string>
     <string name="splash_tagline">面向 Codex CLI 的远程工作台</string>
     <string name="splash_description">连接主机、解锁工作区，并以更稳定的移动端控制面板管理会话。</string>
     <string name="splash_status">正在准备安全连接…</string>
+    <string name="splash_bootstrap_note">启动后会先整理连接、登录和会话导航，再进入控制台。</string>
+    <string name="splash_bootstrap_state">安全启动中</string>
 
     <string name="login_current_host">当前主机</string>
     <string name="login_preparing_environment">正在准备登录环境</string>
@@ -19,6 +22,9 @@
     <string name="login_password_hint">会先验证主机可达性，再提交解锁请求。</string>
     <string name="login_saved_password_detected">已检测到本机保存的密码</string>
     <string name="login_saved_password_local_only">仅保存在本机</string>
+    <string name="login_step_verify">先验连通性</string>
+    <string name="login_step_store">密码留在本机</string>
+    <string name="login_step_enter">再进入工作区</string>
     <string name="login_unlocking">正在解锁</string>
     <string name="login_unlock_button">解锁主机</string>
     <string name="login_footer">输入后会先检查 %1$s 的连通性，然后保存密码并进入工作区。</string>
@@ -27,6 +33,10 @@
 
     <string name="server_connection_checking">检查连接中…</string>
     <string name="server_add_action">添加服务器</string>
+    <string name="server_list_top_subtitle">主机概览与登录入口</string>
+    <string name="server_list_intro_title">主机概览</string>
+    <string name="server_list_intro_message">添加主机后，这里会集中显示连通性、登录状态和可进入的工作区。</string>
+    <string name="server_list_intro_footer">从右下角或上方菜单都能继续添加、刷新或切换主题。</string>
     <string name="server_empty_title">还没有配置服务器</string>
     <string name="server_empty_message">添加一个 CodexRemote 主机后，这里会显示它的连接状态和登录入口。</string>
     <string name="server_empty_footer">右下角的 + 会带你进入添加流程。</string>

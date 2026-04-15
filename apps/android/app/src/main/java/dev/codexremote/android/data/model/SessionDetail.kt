@@ -7,6 +7,10 @@ data class SessionMessage(
     val id: String,
     val role: String,
     val kind: String = "message",
+    val turnId: String? = null,
+    val itemId: String? = null,
+    val orderIndex: Int = 0,
+    val isStreaming: Boolean = false,
     val text: String,
     val createdAt: String,
 )

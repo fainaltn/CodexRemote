@@ -138,6 +138,20 @@ export default function LoginPage() {
               <span className="pill">Live runs</span>
               <span className="pill">Workspace unlock</span>
             </div>
+            <div className="login-ops-strip" aria-label="entry checkpoints">
+              <div className="login-ops-item">
+                <span>入口</span>
+                <strong>受保护主机</strong>
+              </div>
+              <div className="login-ops-item">
+                <span>恢复</span>
+                <strong>自动补齐状态</strong>
+              </div>
+              <div className="login-ops-item">
+                <span>工作流</span>
+                <strong>项目 → 线程 → 运行</strong>
+              </div>
+            </div>
             <div className="panel-meta">
               Built for precise control, clear hierarchy, and low-friction entry.
             </div>

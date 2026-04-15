@@ -5,8 +5,26 @@ import { getLiveRun, liveStreamUrl, getToken, type Run } from "./api";
 
 const RECONNECT_BASE_MS = 1_000;
 const RECONNECT_MAX_MS = 15_000;
-const MAX_CONSECUTIVE_ERRORS = 3;
+const DEGRADED_AFTER_ERRORS = 3;
 const POLL_INTERVAL_MS = 1_500;
+
+export type LiveRunTransportState =
+  | "idle"
+  | "connecting"
+  | "live"
+  | "recovering"
+  | "degraded"
+  | "terminal";
+
+export interface LiveRunState {
+  run: Run | null;
+  transportState: LiveRunTransportState;
+  isConnecting: boolean;
+  isRecovering: boolean;
+  isDegraded: boolean;
+  isLive: boolean;
+  isTerminal: boolean;
+}
 
 /**
  * Subscribe to a session's live-run SSE stream.
@@ -28,39 +46,67 @@ const POLL_INTERVAL_MS = 1_500;
  *
  * Reconnect: on network errors or unexpected stream closure the hook
  * reconnects with exponential back-off and sends `Last-Event-ID` so the
- * server can signal any missed events.  Permanent failures (401, 404, or
- * too many consecutive errors) stop reconnection.
+ * server can signal any missed events.  Permanent failures (401 or 404)
+ * stop reconnection, while repeated recoverable failures surface as a
+ * degraded transport state instead of a hard stop.
  */
-export function useLiveRun(sessionId: string | null): Run | null {
+export function useLiveRun(sessionId: string | null): LiveRunState {
   const [run, setRun] = useState<Run | null>(null);
+  const [transportState, setTransportState] =
+    useState<LiveRunTransportState>("idle");
   const abortRef = useRef<AbortController | null>(null);
 
   useEffect(() => {
     if (!sessionId) {
       setRun(null);
+      setTransportState("idle");
       return;
     }
 
     let cancelled = false;
+    let stopReconnect = false;
     // Capture as non-null for use inside closures (early return above
     // guarantees sessionId is non-null here, but TS can't narrow it
     // across async boundaries).
     const sid = sessionId;
 
     let consecutiveErrors = 0;
+    let hasConnected = false;
     let lastEventId: string | undefined;
     let reconnectMs = RECONNECT_BASE_MS;
     let pollTimer: ReturnType<typeof setInterval> | null = null;
+    let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+
+    setTransportState("connecting");
 
     async function pollSnapshot(): Promise<void> {
       try {
         const snapshot = await getLiveRun(sid);
-        if (!cancelled) {
+        if (!cancelled && !stopReconnect) {
           setRun(snapshot);
         }
       } catch {
         // Keep polling best-effort. SSE remains the primary transport.
       }
+    }
+
+    function clearReconnectTimer(): void {
+      if (reconnectTimer) {
+        clearTimeout(reconnectTimer);
+        reconnectTimer = null;
+      }
+    }
+
+    function enterTerminal(): void {
+      stopReconnect = true;
+      clearReconnectTimer();
+      if (pollTimer) {
+        clearInterval(pollTimer);
+        pollTimer = null;
+      }
+      abortRef.current?.abort();
+      abortRef.current = null;
+      setTransportState("terminal");
     }
 
     // ── SSE frame parser ──────────────────────────────────────────
@@ -99,17 +145,33 @@ export function useLiveRun(sessionId: string | null): Run | null {
 
     // ── Reconnect scheduler ───────────────────────────────────────
     function scheduleReconnect(): void {
-      if (cancelled) return;
+      if (cancelled || stopReconnect) return;
+      clearReconnectTimer();
       const delay = reconnectMs;
       reconnectMs = Math.min(reconnectMs * 2, RECONNECT_MAX_MS);
-      setTimeout(() => {
+      reconnectTimer = setTimeout(() => {
+        reconnectTimer = null;
         if (!cancelled) connect();
       }, delay);
     }
 
+    function markDisconnected(): void {
+      consecutiveErrors += 1;
+      if (stopReconnect) return;
+
+      if (!hasConnected && consecutiveErrors < DEGRADED_AFTER_ERRORS) {
+        setTransportState("connecting");
+      } else if (consecutiveErrors >= DEGRADED_AFTER_ERRORS) {
+        setTransportState("degraded");
+      } else {
+        setTransportState("recovering");
+      }
+      scheduleReconnect();
+    }
+
     // ── Main connection loop ──────────────────────────────────────
     async function connect(): Promise<void> {
-      if (cancelled) return;
+      if (cancelled || stopReconnect) return;
 
       const token = getToken();
       const controller = new AbortController();
@@ -132,17 +194,20 @@ export function useLiveRun(sessionId: string | null): Run | null {
         });
 
         if (!res.ok || !res.body) {
-          consecutiveErrors++;
           // Permanent failures — don't retry.
-          if (res.status === 401 || res.status === 404) return;
-          if (consecutiveErrors >= MAX_CONSECUTIVE_ERRORS) return;
-          scheduleReconnect();
+          if (res.status === 401 || res.status === 404) {
+            enterTerminal();
+            return;
+          }
+          markDisconnected();
           return;
         }
 
         // Connection established — reset error / backoff state.
+        hasConnected = true;
         consecutiveErrors = 0;
         reconnectMs = RECONNECT_BASE_MS;
+        setTransportState("live");
 
         const reader = res.body.getReader();
         const decoder = new TextDecoder();
@@ -168,16 +233,13 @@ export function useLiveRun(sessionId: string | null): Run | null {
         // Always reconnect on transport loss, even if stream-end was
         // seen earlier (it's a run-lifecycle signal, not unsubscribe).
         if (!cancelled) {
-          scheduleReconnect();
+          markDisconnected();
         }
       } catch (err: unknown) {
         if (cancelled) return;
         if (err instanceof DOMException && err.name === "AbortError") return;
 
-        consecutiveErrors++;
-        if (consecutiveErrors < MAX_CONSECUTIVE_ERRORS) {
-          scheduleReconnect();
-        }
+        markDisconnected();
       }
     }
 
@@ -191,10 +253,19 @@ export function useLiveRun(sessionId: string | null): Run | null {
     return () => {
       cancelled = true;
       if (pollTimer) clearInterval(pollTimer);
+      clearReconnectTimer();
       abortRef.current?.abort();
       abortRef.current = null;
     };
   }, [sessionId]);
 
-  return run;
+  return {
+    run,
+    transportState,
+    isConnecting: transportState === "connecting",
+    isRecovering: transportState === "recovering",
+    isDegraded: transportState === "degraded",
+    isLive: transportState === "live",
+    isTerminal: transportState === "terminal",
+  };
 }

@@ -219,6 +219,18 @@ body::before {
   line-height: 1.55;
 }
 
+.desktop-sidebar-note {
+  padding: 12px 14px;
+  border-radius: 16px;
+  border: 1px solid var(--border-subtle);
+  background:
+    radial-gradient(circle at top left, color-mix(in srgb, var(--accent-muted) 72%, transparent), transparent 44%),
+    color-mix(in srgb, var(--surface-raised) 92%, transparent);
+  color: var(--text-secondary);
+  font-size: 12px;
+  line-height: 1.6;
+}
+
 .desktop-sidebar-metrics {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -507,6 +519,27 @@ body::before {
   overflow: hidden;
 }
 
+.desktop-tree-empty {
+  display: grid;
+  gap: 6px;
+  padding: 14px;
+  border-radius: 16px;
+  border: 1px dashed var(--border-subtle);
+  background: color-mix(in srgb, var(--surface-raised) 92%, transparent);
+}
+
+.desktop-tree-empty-title {
+  font-size: 14px;
+  font-weight: 800;
+  letter-spacing: -0.02em;
+}
+
+.desktop-tree-empty-copy {
+  color: var(--text-secondary);
+  font-size: 12px;
+  line-height: 1.55;
+}
+
 /* ── Login ───────────────────────────────────────────────────────── */
 
 .login-screen {
@@ -522,6 +555,34 @@ body::before {
 .login-card {
   width: 100%;
   max-width: 360px;
+}
+
+.login-ops-strip {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 10px;
+}
+
+.login-ops-item {
+  display: grid;
+  gap: 4px;
+  padding: 12px 14px;
+  border-radius: 14px;
+  border: 1px solid var(--border-subtle);
+  background: color-mix(in srgb, var(--surface-raised) 88%, transparent);
+}
+
+.login-ops-item span {
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+.login-ops-item strong {
+  font-size: 14px;
+  color: var(--text);
 }
 
 .login-layout {
@@ -820,6 +881,13 @@ html[data-theme="dark"] .theme-toggle-icon-dark {
   gap: 12px;
 }
 
+.sessions-project-rail-copy {
+  margin-top: 8px;
+  color: var(--text-secondary);
+  font-size: 13px;
+  line-height: 1.55;
+}
+
 .sessions-project-rail-count {
   min-width: 48px;
   padding: 5px 10px;
@@ -988,6 +1056,66 @@ html[data-theme="dark"] .theme-toggle-icon-dark {
   padding: 22px;
 }
 
+.sessions-overview-band {
+  display: grid;
+  grid-template-columns: minmax(0, 1.2fr) minmax(300px, 0.8fr);
+  gap: 16px;
+  padding: 18px;
+  border-radius: 22px;
+  border: 1px solid color-mix(in srgb, var(--primary) 12%, var(--border-subtle));
+  background:
+    radial-gradient(circle at top left, color-mix(in srgb, var(--primary-muted) 76%, transparent), transparent 42%),
+    linear-gradient(180deg, color-mix(in srgb, var(--surface-raised) 92%, transparent), color-mix(in srgb, var(--surface) 96%, transparent));
+}
+
+.sessions-overview-copy {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.sessions-overview-copy h2 {
+  font-size: 24px;
+  line-height: 1.05;
+  letter-spacing: -0.04em;
+}
+
+.sessions-overview-copy p {
+  color: var(--text-secondary);
+  font-size: 14px;
+  line-height: 1.65;
+  max-width: 58ch;
+}
+
+.sessions-overview-metrics {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.sessions-overview-metric {
+  display: grid;
+  gap: 4px;
+  padding: 14px 15px;
+  border-radius: 16px;
+  border: 1px solid var(--border-subtle);
+  background: color-mix(in srgb, var(--surface) 92%, transparent);
+}
+
+.sessions-overview-metric span {
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+.sessions-overview-metric strong {
+  font-size: 22px;
+  line-height: 1;
+  letter-spacing: -0.04em;
+}
+
 .sessions-workbench-header {
   display: flex;
   align-items: flex-start;
@@ -1060,6 +1188,31 @@ html[data-theme="dark"] .theme-toggle-icon-dark {
   border: 1px dashed var(--session-current-border);
   background: color-mix(in srgb, var(--primary-muted) 75%, transparent);
   color: var(--text-secondary);
+}
+
+.sessions-operator-note {
+  display: grid;
+  gap: 6px;
+  padding: 14px 16px;
+  border-radius: 18px;
+  border: 1px solid var(--border-subtle);
+  background:
+    radial-gradient(circle at top left, color-mix(in srgb, var(--accent-muted) 72%, transparent), transparent 38%),
+    color-mix(in srgb, var(--surface-raised) 92%, transparent);
+}
+
+.sessions-operator-note-title {
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+.sessions-operator-note-copy {
+  color: var(--text-secondary);
+  font-size: 13px;
+  line-height: 1.6;
 }
 
 .sessions-workspace,
@@ -1740,6 +1893,22 @@ html[data-theme="dark"] .theme-toggle-icon-dark {
   border-color: color-mix(in srgb, var(--session-current-border) 82%, transparent);
 }
 
+.detail-run-panel-recovering {
+  border-color: color-mix(in srgb, var(--primary) 22%, var(--border-subtle));
+}
+
+.detail-run-panel-degraded {
+  border-color: color-mix(in srgb, var(--warning) 24%, var(--border-subtle));
+}
+
+.detail-run-panel-connecting {
+  border-color: color-mix(in srgb, var(--text-muted) 18%, var(--border-subtle));
+}
+
+.detail-run-panel-terminal {
+  border-color: color-mix(in srgb, var(--error) 20%, var(--border-subtle));
+}
+
 .detail-history-empty,
 .detail-run-empty {
   min-height: 220px;
@@ -2001,6 +2170,62 @@ html[data-theme="dark"] .theme-toggle-icon-dark {
   box-shadow: 0 8px 18px rgba(37, 99, 235, 0.08);
 }
 
+.sync-banner {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 12px 14px;
+  border-radius: 16px;
+  border: 1px solid var(--border-subtle);
+  background:
+    radial-gradient(circle at top left, color-mix(in srgb, var(--surface-tint) 86%, transparent), transparent 46%),
+    color-mix(in srgb, var(--surface-raised) 94%, transparent);
+}
+
+.sync-banner-title {
+  font-size: 13px;
+  font-weight: 800;
+  letter-spacing: -0.02em;
+}
+
+.sync-banner-copy {
+  color: var(--text-secondary);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.sync-banner-connecting {
+  border-color: color-mix(in srgb, var(--text-muted) 18%, var(--border-subtle));
+}
+
+.sync-banner-recovering {
+  border-color: color-mix(in srgb, var(--primary) 22%, var(--border-subtle));
+  background:
+    radial-gradient(circle at top left, color-mix(in srgb, var(--primary-muted) 84%, transparent), transparent 46%),
+    color-mix(in srgb, var(--surface-raised) 94%, transparent);
+}
+
+.sync-banner-degraded {
+  border-color: color-mix(in srgb, var(--warning) 24%, var(--border-subtle));
+  background:
+    radial-gradient(circle at top left, color-mix(in srgb, var(--warning-muted) 84%, transparent), transparent 46%),
+    color-mix(in srgb, var(--surface-raised) 94%, transparent);
+}
+
+.sync-banner-recovered {
+  border-color: color-mix(in srgb, var(--success) 22%, var(--border-subtle));
+  background:
+    radial-gradient(circle at top left, color-mix(in srgb, var(--success-muted) 84%, transparent), transparent 46%),
+    color-mix(in srgb, var(--surface-raised) 94%, transparent);
+}
+
+.sync-banner-terminal {
+  border-color: color-mix(in srgb, var(--error) 20%, var(--border-subtle));
+  background:
+    radial-gradient(circle at top left, color-mix(in srgb, var(--error-muted) 82%, transparent), transparent 46%),
+    color-mix(in srgb, var(--surface-raised) 94%, transparent);
+}
+
 .run-state-copy {
   display: flex;
   flex-direction: column;
@@ -2076,6 +2301,30 @@ html[data-theme="dark"] .theme-toggle-icon-dark {
   background:
     linear-gradient(180deg, color-mix(in srgb, var(--error-muted) 14%, var(--surface-muted) 96%), color-mix(in srgb, var(--surface-muted) 96%, transparent));
   border-color: color-mix(in srgb, var(--error) 18%, transparent);
+}
+
+.run-terminal-card-recovering {
+  border-color: color-mix(in srgb, var(--primary) 18%, transparent);
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--primary-muted) 16%, var(--surface-muted) 96%), color-mix(in srgb, var(--surface-muted) 96%, transparent));
+}
+
+.run-terminal-card-degraded {
+  border-color: color-mix(in srgb, var(--warning) 18%, transparent);
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--warning-muted) 14%, var(--surface-muted) 96%), color-mix(in srgb, var(--surface-muted) 96%, transparent));
+}
+
+.run-terminal-card-connecting {
+  border-color: color-mix(in srgb, var(--border-subtle) 92%, transparent);
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--surface-raised) 92%, transparent), color-mix(in srgb, var(--surface-muted) 96%, transparent));
+}
+
+.run-terminal-card-terminal {
+  border-color: color-mix(in srgb, var(--error) 18%, transparent);
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--error-muted) 12%, var(--surface-muted) 96%), color-mix(in srgb, var(--surface-muted) 96%, transparent));
 }
 
 .run-terminal-output,
@@ -2185,6 +2434,49 @@ html[data-theme="dark"] .theme-toggle-icon-dark {
   text-transform: uppercase;
   letter-spacing: 0.08em;
   border: 1px solid transparent;
+}
+
+.transport-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  border-radius: var(--radius-pill);
+  font-size: 11px;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  border: 1px solid transparent;
+}
+
+.transport-badge-live {
+  background: color-mix(in srgb, var(--surface-raised) 90%, transparent);
+  color: var(--text-muted);
+  border-color: var(--border-subtle);
+}
+
+.transport-badge-connecting {
+  background: color-mix(in srgb, var(--surface-raised) 90%, transparent);
+  color: var(--text-muted);
+  border-color: var(--border-subtle);
+}
+
+.transport-badge-recovering {
+  background: var(--primary-muted);
+  color: var(--primary);
+  border-color: color-mix(in srgb, var(--primary) 18%, transparent);
+}
+
+.transport-badge-degraded {
+  background: var(--warning-muted);
+  color: var(--warning);
+  border-color: color-mix(in srgb, var(--warning) 18%, transparent);
+}
+
+.transport-badge-terminal {
+  background: var(--error-muted);
+  color: var(--error);
+  border-color: color-mix(in srgb, var(--error) 18%, transparent);
 }
 
 .status-running {
@@ -2733,6 +3025,82 @@ html[data-theme="dark"] .theme-toggle-icon-dark {
   border-color: var(--border-subtle);
 }
 
+.composer-runtime-panel {
+  display: grid;
+  grid-template-columns: minmax(0, 1.1fr) minmax(260px, 0.9fr);
+  gap: 14px;
+  padding: 12px 14px;
+  border-radius: 18px;
+  border: 1px solid var(--border-subtle);
+  background:
+    radial-gradient(circle at top left, color-mix(in srgb, var(--accent-muted) 72%, transparent), transparent 42%),
+    color-mix(in srgb, var(--surface-raised) 92%, transparent);
+}
+
+.composer-runtime-copy {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.composer-runtime-title {
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+.composer-runtime-summary {
+  font-size: 14px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+}
+
+.composer-runtime-note {
+  color: var(--text-secondary);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.composer-runtime-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.composer-runtime-field {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+}
+
+.composer-runtime-field span {
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+.composer-runtime-field select {
+  width: 100%;
+  height: 42px;
+  padding: 0 12px;
+  border-radius: 14px;
+  border: 1px solid var(--border-subtle);
+  background: color-mix(in srgb, var(--surface) 96%, transparent);
+  color: var(--text);
+  font-size: 14px;
+  outline: none;
+}
+
+.composer-runtime-field select:focus {
+  border-color: var(--primary);
+  box-shadow: var(--focus-ring);
+}
+
 .composer-attachments {
   display: flex;
   flex-direction: column;
@@ -3117,6 +3485,25 @@ html[data-theme="dark"] .theme-toggle-icon-dark {
   line-height: 1.62;
 }
 
+.detail-run-empty-sync {
+  align-items: flex-start;
+  justify-content: flex-start;
+  text-align: left;
+  min-height: 210px;
+}
+
+.detail-run-empty-sync .empty-state-icon {
+  margin-bottom: 0;
+}
+
+.detail-run-empty-sync .empty-state-text {
+  font-size: 15px;
+}
+
+.detail-run-empty-sync .empty-state-sub {
+  max-width: 46ch;
+}
+
 .loading-screen {
   position: relative;
   isolation: isolate;
@@ -3293,4 +3680,14 @@ html[data-theme="dark"] .theme-toggle-icon-dark {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+@media (max-width: 899px) {
+  .sessions-overview-band {
+    grid-template-columns: 1fr;
+  }
+
+  .sessions-overview-metrics {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
 }

@@ -1,11 +1,14 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="common_back">Back</string>
+    <string name="console_brand_label">Precision Console</string>
 
     <string name="splash_brand_chip">Precision Console</string>
     <string name="splash_tagline">A remote workspace for the Codex CLI</string>
     <string name="splash_description">Connect to your host, unlock the workspace, and steer sessions from a calmer mobile control surface.</string>
     <string name="splash_status">Preparing secure host access…</string>
+    <string name="splash_bootstrap_note">We will organize the connection, sign-in, and session navigation before opening the console.</string>
+    <string name="splash_bootstrap_state">Secure boot</string>
 
     <string name="login_current_host">Current host</string>
     <string name="login_preparing_environment">Preparing login environment</string>
@@ -19,6 +22,9 @@
     <string name="login_password_hint">We will check host reachability first, then submit the unlock request.</string>
     <string name="login_saved_password_detected">Saved password detected on this device</string>
     <string name="login_saved_password_local_only">Stored on this device only</string>
+    <string name="login_step_verify">Verify reachability first</string>
+    <string name="login_step_store">Keep the password on device</string>
+    <string name="login_step_enter">Then enter the workspace</string>
     <string name="login_unlocking">Unlocking</string>
     <string name="login_unlock_button">Unlock host</string>
     <string name="login_footer">After entry, we will check connectivity for %1$s, save the password, and open the workspace.</string>
@@ -27,6 +33,10 @@
 
     <string name="server_connection_checking">Checking connection…</string>
     <string name="server_add_action">Add server</string>
+    <string name="server_list_top_subtitle">Host overview and sign-in entry</string>
+    <string name="server_list_intro_title">Host overview</string>
+    <string name="server_list_intro_message">Once hosts are added, this page shows reachability, sign-in state, and the workspaces you can enter.</string>
+    <string name="server_list_intro_footer">Use the bottom-right button or the top menu to add, refresh, or switch themes.</string>
     <string name="server_empty_title">No servers configured yet</string>
     <string name="server_empty_message">Add a CodexRemote host and this page will show its connection status and sign-in entry.</string>
     <string name="server_empty_footer">Tap the + in the bottom-right corner to start the add flow.</string>

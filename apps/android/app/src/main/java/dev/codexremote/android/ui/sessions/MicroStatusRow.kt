@@ -68,10 +68,18 @@ internal fun MicroStatusRow(
         } else {
             null
         }
+        val isRecoveryLabel = label?.contains("恢复") == true ||
+            label?.contains("recover", ignoreCase = true) == true ||
+            label?.contains("降级") == true ||
+            label?.contains("degraded", ignoreCase = true) == true
         if (label != null) {
             Surface(
                 shape = RoundedCornerShape(999.dp),
-                color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.8f),
+                color = if (isRecoveryLabel) {
+                    MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.72f)
+                } else {
+                    MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.8f)
+                },
             ) {
                 Row(
                     modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
@@ -88,7 +96,11 @@ internal fun MicroStatusRow(
                     Text(
                         text = label,
                         style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.primary,
+                        color = if (isRecoveryLabel) {
+                            MaterialTheme.colorScheme.onSecondaryContainer
+                        } else {
+                            MaterialTheme.colorScheme.primary
+                        },
                     )
                 }
             }

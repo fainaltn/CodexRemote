@@ -23,8 +23,13 @@ English:
 - Server 构建和测试通过
 - Web 构建和测试通过
 - Android Debug APK 可正常编译
+- 本地运维已收敛到 `npm run codexremote -- doctor|up|status|logs|restart|web`
+- Web 与 Android 的首屏入口、项目导航和会话工作区已按 `Precision Console` 方向统一收口
 - Android 会话列表支持项目文件夹隐藏与自定义拖拽排序
+- Web 与 Android 会话详情都已支持更明确的恢复态语义，弱网或后台恢复时会尽量补齐而不是直接报错
 - Android 会话详情已升级为更完整的原生移动控制台，支持流式回复、历史折叠、附件队列、运行参数控制与仓库操作入口
+- Web 会话页现在也支持显式的运行参数控制，可直接为下一次发送选择 `model` 与 `reasoning`
+- Android 后台通知已区分运行完成、失败、需要注意和恢复同步，不再只有单一 completion 提醒
 - Android 端支持在应用内修改服务密码，并在服务端重启后自动重新对齐连接
 - 继续已有会话时，服务端会先恢复 thread 再启动 turn，避免旧会话落回只读权限
 - Inbox 已改为 staging 模式，远端只落盘到 `data/submissions/`
@@ -34,8 +39,13 @@ English:
 - Server builds and tests are passing
 - Web builds and tests are passing
 - Android debug APK builds successfully
+- Local operator flows are now unified under `npm run codexremote -- doctor|up|status|logs|restart|web`
+- Web and Android first-use surfaces, project navigation, and session workspaces now follow the `Precision Console` direction more consistently
 - Android session lists now support hiding project folders and custom drag reordering
+- Web and Android session detail now treat degraded transport as a recovery flow, aiming to catch up instead of failing loudly
 - Android session detail is now a fuller native mobile console with streaming replies, folded history, attachment queueing, runtime controls, and repo action entry points
+- The web session page now also exposes explicit runtime controls so the next send can choose `model` and `reasoning`
+- Android background notifications now distinguish completed, failed, needs-attention, and recovered-sync events instead of a single completion alert
 - Android can now change the service password in-app and automatically re-align the connection after the server restarts
 - Resumed sessions now restore the thread before starting a turn so existing sessions do not fall back to read-only permissions
 - Inbox now uses a staging model and stores submissions under `data/submissions/`
@@ -52,6 +62,7 @@ packages/
   shared/   Shared contracts and schemas
   sdk/      Reserved for future typed SDK work
 scripts/
+  codexremote.sh     Unified local operator entrypoint
   install-launchd.sh  Install local macOS launch agents
   codexremotectl.sh   Inspect and restart launchd services
   clear-inbox.sh      Remove inbox records and stored staging files
@@ -74,7 +85,14 @@ cp .env.example .env.local
 English: Set a strong `CODEXREMOTE_PASSWORD` in `.env.local`, then run:
 
 ```bash
-npm run build --workspace @codexremote/shared
+npm run codexremote -- doctor
+npm run codexremote -- up
+```
+
+中文：本地开发时也可以继续直接运行 workspace dev 命令。
+English: For active development you can still run the workspace dev servers directly.
+
+```bash
 npm run dev --workspace @codexremote/server
 npm run dev --workspace @codexremote/web -- --port 31817
 ```
@@ -102,6 +120,7 @@ English:
 
 - Architecture / 架构说明: [docs/architecture.md](./docs/architecture.md)
 - Operations / 运维说明: [docs/operations.md](./docs/operations.md)
+- Roadmap / 路线图: [docs/v0.3.0-roadmap.md](./docs/v0.3.0-roadmap.md)
 - Release checklist / 发布检查单: [docs/release-checklist.md](./docs/release-checklist.md)
 - Release notes / 发布说明: [docs/release-notes-v0.2.1.md](./docs/release-notes-v0.2.1.md)
 

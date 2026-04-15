@@ -4,10 +4,18 @@ import android.content.Context
 import android.content.Intent
 import dev.codexremote.android.navigation.Screen
 
+enum class RunNotificationTier {
+    COMPLETED,
+    FAILED,
+    NEEDS_ATTENTION,
+    RECOVERED,
+}
+
 data class RunCompletedNotificationPayload(
     val serverId: String,
     val hostId: String,
     val sessionId: String,
+    val tier: RunNotificationTier = RunNotificationTier.COMPLETED,
     val runId: String? = null,
     val serverLabel: String? = null,
     val hostLabel: String? = null,
@@ -21,7 +29,7 @@ data class RunCompletedNotificationPayload(
         get() = notificationKey.hashCode()
 
     val notificationTag: String
-        get() = "run-completed:$notificationKey"
+        get() = "run-${tier.name.lowercase()}:$notificationKey"
 
     fun toSessionDetailRoute(): String =
         Screen.SessionDetail.createRoute(serverId, hostId, sessionId)
@@ -42,6 +50,7 @@ object RunCompletedNotificationContract {
     const val EXTRA_HOST_LABEL = "dev.codexremote.android.notifications.extra.HOST_LABEL"
     const val EXTRA_SESSION_LABEL = "dev.codexremote.android.notifications.extra.SESSION_LABEL"
     const val EXTRA_TERMINAL_STATUS = "dev.codexremote.android.notifications.extra.TERMINAL_STATUS"
+    const val EXTRA_NOTIFICATION_TIER = "dev.codexremote.android.notifications.extra.TIER"
 
     fun createOpenSessionDetailIntent(
         context: Context,
@@ -55,6 +64,7 @@ object RunCompletedNotificationContract {
             putExtra(EXTRA_SERVER_ID, payload.serverId)
             putExtra(EXTRA_HOST_ID, payload.hostId)
             putExtra(EXTRA_SESSION_ID, payload.sessionId)
+            putExtra(EXTRA_NOTIFICATION_TIER, payload.tier.name)
             payload.runId?.let { putExtra(EXTRA_RUN_ID, it) }
             payload.serverLabel?.let { putExtra(EXTRA_SERVER_LABEL, it) }
             payload.hostLabel?.let { putExtra(EXTRA_HOST_LABEL, it) }
@@ -74,6 +84,9 @@ object RunCompletedNotificationContract {
             serverId = serverId,
             hostId = hostId,
             sessionId = sessionId,
+            tier = intent.getStringExtra(EXTRA_NOTIFICATION_TIER)
+                ?.let { stored -> RunNotificationTier.entries.firstOrNull { it.name == stored } }
+                ?: RunNotificationTier.COMPLETED,
             runId = intent.getStringExtra(EXTRA_RUN_ID),
             serverLabel = intent.getStringExtra(EXTRA_SERVER_LABEL),
             hostLabel = intent.getStringExtra(EXTRA_HOST_LABEL),

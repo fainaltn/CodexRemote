@@ -728,6 +728,64 @@ describe("codex session discovery", () => {
     });
   });
 
+  it("keeps distinct assistant replies when stable item identity differs even if text matches", async () => {
+    const base = await mkdtemp(join(tmpdir(), "codexremote-sessions-"));
+    createdDirs.push(base);
+    process.env["CODEX_STATE_DIR"] = base;
+
+    await makeSessionFile(base, "2026/04/06", [
+      {
+        timestamp: "2026-04-06T12:00:00.000Z",
+        type: "session_meta",
+        payload: {
+          id: "stable-identity-session-id",
+          cwd: "/workspace/CodexRemote",
+        },
+      },
+      {
+        timestamp: "2026-04-06T12:00:02.000Z",
+        type: "response_item",
+        payload: {
+          id: "item-1",
+          turnId: "turn-1",
+          type: "message",
+          role: "assistant",
+          content: [{ type: "output_text", text: "同一句话，但它是第一条。" }],
+        },
+      },
+      {
+        timestamp: "2026-04-06T12:00:02.100Z",
+        type: "response_item",
+        payload: {
+          id: "item-2",
+          turnId: "turn-1",
+          type: "message",
+          role: "assistant",
+          content: [{ type: "output_text", text: "同一句话，但它是第一条。" }],
+        },
+      },
+    ]);
+
+    const messages = await readSessionMessages("stable-identity-session-id");
+    expect(messages).toHaveLength(2);
+    expect(messages[0]).toMatchObject({
+      role: "assistant",
+      kind: "message",
+      itemId: "item-1",
+      turnId: "turn-1",
+      orderIndex: 0,
+      isStreaming: false,
+    });
+    expect(messages[1]).toMatchObject({
+      role: "assistant",
+      kind: "message",
+      itemId: "item-2",
+      turnId: "turn-1",
+      orderIndex: 1,
+      isStreaming: false,
+    });
+  });
+
   it("filters internal environment and permissions context from message history", async () => {
     const base = await mkdtemp(join(tmpdir(), "codexremote-sessions-"));
     createdDirs.push(base);

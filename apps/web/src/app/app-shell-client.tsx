@@ -249,6 +249,15 @@ export function AppShellClient({ children }: { children: ReactNode }) {
     () => treeGroups.reduce((count, group) => count + group.sessions.length, 0),
     [treeGroups],
   );
+  const draftGroupCount = useMemo(
+    () => treeGroups.filter((group) => group.draftOnly).length,
+    [treeGroups],
+  );
+  const activeWindowLabel = currentSessionId
+    ? "当前会话"
+    : selectedProject
+      ? "项目聚焦"
+      : "浏览全局";
   const focusedGroupKey = useMemo(() => {
     const selectedGroup = treeGroups.find(
       (group) => selectedProject === routeProjectValue(group),
@@ -297,20 +306,27 @@ export function AppShellClient({ children }: { children: ReactNode }) {
       <div className="desktop-shell-inner">
         <aside className="desktop-sidebar">
           <div className="desktop-sidebar-brand">
-            <div className="desktop-sidebar-eyebrow">CodexRemote</div>
-            <h1>本地控制台</h1>
+            <div className="desktop-sidebar-eyebrow">Precision Console</div>
+            <h1>CodexRemote 本地控制台</h1>
             <p className="desktop-sidebar-copy">
-              精选项目导航 · {groups.length} 个项目 · {totalSessions} 个线程
+              把当前项目、草稿目录与最近线程收成一个可操作的远程工作台。
             </p>
             <div className="desktop-sidebar-metrics">
               <div className="desktop-sidebar-metric">
-                <span>焦点</span>
-                <strong>{selectedProject ? "当前项目" : "全部项目"}</strong>
+                <span>视角</span>
+                <strong>{selectedProject ? "项目聚焦" : "工作区总览"}</strong>
               </div>
               <div className="desktop-sidebar-metric">
                 <span>状态</span>
-                <strong>{currentSessionId ? "当前会话" : "浏览中"}</strong>
+                <strong>{activeWindowLabel}</strong>
               </div>
+              <div className="desktop-sidebar-metric">
+                <span>草稿</span>
+                <strong>{draftGroupCount} 个目录</strong>
+              </div>
+            </div>
+            <div className="desktop-sidebar-note">
+              先定位项目，再切进线程；弱网和恢复态会在会话页继续给出明确反馈。
             </div>
           </div>
 
@@ -319,7 +335,14 @@ export function AppShellClient({ children }: { children: ReactNode }) {
           </div>
 
           <div className="desktop-project-tree" aria-label="项目与线程">
-            {treeGroups.map((group) => {
+            {treeGroups.length === 0 ? (
+              <div className="desktop-tree-empty">
+                <div className="desktop-tree-empty-title">等待工作区同步</div>
+                <div className="desktop-tree-empty-copy">
+                  登录后这里会出现项目目录、草稿入口和最近线程，形成完整的控制台导航。
+                </div>
+              </div>
+            ) : treeGroups.map((group) => {
               const expanded = expandedGroups[group.key] ?? false;
               const activeProject = selectedProject === routeProjectValue(group);
               const containsActiveSession = group.sessions.some(
@@ -460,7 +483,7 @@ export function AppShellClient({ children }: { children: ReactNode }) {
 
           <div className="desktop-sidebar-footer">
             <div className="desktop-footer-meta">
-              {groups.length} 个项目文件夹
+              {groups.length} 个项目文件夹 · {totalSessions} 个线程
             </div>
           </div>
         </aside>

@@ -2,6 +2,7 @@ package dev.codexremote.android.ui.sessions
 
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -12,6 +13,10 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.items
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.pluralStringResource
@@ -19,6 +24,18 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import dev.codexremote.android.R
 import dev.codexremote.android.data.model.Run
+
+private fun isRecoveringStreamStatus(liveStreamStatus: String?): Boolean {
+    val status = liveStreamStatus?.lowercase().orEmpty()
+    return status.contains("recover") ||
+        status.contains("fallback") ||
+        status.contains("reconnect") ||
+        status.contains("sync") ||
+        status.contains("恢复") ||
+        status.contains("重连") ||
+        status.contains("同步") ||
+        status.contains("刷新")
+}
 
 /**
  * The conversation timeline — a chat-like LazyColumn that displays:
@@ -52,44 +69,44 @@ internal fun ConversationTimeline(
 ) {
     val liveRunStatus = liveRun?.status
     val isActive = liveRunStatus in activeRunStatuses
-    val pendingUserText = pendingTurnPrompt?.trim()?.ifBlank { null }
-    val latestTimelineUser = latestUserPrompt?.trim()?.ifBlank { null }
-    val latestTimelineUserDisplay = latestTimelineUser?.let(::sanitizePromptDisplay)
-    val continuousLiveOutput = cleanedOutput ?: retainedLiveOutput
-
-    val currentUserText = when {
-        liveRun != null && isActive -> sanitizePromptDisplay(liveRun.prompt)
-        liveRun != null -> pendingUserText ?: latestTimelineUserDisplay ?: sanitizePromptDisplay(liveRun.prompt)
-        !pendingUserText.isNullOrBlank() -> pendingUserText
-        else -> latestTimelineUserDisplay
-    }
-
-    val currentTurnStoredReply = if (
-        !currentUserText.isNullOrBlank() &&
-        latestTimelineUserDisplay == currentUserText
+    val projection = remember(
+        historyRounds,
+        liveRun,
+        latestUserPrompt,
+        latestAssistantReply,
+        cleanedOutput,
+        pendingTurnPrompt,
+        retainedLiveOutput,
+        isDraft,
     ) {
-        latestAssistantReply
-    } else {
-        null
+        buildCurrentTurnProjection(
+            messages = historyRounds.flatMap { it.messages },
+            liveRun = liveRun,
+            pendingTurnPrompt = pendingTurnPrompt,
+            cleanedOutput = cleanedOutput,
+            retainedLiveOutput = retainedLiveOutput,
+            isDraft = isDraft,
+        )
     }
-
-    val replyOutput = when {
-        isActive -> continuousLiveOutput
-        liveRun != null || !pendingUserText.isNullOrBlank() -> currentTurnStoredReply ?: continuousLiveOutput
-        else -> latestAssistantReply ?: continuousLiveOutput
-    }
-
-    val showWaitingPlaceholder = replyOutput.isNullOrBlank() &&
-        (isDraft || liveRun != null || !currentUserText.isNullOrBlank())
-    val showAssistantReply = isDraft ||
-        liveRun != null ||
-        !pendingUserText.isNullOrBlank() ||
-        !replyOutput.isNullOrBlank() ||
-        showWaitingPlaceholder
-    val showStreamDegradedCard = isActive && !liveStreamConnected && !liveStreamStatus.isNullOrBlank()
+    var currentTurnExpanded by remember(
+        projection.collapsedAssistantMessages.size,
+        projection.visibleSettledAssistantMessages.lastOrNull()?.id,
+        projection.userPrompt,
+    ) { mutableStateOf(false) }
+    val showAssistantReply = projection.showWaitingPlaceholder ||
+        projection.visibleSettledAssistantMessages.isNotEmpty() ||
+        !projection.streamingTailText.isNullOrBlank() ||
+        !projection.finalReplyFallbackText.isNullOrBlank() ||
+        projection.showThinkingState ||
+        isDraft ||
+        liveRun != null
+    val showStreamRecoveryCard = isActive && !liveStreamConnected && !liveStreamStatus.isNullOrBlank()
+    val isStreamRecovering = isRecoveringStreamStatus(liveStreamStatus)
     val runStateLabel = currentRunStateLabel(
         liveRunStatus = liveRunStatus,
-        hasVisibleOutput = !replyOutput.isNullOrBlank(),
+        hasVisibleOutput = projection.visibleSettledAssistantMessages.isNotEmpty() ||
+            !projection.streamingTailText.isNullOrBlank() ||
+            !projection.finalReplyFallbackText.isNullOrBlank(),
         liveStreamConnected = liveStreamConnected,
         sending = sending,
         isDraft = isDraft,
@@ -151,20 +168,34 @@ internal fun ConversationTimeline(
             }
 
             // ② Current-turn user message
-            if (!currentUserText.isNullOrBlank()) {
+            if (!projection.userPrompt.isNullOrBlank()) {
                 item(key = "current-user") {
-                    UserMessageBubble(text = currentUserText)
+                    UserMessageBubble(text = projection.userPrompt)
                 }
             }
 
             // ③ Connection degradation notice (only when SSE lost during active run)
-            if (showStreamDegradedCard) {
+            if (showStreamRecoveryCard) {
                 item(key = "connection-notice") {
                     TimelineNoticeCard(
-                        title = stringResource(R.string.session_timeline_stream_degraded_title),
+                        title = if (isStreamRecovering) {
+                            stringResource(R.string.session_timeline_stream_recovering_title)
+                        } else {
+                            stringResource(R.string.session_timeline_stream_degraded_title)
+                        },
                         message = liveStreamStatus.orEmpty(),
-                        footer = stringResource(R.string.session_timeline_stream_degraded_footer),
-                        tone = TimelineNoticeTone.Warning,
+                        footer = if (isStreamRecovering) {
+                            stringResource(R.string.session_timeline_stream_recovering_footer)
+                        } else {
+                            stringResource(R.string.session_timeline_stream_degraded_footer)
+                        },
+                        tone = if (isStreamRecovering) TimelineNoticeTone.Neutral else TimelineNoticeTone.Warning,
+                        stateLabel = if (isStreamRecovering) {
+                            stringResource(R.string.session_timeline_stream_recovering_state_label)
+                        } else {
+                            stringResource(R.string.session_timeline_stream_degraded_state_label)
+                        },
+                        stateTone = if (isStreamRecovering) TimelineNoticeTone.Neutral else TimelineNoticeTone.Warning,
                     )
                 }
             }
@@ -172,29 +203,87 @@ internal fun ConversationTimeline(
             // ④ AI reply (hero block)
             if (showAssistantReply) {
                 item(key = "assistant-reply") {
-                    if (showWaitingPlaceholder) {
+                    if (projection.showWaitingPlaceholder) {
                         WaitingReplyPlaceholder(draft = isDraft)
                     } else {
-                        AssistantReplyBlock(
-                            output = replyOutput,
-                            isActive = isActive,
-                            status = liveRun?.status,
-                            model = liveRun?.model,
-                            startedAt = liveRun?.startedAt,
-                            finishedAt = liveRun?.finishedAt,
-                            error = liveRun?.error,
-                            sending = sending,
-                            onRetry = if (!isActive && !liveRun?.prompt.isNullOrBlank()) {
-                                { onRetry(liveRun!!.prompt) }
-                            } else {
-                                null
-                            },
-                            onReusePrompt = if (!isActive && !liveRun?.prompt.isNullOrBlank()) {
-                                { onReusePrompt(liveRun!!.prompt) }
-                            } else {
-                                null
-                            },
-                        )
+                        Column(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalArrangement = Arrangement.spacedBy(10.dp),
+                        ) {
+                            if (projection.collapsedAssistantMessages.isNotEmpty()) {
+                                CurrentTurnCollapsedHeader(
+                                    messageCount = projection.collapsedAssistantMessages.size,
+                                    expanded = currentTurnExpanded,
+                                    processedDuration = liveRun?.startedAt?.let {
+                                        formatRunElapsed(it, liveRun.finishedAt)
+                                    },
+                                    onToggle = { currentTurnExpanded = !currentTurnExpanded },
+                                )
+                            }
+
+                            if (currentTurnExpanded) {
+                                projection.collapsedAssistantMessages.forEach { message ->
+                                    SettledAssistantMessageCard(
+                                        message = message,
+                                        collapsed = true,
+                                    )
+                                }
+                            }
+
+                            projection.visibleSettledAssistantMessages.forEach { message ->
+                                SettledAssistantMessageCard(
+                                    message = message,
+                                    collapsed = false,
+                                )
+                            }
+
+                            if (!projection.streamingTailText.isNullOrBlank()) {
+                                AssistantReplyBlock(
+                                    output = projection.streamingTailText,
+                                    isActive = true,
+                                    status = liveRun?.status,
+                                    model = liveRun?.model,
+                                    startedAt = liveRun?.startedAt,
+                                    finishedAt = liveRun?.finishedAt,
+                                    error = liveRun?.error,
+                                    sending = sending,
+                                    onRetry = null,
+                                    onReusePrompt = null,
+                                )
+                            }
+
+                            if (projection.showThinkingState) {
+                                ThinkingPlaceholderCard(
+                                    compact = projection.visibleSettledAssistantMessages.isNotEmpty(),
+                                )
+                            }
+
+                            if (projection.visibleSettledAssistantMessages.isEmpty() &&
+                                projection.streamingTailText.isNullOrBlank() &&
+                                !projection.finalReplyFallbackText.isNullOrBlank()
+                            ) {
+                                AssistantReplyBlock(
+                                    output = projection.finalReplyFallbackText,
+                                    isActive = false,
+                                    status = liveRun?.status,
+                                    model = liveRun?.model,
+                                    startedAt = liveRun?.startedAt,
+                                    finishedAt = liveRun?.finishedAt,
+                                    error = liveRun?.error,
+                                    sending = sending,
+                                    onRetry = if (!liveRun?.prompt.isNullOrBlank()) {
+                                        { onRetry(liveRun!!.prompt) }
+                                    } else {
+                                        null
+                                    },
+                                    onReusePrompt = if (!liveRun?.prompt.isNullOrBlank()) {
+                                        { onReusePrompt(liveRun!!.prompt) }
+                                    } else {
+                                        null
+                                    },
+                                )
+                            }
+                        }
                     }
                 }
             }

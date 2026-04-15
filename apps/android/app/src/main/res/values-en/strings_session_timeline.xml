@@ -13,8 +13,16 @@
     <string name="session_timeline_history_empty_state_label">Empty history</string>
     <string name="session_timeline_stream_degraded_title">Live stream degraded</string>
     <string name="session_timeline_stream_degraded_footer">The session is still running, and the UI will refresh automatically to catch up.</string>
+    <string name="session_timeline_stream_degraded_state_label">Degraded</string>
+    <string name="session_timeline_stream_recovering_title">Live stream recovering</string>
+    <string name="session_timeline_stream_recovering_footer">The UI will keep trying to reconnect and fill in anything that was missed.</string>
+    <string name="session_timeline_stream_recovering_state_label">Recovering</string>
     <string name="session_timeline_history_round_expand">Expand</string>
     <string name="session_timeline_history_round_collapse">Collapse</string>
+    <string name="session_timeline_current_turn_expand">Expand collapsed current-turn messages</string>
+    <string name="session_timeline_current_turn_collapse">Collapse current-turn messages</string>
+    <string name="session_timeline_current_turn_collapsed_title">Up %1$d messages</string>
+    <string name="session_timeline_current_turn_collapsed_subtitle">Processed %1$s</string>
     <string name="session_timeline_history_round_preview_empty">No preview content yet</string>
     <string name="session_timeline_folded_messages_expand">Show %1$d intermediate steps</string>
     <string name="session_timeline_folded_messages_collapse">Hide %1$d intermediate steps</string>

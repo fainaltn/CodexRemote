@@ -154,6 +154,28 @@ internal fun typewriterDelayMs(nextChar: Char): Long = when (nextChar) {
     else -> (28L..48L).random()
 }
 
+private const val liveTailAnimationWindowChars = 160
+
+private fun commonPrefixLength(first: String, second: String): Int {
+    val sharedLength = minOf(first.length, second.length)
+    for (index in 0 until sharedLength) {
+        if (first[index] != second[index]) return index
+    }
+    return sharedLength
+}
+
+internal fun calmTypewriterBaseline(
+    targetText: String,
+    currentDisplayedText: String,
+): String {
+    if (targetText.isEmpty()) return ""
+    val preservedPrefixLength = commonPrefixLength(targetText, currentDisplayedText)
+    val minimumSettledLength = (targetText.length - liveTailAnimationWindowChars).coerceAtLeast(0)
+    val baselineLength = maxOf(preservedPrefixLength, minimumSettledLength)
+        .coerceAtMost(targetText.length)
+    return targetText.substring(0, baselineLength)
+}
+
 // ── Output cleaning ───────────────────────────────────────────────
 
 private val ansiEscapeRegex = Regex("\\u001B\\[[;\\d]*[A-Za-z]")
@@ -330,30 +352,167 @@ internal fun cleanLiveOutput(
 
 // ── Message & history grouping ────────────────────────────────────
 
-internal fun latestCanonicalPrompt(messages: List<SessionMessage>): String? =
-    messages
-        .lastOrNull { it.role == "user" }
-        ?.text
-        ?.trim()
-        ?.ifBlank { null }
+private fun SessionMessage.normalizedDisplayText(): String? =
+    text.trim().ifBlank { null }
 
-internal fun latestCanonicalAssistantReply(messages: List<SessionMessage>): String? {
-    val lastUserIndex = messages.indexOfLast { it.role == "user" }
-    if (lastUserIndex == -1) return null
-    return messages
-        .drop(lastUserIndex + 1)
-        .lastOrNull { it.role == "assistant" && it.kind == "message" }
-        ?.text
-        ?.trim()
-        ?.ifBlank { null }
+private fun SessionMessage.normalizedPromptText(): String? =
+    normalizedDisplayText()?.let(::sanitizePromptDisplay)
+
+private fun SessionMessage.normalizedTurnId(): String? =
+    turnId?.trim()?.ifBlank { null }
+
+private fun orderedMessages(messages: List<SessionMessage>): List<SessionMessage> =
+    messages.sortedWith(
+        compareBy<SessionMessage>({ it.orderIndex }, { it.createdAt }, { it.id })
+    )
+
+private fun lastUserMessageForPrompt(
+    messages: List<SessionMessage>,
+    promptText: String?,
+): SessionMessage? {
+    val normalizedPrompt = promptText?.trim()?.ifBlank { null } ?: return null
+    return messages.lastOrNull { message ->
+        message.role == "user" && message.normalizedPromptText() == normalizedPrompt
+    }
 }
 
-internal fun splitOutputSections(output: String?): List<String> {
-    return output
-        ?.split(Regex("\n{2,}"))
-        ?.map { it.trim() }
-        ?.filter { it.isNotBlank() }
-        ?: emptyList()
+private fun currentTurnMessages(
+    messages: List<SessionMessage>,
+    currentUserText: String?,
+): List<SessionMessage> {
+    val ordered = orderedMessages(messages)
+    val anchorUser = lastUserMessageForPrompt(ordered, currentUserText) ?: return emptyList()
+    val anchorTurnId = anchorUser.normalizedTurnId()
+    if (anchorTurnId != null) {
+        return ordered.filter { it.normalizedTurnId() == anchorTurnId }
+    }
+
+    val anchorIndex = ordered.indexOfLast { it.id == anchorUser.id }
+    if (anchorIndex == -1) return emptyList()
+    return ordered.drop(anchorIndex)
+}
+
+private fun latestCanonicalAssistantMessage(messages: List<SessionMessage>): SessionMessage? {
+    val ordered = orderedMessages(messages)
+    val latestUser = ordered.lastOrNull { it.role == "user" } ?: return null
+    val latestTurnId = latestUser.normalizedTurnId()
+    return if (latestTurnId != null) {
+        ordered.lastOrNull { message ->
+            message.normalizedTurnId() == latestTurnId &&
+                message.role == "assistant" &&
+                message.kind == "message" &&
+                !message.normalizedDisplayText().isNullOrBlank()
+        }
+    } else {
+        val lastUserIndex = ordered.indexOfLast { it.role == "user" }
+        if (lastUserIndex == -1) return null
+        ordered
+            .drop(lastUserIndex + 1)
+            .lastOrNull { it.role == "assistant" && it.kind == "message" }
+    }
+}
+
+internal fun latestCanonicalPrompt(messages: List<SessionMessage>): String? =
+    orderedMessages(messages)
+        .lastOrNull { it.role == "user" }
+        ?.normalizedDisplayText()
+
+internal fun latestCanonicalAssistantReply(messages: List<SessionMessage>): String? {
+    return latestCanonicalAssistantMessage(messages)
+        ?.normalizedDisplayText()
+}
+
+internal data class CurrentTurnProjection(
+    val userPrompt: String?,
+    val settledAssistantMessages: List<SessionMessage>,
+    val collapsedAssistantMessages: List<SessionMessage>,
+    val visibleSettledAssistantMessages: List<SessionMessage>,
+    val streamingTailText: String?,
+    val finalReplyFallbackText: String?,
+    val showThinkingState: Boolean,
+    val showWaitingPlaceholder: Boolean,
+)
+
+internal fun buildCurrentTurnProjection(
+    messages: List<SessionMessage>,
+    liveRun: dev.codexremote.android.data.model.Run?,
+    pendingTurnPrompt: String?,
+    cleanedOutput: String?,
+    retainedLiveOutput: String?,
+    isDraft: Boolean,
+): CurrentTurnProjection {
+    val isActive = liveRun?.status in activeRunStatuses
+    val latestTimelineUserDisplay = latestCanonicalPrompt(messages)?.let(::sanitizePromptDisplay)
+    val currentUserText = when {
+        liveRun != null && isActive -> sanitizePromptDisplay(liveRun.prompt)
+        liveRun != null -> pendingTurnPrompt?.trim()?.ifBlank { null }
+            ?: latestTimelineUserDisplay
+            ?: sanitizePromptDisplay(liveRun.prompt)
+        !pendingTurnPrompt.isNullOrBlank() -> pendingTurnPrompt.trim()
+        else -> latestTimelineUserDisplay
+    }
+
+    val currentRoundMessages = currentTurnMessages(messages, currentUserText)
+
+    val settledAssistantMessages = currentRoundMessages
+        .filter { it.role == "assistant" && it.kind == "message" }
+        .filter { !it.normalizedDisplayText().isNullOrBlank() }
+
+    val collapsedAssistantMessages = if (!isActive && settledAssistantMessages.size > 1) {
+        settledAssistantMessages.dropLast(1)
+    } else {
+        emptyList()
+    }
+    val visibleSettledAssistantMessages = if (isActive) {
+        settledAssistantMessages
+    } else {
+        settledAssistantMessages.takeLast(1)
+    }
+
+    val liveOutputCandidate = (cleanedOutput ?: retainedLiveOutput)
+        ?.trim()
+        ?.ifBlank { null }
+    val latestSettledAssistantText = visibleSettledAssistantMessages.lastOrNull()?.normalizedDisplayText()
+    val streamingTailText = if (
+        isActive &&
+        !liveOutputCandidate.isNullOrBlank() &&
+        liveOutputCandidate != latestSettledAssistantText
+    ) {
+        liveOutputCandidate
+    } else {
+        null
+    }
+
+    val finalReplyFallbackText = if (
+        !isActive &&
+        visibleSettledAssistantMessages.isEmpty() &&
+        !liveOutputCandidate.isNullOrBlank()
+    ) {
+        liveOutputCandidate
+    } else {
+        null
+    }
+
+    val showThinkingState = isActive &&
+        streamingTailText.isNullOrBlank() &&
+        (liveRun != null || !currentUserText.isNullOrBlank())
+
+    val showWaitingPlaceholder = !showThinkingState &&
+        visibleSettledAssistantMessages.isEmpty() &&
+        streamingTailText.isNullOrBlank() &&
+        finalReplyFallbackText.isNullOrBlank() &&
+        (isDraft || liveRun != null || !currentUserText.isNullOrBlank())
+
+    return CurrentTurnProjection(
+        userPrompt = currentUserText,
+        settledAssistantMessages = settledAssistantMessages,
+        collapsedAssistantMessages = collapsedAssistantMessages,
+        visibleSettledAssistantMessages = visibleSettledAssistantMessages,
+        streamingTailText = streamingTailText,
+        finalReplyFallbackText = finalReplyFallbackText,
+        showThinkingState = showThinkingState,
+        showWaitingPlaceholder = showWaitingPlaceholder,
+    )
 }
 
 internal fun summarizeGroupTitle(text: String?): String {
@@ -427,6 +586,102 @@ internal fun HistoryRound.previewLabel(maxChars: Int = 96): String {
 }
 
 internal fun buildHistoryRounds(messages: List<SessionMessage>): List<HistoryRound> {
+    if (messages.isEmpty()) return emptyList()
+    val ordered = orderedMessages(messages)
+    if (ordered.none { it.normalizedTurnId() != null }) {
+        return buildHistoryRoundsLegacy(ordered)
+    }
+
+    val groupedMessages = groupMessagesIntoTurns(ordered)
+    val rounds = mutableListOf<HistoryRound>()
+    groupedMessages.forEachIndexed { index, current ->
+        val firstUser = current.firstOrNull { it.role == "user" }
+        val assistantMessages = current.filter {
+            it.role == "assistant" && it.kind == "message"
+        }
+        val previewSource = assistantMessages.lastOrNull()?.text
+            ?: firstUser?.text
+            ?: current.firstOrNull()?.text
+            ?: ""
+        val isHistorical = index < groupedMessages.lastIndex
+        val isReasoningOnly = current.isNotEmpty() && current.all { it.kind == "reasoning" }
+        val isLatestVisibleReply = !isReasoningOnly && !isHistorical
+        var primaryMessages = current.toList()
+        var foldedMessages = emptyList<SessionMessage>()
+
+        if (!isReasoningOnly && assistantMessages.size > 1) {
+            val finalAssistant = assistantMessages.last()
+            primaryMessages = current.filter { message ->
+                message.role != "assistant" || message.kind != "message" || message.id == finalAssistant.id
+            }
+            foldedMessages = current.filter { message ->
+                message.role == "assistant" && message.kind == "message" && message.id != finalAssistant.id
+            }
+        }
+
+        rounds += HistoryRound(
+            id = current.first().id,
+            messages = current.toList(),
+            primaryMessages = primaryMessages,
+            foldedMessages = foldedMessages,
+            title = when {
+                isReasoningOnly -> "Codex 思考"
+                isLatestVisibleReply -> "当前对话"
+                firstUser != null -> summarizeHistoryTitle(current)
+                else -> "系统上下文"
+            },
+            folded = isReasoningOnly || isHistorical,
+            isHistorical = isHistorical,
+            preview = if (previewSource.length > 72) "${previewSource.take(72)}…" else previewSource,
+        )
+    }
+
+    return rounds
+}
+
+private fun groupMessagesIntoTurns(messages: List<SessionMessage>): List<List<SessionMessage>> {
+    val groups = mutableListOf<List<SessionMessage>>()
+    var current = mutableListOf<SessionMessage>()
+    var currentTurnId: String? = null
+    var currentHasUser = false
+
+    fun flush() {
+        if (current.isEmpty()) return
+        groups += current.toList()
+        current = mutableListOf()
+        currentTurnId = null
+        currentHasUser = false
+    }
+
+    for (message in messages) {
+        val messageTurnId = message.normalizedTurnId()
+        if (current.isNotEmpty()) {
+            val startsNewTurn = when {
+                currentTurnId != null && messageTurnId != null -> messageTurnId != currentTurnId
+                currentTurnId != null && messageTurnId == null -> message.role == "user"
+                currentTurnId == null && messageTurnId != null -> false
+                else -> message.role == "user" && currentHasUser
+            }
+            if (startsNewTurn) {
+                flush()
+            }
+        }
+
+        if (current.isEmpty()) {
+            currentTurnId = messageTurnId
+        } else if (currentTurnId == null && messageTurnId != null) {
+            currentTurnId = messageTurnId
+        }
+
+        current += message
+        currentHasUser = currentHasUser || message.role == "user"
+    }
+    flush()
+
+    return groups
+}
+
+private fun buildHistoryRoundsLegacy(messages: List<SessionMessage>): List<HistoryRound> {
     val lastUserIndex = messages.indexOfLast { it.role == "user" }
     val rounds = mutableListOf<HistoryRound>()
     var current = mutableListOf<SessionMessage>()

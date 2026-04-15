@@ -150,6 +150,10 @@ export interface RawSessionMessage {
   id: string;
   role: "user" | "assistant" | "system";
   kind: "message" | "reasoning";
+  turnId?: string;
+  itemId?: string;
+  orderIndex?: number;
+  isStreaming?: boolean;
   text: string;
   createdAt: string;
 }
@@ -397,6 +401,11 @@ export async function readSessionMessages(
       .filter((message, index, all) => !isBootstrapMessage(message, index, all))
       .filter((message) => !isInternalBootstrapPrompt(message))
       .filter((message) => !isInternalContextMessage(message))
+      .map((message, index) => ({
+        ...message,
+        orderIndex: message.orderIndex ?? index,
+        isStreaming: message.isStreaming ?? false,
+      }))
       .slice(-limit);
   } catch {
     return [];
@@ -422,6 +431,8 @@ function appendParsedMessages(
 
       if (parsed.type === "event_msg" && parsed.payload) {
         const eventType = parsed.payload["type"];
+        const turnId = extractFirstString(parsed.payload, "turnId", "turn_id");
+        const itemId = extractFirstString(parsed.payload, "itemId", "item_id", "id");
         if (
           eventType === "user_message" ||
           eventType === "agent_message" ||
@@ -441,6 +452,8 @@ function appendParsedMessages(
             id: `${timestamp}-${messages.length}`,
             role,
             kind: "message",
+            turnId,
+            itemId,
             text: displayText,
             createdAt: timestamp,
             source: "event_msg",
@@ -455,6 +468,8 @@ function appendParsedMessages(
             id: `${timestamp}-${messages.length}`,
             role: "assistant",
             kind: "reasoning",
+            turnId,
+            itemId,
             text,
             createdAt: timestamp,
             source: "event_msg",
@@ -466,6 +481,8 @@ function appendParsedMessages(
       if (parsed.type === "response_item" && parsed.payload) {
         const payloadType = parsed.payload["type"];
         const payloadRole = parsed.payload["role"];
+        const turnId = extractFirstString(parsed.payload, "turnId", "turn_id");
+        const itemId = extractFirstString(parsed.payload, "itemId", "item_id", "id");
         if (payloadType === "message") {
           const role =
             payloadRole === "user" || payloadRole === "assistant"
@@ -479,6 +496,8 @@ function appendParsedMessages(
             id: `${timestamp}-${messages.length}`,
             role,
             kind: "message",
+            turnId,
+            itemId,
             text: displayText,
             createdAt: timestamp,
             source: "response_item",
@@ -490,6 +509,19 @@ function appendParsedMessages(
       // ignore malformed lines
     }
   }
+}
+
+function extractFirstString(
+  record: Record<string, unknown>,
+  ...keys: string[]
+): string | undefined {
+  for (const key of keys) {
+    const value = record[key];
+    if (typeof value === "string" && value.trim().length > 0) {
+      return value.trim();
+    }
+  }
+  return undefined;
 }
 
 interface ParsedSessionFile {
@@ -708,9 +740,20 @@ function collapseSessionMessages(
 
     if (
       previous &&
+      shareStableMessageIdentity(previous, message) &&
+      previous.role === message.role &&
+      previous.kind === message.kind &&
+      normalizeMessageText(previous.text) === normalizeMessageText(message.text)
+    ) {
+      continue;
+    }
+
+    if (
+      previous &&
       previous.role === message.role &&
       previous.kind === message.kind &&
       normalizeMessageText(previous.text) === normalizeMessageText(message.text) &&
+      !(hasStableMessageIdentity(previous) && hasStableMessageIdentity(message)) &&
       withinDuplicateWindow
     ) {
       continue;
@@ -734,6 +777,12 @@ function areLikelyDuplicateMessages(
     return false;
   }
 
+  const identityMatch = shareStableMessageIdentity(a, b);
+  if (identityMatch) return true;
+  if (hasStableMessageIdentity(a) && hasStableMessageIdentity(b)) {
+    return false;
+  }
+
   const aTime = Date.parse(a.createdAt);
   const bTime = Date.parse(b.createdAt);
   if (!Number.isFinite(aTime) || !Number.isFinite(bTime)) {
@@ -741,6 +790,32 @@ function areLikelyDuplicateMessages(
   }
 
   return Math.abs(aTime - bTime) <= 5_000;
+}
+
+function hasStableMessageIdentity(message: Pick<RawSessionMessage, "turnId" | "itemId" | "orderIndex">): boolean {
+  return !!message.itemId || (!!message.turnId && message.orderIndex !== undefined);
+}
+
+function shareStableMessageIdentity(
+  a: Pick<RawSessionMessage, "turnId" | "itemId" | "orderIndex">,
+  b: Pick<RawSessionMessage, "turnId" | "itemId" | "orderIndex">,
+): boolean {
+  if (a.itemId && b.itemId) {
+    if (a.itemId !== b.itemId) return false;
+    if (a.turnId && b.turnId && a.turnId !== b.turnId) return false;
+    return true;
+  }
+
+  if (
+    a.turnId &&
+    b.turnId &&
+    a.orderIndex !== undefined &&
+    b.orderIndex !== undefined
+  ) {
+    return a.turnId === b.turnId && a.orderIndex === b.orderIndex;
+  }
+
+  return false;
 }
 
 function isBootstrapMessage(

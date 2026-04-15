@@ -324,6 +324,11 @@ export default function SessionsPage() {
     orderedGroups[0] ??
     null;
   const currentProjectCount = orderedGroups.length;
+  const totalSessionCount = sessions.length;
+  const draftProjectCount = orderedGroups.filter((group) => group.draftOnly).length;
+  const recentSessionCount = sessions.filter((session) =>
+    isFreshActivity(session.updatedAt, 180),
+  ).length;
   const currentGroupSignal = activeGroup
     ? getGroupSignal(activeGroup, projectParam, activeGroupKey)
     : null;
@@ -442,8 +447,11 @@ export default function SessionsPage() {
           <aside className="sessions-project-rail panel" aria-label="项目导航">
             <div className="sessions-project-rail-header">
               <div>
-                <div className="sessions-sidebar-eyebrow">Project Navigator</div>
+                <div className="sessions-sidebar-eyebrow">Precision Console</div>
                 <h2>精选项目</h2>
+                <div className="sessions-project-rail-copy">
+                  先锁定工作目录，再进入线程；草稿目录和最近活跃项目都会被抬到前面。
+                </div>
               </div>
               <div className="sessions-project-rail-count">
                 {currentProjectCount} 个
@@ -451,11 +459,11 @@ export default function SessionsPage() {
             </div>
             <div className="sessions-project-rail-stats">
               <div className="sessions-project-rail-stat">
-                <span>当前</span>
+                <span>焦点</span>
                 <strong>{activeGroup ? activeGroup.label : "无"}</strong>
               </div>
               <div className="sessions-project-rail-stat">
-                <span>更新</span>
+                <span>同步</span>
                 <strong>{activeGroup ? timeAgo(activeGroup.updatedAt) : "—"}</strong>
               </div>
               <div className="sessions-project-rail-stat">
@@ -530,9 +538,9 @@ export default function SessionsPage() {
             {loading && sessions.length === 0 ? (
               <div className="empty-state">
                 <div className="spinner" />
-                <div className="empty-state-text">正在重建项目导航</div>
+                <div className="empty-state-text">正在重建 Precision Console</div>
                 <div className="empty-state-sub">
-                  会同步当前项目、草稿目录和最近活跃线程。
+                  会同步当前项目、草稿目录和最近活跃线程，稍后把工作区恢复到可进入状态。
                 </div>
               </div>
             ) : error ? (
@@ -564,6 +572,37 @@ export default function SessionsPage() {
               </div>
             ) : (
               <>
+                <section className="sessions-overview-band">
+                  <div className="sessions-overview-copy">
+                    <div className="sessions-sidebar-eyebrow">
+                      {selectionActive ? "Batch Selection" : "Workspace Overview"}
+                    </div>
+                    <h2>把项目、草稿与线程收成一个可操作的工作台</h2>
+                    <p>
+                      当前工作区会优先突出最近活跃目录、当前焦点项目和可继续推进的线程，
+                      让你能更快回到正确的上下文。
+                    </p>
+                  </div>
+                  <div className="sessions-overview-metrics" aria-label="工作区概览">
+                    <div className="sessions-overview-metric">
+                      <span>项目</span>
+                      <strong>{currentProjectCount}</strong>
+                    </div>
+                    <div className="sessions-overview-metric">
+                      <span>线程</span>
+                      <strong>{totalSessionCount}</strong>
+                    </div>
+                    <div className="sessions-overview-metric">
+                      <span>草稿</span>
+                      <strong>{draftProjectCount}</strong>
+                    </div>
+                    <div className="sessions-overview-metric">
+                      <span>近 3 小时</span>
+                      <strong>{recentSessionCount}</strong>
+                    </div>
+                  </div>
+                </section>
+
                 <section className="sessions-workbench-header">
                   <div className="sessions-workbench-title">
                     <div className="sessions-sidebar-eyebrow">
@@ -637,6 +676,15 @@ export default function SessionsPage() {
                   <div className="sessions-workbench-stat">
                     <span>选择状态</span>
                     <strong>{selectionActive ? `${selectedCount} 已选` : "浏览中"}</strong>
+                  </div>
+                </section>
+
+                <section className="sessions-operator-note" aria-label="工作台提示">
+                  <div className="sessions-operator-note-title">工作台提示</div>
+                  <div className="sessions-operator-note-copy">
+                    {activeGroup.draftOnly
+                      ? "先为这个目录创建首个线程，之后它就会和其他活跃项目一样进入正常的工作流排序。"
+                      : "如果你刚从手机或其他入口切回来，这里会保留项目层级，并把最近活跃线程留在最易进入的位置。"}
                   </div>
                 </section>
 

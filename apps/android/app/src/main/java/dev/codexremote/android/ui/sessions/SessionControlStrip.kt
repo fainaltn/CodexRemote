@@ -5,6 +5,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -27,6 +28,8 @@ internal fun SessionControlStrip(
     liveRun: Run?,
     liveStreamConnected: Boolean,
     liveStreamStatus: String?,
+    selectedModel: String?,
+    selectedReasoningEffort: String?,
     queuedPromptCount: Int,
     isRefreshing: Boolean,
     modifier: Modifier = Modifier,
@@ -39,11 +42,24 @@ internal fun SessionControlStrip(
         liveStreamConnected -> stringResource(R.string.session_control_stream_ready)
         else -> stringResource(R.string.session_control_waiting_next)
     }
-    val detailItems = buildList {
-        liveRun?.model?.takeIf { it.isNotBlank() }?.let { add(it) }
-        liveRun?.reasoningEffort?.takeIf { it.isNotBlank() }?.let { add(it) }
+    val effectiveModel = liveRun?.model?.takeIf { it.isNotBlank() } ?: selectedModel
+    val effectiveReasoning = liveRun?.reasoningEffort?.takeIf { it.isNotBlank() } ?: selectedReasoningEffort
+    val runtimeItems = listOf(
+        stringResource(
+            R.string.session_control_model_format,
+            runtimeControlLabel(RuntimeControlTarget.Model, effectiveModel),
+        ),
+        stringResource(
+            R.string.session_control_reasoning_format,
+            runtimeControlLabel(RuntimeControlTarget.ReasoningEffort, effectiveReasoning),
+        ),
+    )
+    val secondaryItems = buildList {
         if (queuedPromptCount > 0) add(stringResource(R.string.session_control_queue_count, queuedPromptCount))
         if (isRefreshing) add(stringResource(R.string.session_control_syncing))
+        if (!liveStreamStatus.isNullOrBlank() && !liveStreamConnected) {
+            add(stringResource(R.string.session_control_degraded))
+        }
     }
     val elapsedText = liveRun?.let { formatRunElapsed(it.startedAt, it.finishedAt) }
     val containerColor = when {
@@ -90,29 +106,20 @@ internal fun SessionControlStrip(
                     style = MaterialTheme.typography.labelLarge,
                     color = contentColor,
                 )
+                Spacer(modifier = Modifier.weight(1f))
                 elapsedText?.let {
                     StripChip(text = it, contentColor = contentColor)
                 }
-                if (!liveStreamStatus.isNullOrBlank() && !liveStreamConnected) {
-                    Surface(
-                        shape = RoundedCornerShape(999.dp),
-                        color = contentColor.copy(alpha = 0.1f),
-                    ) {
-                        Text(
-                            text = stringResource(R.string.session_control_degraded),
-                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
-                            style = MaterialTheme.typography.labelSmall,
-                            color = contentColor,
-                        )
-                    }
+                runtimeItems.forEach { item ->
+                    StripChip(text = item, contentColor = contentColor)
                 }
             }
-            if (detailItems.isNotEmpty() || (!liveStreamStatus.isNullOrBlank() && !liveStreamConnected)) {
+            if (secondaryItems.isNotEmpty()) {
                 FlowRow(
                     horizontalArrangement = Arrangement.spacedBy(6.dp),
                     verticalArrangement = Arrangement.spacedBy(4.dp),
                 ) {
-                    detailItems.forEach { item ->
+                    secondaryItems.forEach { item ->
                         StripChip(text = item, contentColor = contentColor)
                     }
                 }

@@ -13,8 +13,16 @@
     <string name="session_timeline_history_empty_state_label">历史为空</string>
     <string name="session_timeline_stream_degraded_title">实时流已降级</string>
     <string name="session_timeline_stream_degraded_footer">会话仍在继续，界面会自动刷新补齐内容。</string>
+    <string name="session_timeline_stream_degraded_state_label">降级</string>
+    <string name="session_timeline_stream_recovering_title">实时流正在恢复</string>
+    <string name="session_timeline_stream_recovering_footer">界面会继续尝试重新连接并补齐刚刚错过的内容。</string>
+    <string name="session_timeline_stream_recovering_state_label">恢复中</string>
     <string name="session_timeline_history_round_expand">展开</string>
     <string name="session_timeline_history_round_collapse">收起</string>
+    <string name="session_timeline_current_turn_expand">展开当前轮折叠消息</string>
+    <string name="session_timeline_current_turn_collapse">收起当前轮折叠消息</string>
+    <string name="session_timeline_current_turn_collapsed_title">上 %1$d 条消息</string>
+    <string name="session_timeline_current_turn_collapsed_subtitle">已处理 %1$s</string>
     <string name="session_timeline_history_round_preview_empty">暂无可预览内容</string>
     <string name="session_timeline_folded_messages_expand">查看 %1$d 条中间步骤</string>
     <string name="session_timeline_folded_messages_collapse">收起 %1$d 条中间步骤</string>

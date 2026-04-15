@@ -19,6 +19,7 @@ import dev.codexremote.android.data.network.ApiClient
 import dev.codexremote.android.data.network.LiveRunStreamEvent
 import dev.codexremote.android.data.repository.ServerRepository
 import dev.codexremote.android.notifications.RunCompletedNotificationHelper
+import dev.codexremote.android.notifications.RunNotificationTier
 import dev.codexremote.android.notifications.RunCompletedNotificationPayload
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
@@ -141,6 +142,27 @@ private fun sanitizePromptDisplay(prompt: String?): String? {
 private fun normalizeRuntimeControl(value: String?): String? =
     value?.trim()?.takeIf { it.isNotBlank() }
 
+private fun isRecoverableConnectivityError(error: Throwable): Boolean {
+    val resolved = ApiClient.describeNetworkFailure(error)
+    val message = error.message.orEmpty()
+    return resolved.contains("超时") ||
+        resolved.contains("timeout", ignoreCase = true) ||
+        resolved.contains("network", ignoreCase = true) ||
+        resolved.contains("连接", ignoreCase = true) ||
+        message.contains("timeout", ignoreCase = true) ||
+        message.contains("socket", ignoreCase = true) ||
+        message.contains("network", ignoreCase = true) ||
+        message.contains("Connection reset", ignoreCase = true) ||
+        message.contains("broken pipe", ignoreCase = true)
+}
+
+private fun hasVisibleSessionContent(state: SessionDetailUiState): Boolean =
+    state.session != null ||
+        state.messages.isNotEmpty() ||
+        !state.liveRun?.lastOutput.isNullOrBlank() ||
+        !state.retainedLiveOutput.isNullOrBlank() ||
+        !state.currentTurnPromptOverride.isNullOrBlank()
+
 class SessionDetailViewModel(application: Application) : AndroidViewModel(application) {
     private val repo = ServerRepository(application)
 
@@ -165,11 +187,20 @@ class SessionDetailViewModel(application: Application) : AndroidViewModel(applic
         .map { (output, prompt) -> cleanLiveOutput(output, prompt) }
     private var liveStreamJob: Job? = null
     private var backgroundMonitorJob: Job? = null
+    private var foregroundMessageSyncJob: Job? = null
     private var queuedDispatchJob: Job? = null
     private var liveStreamKey: Pair<String, String>? = null
     private var liveStreamLastEventId: Long? = null
     private var activeSessionRef: SessionRef? = null
-    private var lastNotifiedTerminalRunId: String? = null
+    private var lastNotifiedBackgroundEventKey: String? = null
+    private var backgroundAttentionContextKey: String? = null
+
+    private enum class BackgroundNotificationTier(val statusValue: String) {
+        COMPLETED("completed"),
+        FAILED("failed"),
+        NEEDS_ATTENTION("needs-attention"),
+        RECOVERED("recovered"),
+    }
 
     private fun string(resId: Int, vararg args: Any): String =
         getApplication<Application>().getString(resId, *args)
@@ -209,13 +240,23 @@ class SessionDetailViewModel(application: Application) : AndroidViewModel(applic
     fun load(serverId: String, sessionId: String) {
         rememberActiveSession(serverId, sessionId)
         viewModelScope.launch {
-            _uiState.update { it.copy(loading = true, error = null) }
+            _uiState.update { it.copy(loading = true, error = null, recoveryNotice = null) }
             try {
                 refreshSessionAndLive(serverId, sessionId)
             } catch (e: Exception) {
                 val existingState = _uiState.value
-                if (isTransientTimeout(e) && (existingState.session != null || existingState.messages.isNotEmpty())) {
-                    _uiState.update { it.copy(session = it.session, messages = it.messages) }
+                if (
+                    (isTransientTimeout(e) || isRecoverableConnectivityError(e)) &&
+                    hasVisibleSessionContent(existingState)
+                ) {
+                    _uiState.update {
+                        it.copy(
+                            session = it.session,
+                            messages = it.messages,
+                            recoveryNotice = string(R.string.session_detail_recovery_degraded),
+                        )
+                    }
+                    maybeNotifyBackgroundNeedsAttention(serverId, sessionId, existingState)
                 } else {
                     _uiState.update {
                         it.copy(
@@ -235,7 +276,10 @@ class SessionDetailViewModel(application: Application) : AndroidViewModel(applic
         stopLiveRunStream()
         backgroundMonitorJob?.cancel()
         backgroundMonitorJob = null
+        stopForegroundMessageSync()
         activeSessionRef = null
+        backgroundAttentionContextKey = null
+        lastNotifiedBackgroundEventKey = null
         val snapshot = _uiState.value
         _uiState.value = SessionDetailUiState(
             loading = false,
@@ -252,18 +296,18 @@ class SessionDetailViewModel(application: Application) : AndroidViewModel(applic
             try {
                 refreshSessionAndLive(serverId, sessionId)
             } catch (e: Exception) {
-                // Suppress timeout/network blips while a run is actively streaming.
-                // Only surface errors when there is no live data to show.
-                val isActivelyStreaming = _uiState.value.let { s ->
-                    s.liveRun?.status in activeRunStatuses || s.liveStreamConnected
-                }
-                val hasVisibleContent = _uiState.value.let { s ->
-                    s.session != null || s.messages.isNotEmpty() || !s.liveRun?.lastOutput.isNullOrBlank()
-                }
-                if (!isActivelyStreaming && !(hasVisibleContent && isTransientTimeout(e))) {
+                val snapshot = _uiState.value
+                val canRecover = (isTransientTimeout(e) || isRecoverableConnectivityError(e)) &&
+                    (hasVisibleSessionContent(snapshot) || snapshot.liveRun?.status in activeRunStatuses || snapshot.liveStreamConnected)
+                if (!canRecover) {
                     _uiState.update {
                         it.copy(error = userFacingMessage(e, string(R.string.session_detail_error_refresh)))
                     }
+                } else {
+                    _uiState.update {
+                        it.copy(recoveryNotice = string(R.string.session_detail_recovery_degraded))
+                    }
+                    maybeNotifyBackgroundNeedsAttention(serverId, sessionId, snapshot)
                 }
             } finally {
                 _uiState.update { it.copy(refreshing = false) }
@@ -297,7 +341,9 @@ class SessionDetailViewModel(application: Application) : AndroidViewModel(applic
                     )
                 }
                 seedRuntimeControlsFromRun(liveRun)
-                maybeNotifyRunCompleted(serverId, sessionId, liveRun)
+                maybeNotifyRunState(serverId, sessionId, liveRun)
+                maybeNotifyRecovered(serverId, sessionId, liveRun)
+                markRecoverySyncedIfNeeded()
                 startBackgroundMonitorIfNeeded()
             } catch (_: Exception) {
                 // Keep the last visible live state when polling blips.
@@ -359,7 +405,8 @@ class SessionDetailViewModel(application: Application) : AndroidViewModel(applic
                                     )
                                 }
                                 seedRuntimeControlsFromRun(event.run)
-                                maybeNotifyRunCompleted(serverId, sessionId, event.run)
+                                maybeNotifyRunState(serverId, sessionId, event.run)
+                                maybeNotifyRecovered(serverId, sessionId, event.run)
                                 // Auto-refresh full session when run reaches terminal state
                                 if (isTerminal) {
                                     silentRefreshSessionAndLive(serverId, sessionId)
@@ -395,6 +442,7 @@ class SessionDetailViewModel(application: Application) : AndroidViewModel(applic
                                         liveStreamStatus = string(R.string.session_detail_stream_idle_recovering),
                                     )
                                 }
+                                maybeNotifyBackgroundNeedsAttention(serverId, sessionId, _uiState.value)
                             }
                             is LiveRunStreamEvent.Reconnecting -> {
                                 _uiState.update {
@@ -403,6 +451,7 @@ class SessionDetailViewModel(application: Application) : AndroidViewModel(applic
                                         liveStreamStatus = event.message,
                                     )
                                 }
+                                maybeNotifyBackgroundNeedsAttention(serverId, sessionId, _uiState.value)
                             }
                         }
                     }
@@ -417,6 +466,7 @@ class SessionDetailViewModel(application: Application) : AndroidViewModel(applic
                         liveStreamStatus = string(R.string.session_detail_stream_fallback_polling),
                     )
                 }
+                maybeNotifyBackgroundNeedsAttention(serverId, sessionId, _uiState.value)
             }
         }
     }
@@ -434,6 +484,8 @@ class SessionDetailViewModel(application: Application) : AndroidViewModel(applic
         liveStreamKey = null
         liveStreamLastEventId = null
         if (resetState) {
+            backgroundAttentionContextKey = null
+            lastNotifiedBackgroundEventKey = null
             _uiState.update {
                 it.copy(
                     liveStreamConnected = false,
@@ -596,7 +648,7 @@ class SessionDetailViewModel(application: Application) : AndroidViewModel(applic
         _uiState.update {
             it.copy(
                 appInBackground = false,
-                recoveryNotice = if (sessionId.isNullOrBlank()) null else string(R.string.session_detail_recovery_synced),
+                recoveryNotice = if (sessionId.isNullOrBlank()) null else string(R.string.session_detail_recovery_restoring),
                 error = null,
             )
         }
@@ -605,6 +657,7 @@ class SessionDetailViewModel(application: Application) : AndroidViewModel(applic
             restartLiveRunStream(serverId, sessionId)
             refreshLiveRun(serverId, sessionId)
             refresh(serverId, sessionId)
+            startForegroundMessageSyncIfNeeded(serverId, sessionId)
         }
     }
 
@@ -813,6 +866,7 @@ class SessionDetailViewModel(application: Application) : AndroidViewModel(applic
                     retainedLiveRunId = null,
                 )
             }
+            startForegroundMessageSyncIfNeeded(serverId, sessionId)
             refreshLiveRun(serverId, sessionId)
             return true
         } catch (e: Exception) {
@@ -1082,11 +1136,15 @@ class SessionDetailViewModel(application: Application) : AndroidViewModel(applic
                     )
                 }
                 seedRuntimeControlsFromRun(liveRun)
-                maybeNotifyRunCompleted(serverId, sessionId, liveRun)
+                maybeNotifyRunState(serverId, sessionId, liveRun)
+                maybeNotifyRecovered(serverId, sessionId, liveRun)
                 startBackgroundMonitorIfNeeded()
+                startForegroundMessageSyncIfNeeded(serverId, sessionId)
+                markRecoverySyncedIfNeeded()
                 session
             }
             if (_uiState.value.liveRun?.status !in activeRunStatuses) {
+                stopForegroundMessageSync()
                 maybeDispatchQueuedPrompt(serverId, sessionId)
             }
             if (_uiState.value.session == null) {
@@ -1213,22 +1271,35 @@ class SessionDetailViewModel(application: Application) : AndroidViewModel(applic
             val snapshot = _uiState.value
             val effectiveRuntimeControls = runtimeControls ?: currentRuntimeControls(snapshot)
             val composedPrompt = buildAttachmentPrompt(prompt, snapshot.pendingArtifacts)
-            val createdSessionId = withServerClient(serverId) { handle ->
-                handle.client.createSession(
-                    token = handle.token,
-                    hostId = SESSION_HOST_ID,
-                    cwd = cwd,
-                    prompt = null,
-                ).sessionId
+            val inlineCreate = runtimeControls == null
+            val createdSessionId = if (inlineCreate) {
+                withServerClient(serverId) { handle ->
+                    handle.client.createSession(
+                        token = handle.token,
+                        hostId = SESSION_HOST_ID,
+                        cwd = cwd,
+                        prompt = composedPrompt,
+                    ).sessionId
+                }
+            } else {
+                val newSessionId = withServerClient(serverId) { handle ->
+                    handle.client.createSession(
+                        token = handle.token,
+                        hostId = SESSION_HOST_ID,
+                        cwd = cwd,
+                        prompt = null,
+                    ).sessionId
+                }
+                sendPromptInternal(
+                    serverId = serverId,
+                    sessionId = newSessionId,
+                    composedPrompt = composedPrompt,
+                    model = effectiveRuntimeControls.model,
+                    reasoningEffort = effectiveRuntimeControls.reasoningEffort,
+                )
+                newSessionId
             }
-            _uiState.update { it.copy(createdSessionId = createdSessionId) }
-            sendPromptInternal(
-                serverId = serverId,
-                sessionId = createdSessionId,
-                composedPrompt = composedPrompt,
-                model = effectiveRuntimeControls.model,
-                reasoningEffort = effectiveRuntimeControls.reasoningEffort,
-            )
+            startForegroundMessageSyncIfNeeded(serverId, createdSessionId)
             refreshSessionAndLive(serverId, createdSessionId)
             _uiState.update {
                 it.copy(
@@ -1298,6 +1369,7 @@ class SessionDetailViewModel(application: Application) : AndroidViewModel(applic
                 model = effectiveRuntimeControls.model,
                 reasoningEffort = effectiveRuntimeControls.reasoningEffort,
             )
+            startForegroundMessageSyncIfNeeded(serverId, createdSessionId)
             refreshSessionAndLive(serverId, createdSessionId)
 
             _uiState.update {
@@ -1328,6 +1400,7 @@ class SessionDetailViewModel(application: Application) : AndroidViewModel(applic
 
     override fun onCleared() {
         queuedDispatchJob?.cancel()
+        stopForegroundMessageSync()
         stopLiveRunStream()
         super.onCleared()
     }
@@ -1414,7 +1487,7 @@ class SessionDetailViewModel(application: Application) : AndroidViewModel(applic
             }
         }
 
-        if (hasSettledCurrentTurn(messages, next.currentTurnPromptOverride)) {
+        if (liveRun?.status in terminalRunStatuses && hasSettledCurrentTurn(messages, next.currentTurnPromptOverride)) {
             next = next.copy(
                 currentTurnPromptOverride = null,
                 retainedLiveOutput = null,
@@ -1425,15 +1498,78 @@ class SessionDetailViewModel(application: Application) : AndroidViewModel(applic
         return next
     }
 
+    private fun startForegroundMessageSyncIfNeeded(serverId: String, sessionId: String) {
+        if (_uiState.value.appInBackground) return
+        if (foregroundMessageSyncJob?.isActive == true) return
+
+        foregroundMessageSyncJob = viewModelScope.launch {
+            while (isActive && !_uiState.value.appInBackground) {
+                val liveRun = _uiState.value.liveRun
+                if (liveRun?.status !in activeRunStatuses) {
+                    if (_uiState.value.sending) {
+                        kotlinx.coroutines.delay(450L)
+                        continue
+                    }
+                    break
+                }
+                try {
+                    val detail = withServerClient(serverId) { handle ->
+                        handle.client.getSessionDetail(handle.token, SESSION_HOST_ID, sessionId)
+                    }
+                    _uiState.update { state ->
+                        applyConversationContinuity(
+                            state = state.copy(
+                                session = detail.session,
+                                messages = detail.messages,
+                            ),
+                            messages = detail.messages,
+                            liveRun = state.liveRun,
+                        )
+                    }
+                } catch (_: Exception) {
+                    // Best effort only. Live run continuity should not be blocked by message polling blips.
+                }
+                kotlinx.coroutines.delay(1200L)
+            }
+            foregroundMessageSyncJob = null
+        }
+    }
+
+    private fun stopForegroundMessageSync() {
+        foregroundMessageSyncJob?.cancel()
+        foregroundMessageSyncJob = null
+    }
+
     private fun hasSettledCurrentTurn(
         messages: List<SessionMessage>,
         currentTurnPromptOverride: String?,
     ): Boolean {
         val pendingPrompt = currentTurnPromptOverride?.trim().orEmpty()
         if (pendingPrompt.isBlank()) return false
+        val currentTurnMessages = buildCurrentTurnProjection(
+            messages = messages,
+            liveRun = null,
+            pendingTurnPrompt = pendingPrompt,
+            cleanedOutput = null,
+            retainedLiveOutput = null,
+            isDraft = false,
+        )
         val latestPrompt = sanitizePromptDisplay(latestCanonicalPrompt(messages))
         if (latestPrompt.isNullOrBlank() || latestPrompt != pendingPrompt) return false
-        return !latestCanonicalAssistantReply(messages).isNullOrBlank()
+        return currentTurnMessages.settledAssistantMessages.isNotEmpty()
+    }
+
+    private fun markRecoverySyncedIfNeeded() {
+        val restoring = string(R.string.session_detail_recovery_restoring)
+        val degraded = string(R.string.session_detail_recovery_degraded)
+        val synced = string(R.string.session_detail_recovery_synced)
+        _uiState.update { state ->
+            if (!state.appInBackground && (state.recoveryNotice == restoring || state.recoveryNotice == degraded)) {
+                state.copy(recoveryNotice = synced)
+            } else {
+                state
+            }
+        }
     }
 
     private fun rememberActiveSession(serverId: String, sessionId: String) {
@@ -1459,14 +1595,15 @@ class SessionDetailViewModel(application: Application) : AndroidViewModel(applic
                         )
                     }
                     seedRuntimeControlsFromRun(liveRun)
-                    maybeNotifyRunCompleted(currentRef.serverId, currentRef.sessionId, liveRun)
+                    maybeNotifyRunState(currentRef.serverId, currentRef.sessionId, liveRun)
+                    maybeNotifyRecovered(currentRef.serverId, currentRef.sessionId, liveRun)
                     if (liveRun?.status in terminalRunStatuses) {
                         silentRefreshSessionAndLive(currentRef.serverId, currentRef.sessionId)
                         maybeDispatchQueuedPrompt(currentRef.serverId, currentRef.sessionId)
                         break
                     }
                 } catch (_: Exception) {
-                    // Best effort. Background polling should stay silent.
+                    maybeNotifyBackgroundNeedsAttention(currentRef.serverId, currentRef.sessionId, _uiState.value)
                 }
                 kotlinx.coroutines.delay(20_000L)
             }
@@ -1478,29 +1615,130 @@ class SessionDetailViewModel(application: Application) : AndroidViewModel(applic
             handle.client.getLiveRun(handle.token, SESSION_HOST_ID, sessionId)
         }
 
-    private fun maybeNotifyRunCompleted(
+    private fun maybeNotifyRunState(
         serverId: String,
         sessionId: String,
         liveRun: Run?,
     ) {
         val run = liveRun ?: return
-        if (run.status !in terminalRunStatuses) return
-        if (!_uiState.value.appInBackground) return
-        val notificationKey = run.id?.takeIf { it.isNotBlank() }
-            ?: "$serverId|$sessionId|${run.status}"
-        if (notificationKey == lastNotifiedTerminalRunId) return
+        val tier = when (run.status) {
+            "completed" -> BackgroundNotificationTier.COMPLETED
+            "failed" -> BackgroundNotificationTier.FAILED
+            "stopped" -> BackgroundNotificationTier.NEEDS_ATTENTION
+            else -> null
+        } ?: return
+        postBackgroundNotification(
+            serverId = serverId,
+            sessionId = sessionId,
+            run = run,
+            tier = tier,
+        )
+        if (run.status in terminalRunStatuses) {
+            backgroundAttentionContextKey = null
+        }
+    }
 
-        lastNotifiedTerminalRunId = notificationKey
+    private fun maybeNotifyBackgroundNeedsAttention(
+        serverId: String,
+        sessionId: String,
+        snapshot: SessionDetailUiState,
+    ) {
+        if (!snapshot.appInBackground) return
+        if (!hasVisibleSessionContent(snapshot) &&
+            snapshot.liveRun?.status !in activeRunStatuses &&
+            !snapshot.liveStreamConnected
+        ) {
+            return
+        }
+        val attentionContext = listOf(
+            serverId,
+            sessionId,
+            snapshot.liveRun?.id.orEmpty(),
+            snapshot.liveRun?.status.orEmpty(),
+            snapshot.liveStreamStatus.orEmpty(),
+        ).joinToString("|")
+        if (attentionContext == backgroundAttentionContextKey) return
+        backgroundAttentionContextKey = attentionContext
+        postBackgroundNotification(
+            serverId = serverId,
+            sessionId = sessionId,
+            run = snapshot.liveRun,
+            tier = BackgroundNotificationTier.NEEDS_ATTENTION,
+            additionalKey = attentionContext,
+        )
+    }
+
+    private fun maybeNotifyRecovered(
+        serverId: String,
+        sessionId: String,
+        liveRun: Run?,
+    ) {
+        val run = liveRun
+        val attentionContext = backgroundAttentionContextKey ?: return
+        val expectedPrefix = "$serverId|$sessionId|"
+        if (!attentionContext.startsWith(expectedPrefix)) return
+        if (!_uiState.value.appInBackground) {
+            backgroundAttentionContextKey = null
+            return
+        }
+        if (run?.status in terminalRunStatuses) {
+            backgroundAttentionContextKey = null
+            return
+        }
+
+        backgroundAttentionContextKey = null
+        postBackgroundNotification(
+            serverId = serverId,
+            sessionId = sessionId,
+            run = run,
+            tier = BackgroundNotificationTier.RECOVERED,
+            additionalKey = attentionContext,
+        )
+    }
+
+    private fun postBackgroundNotification(
+        serverId: String,
+        sessionId: String,
+        run: Run?,
+        tier: BackgroundNotificationTier,
+        additionalKey: String? = null,
+    ) {
+        val appInBackground = _uiState.value.appInBackground
+        if (!appInBackground) return
+
+        val notificationKey = listOf(
+            serverId,
+            sessionId,
+            run?.id.orEmpty(),
+            tier.statusValue,
+            additionalKey.orEmpty(),
+        ).joinToString("|")
+        if (notificationKey == lastNotifiedBackgroundEventKey) return
+        lastNotifiedBackgroundEventKey = notificationKey
+
+        if (tier == BackgroundNotificationTier.NEEDS_ATTENTION) {
+            backgroundAttentionContextKey = additionalKey ?: notificationKey
+        }
+
         RunCompletedNotificationHelper(getApplication()).postRunCompleted(
             payload = RunCompletedNotificationPayload(
                 serverId = serverId,
                 hostId = SESSION_HOST_ID,
                 sessionId = sessionId,
-                runId = run.id,
+                tier = when (tier) {
+                    BackgroundNotificationTier.COMPLETED -> RunNotificationTier.COMPLETED
+                    BackgroundNotificationTier.FAILED -> RunNotificationTier.FAILED
+                    BackgroundNotificationTier.NEEDS_ATTENTION -> RunNotificationTier.NEEDS_ATTENTION
+                    BackgroundNotificationTier.RECOVERED -> RunNotificationTier.RECOVERED
+                },
+                runId = run?.id,
                 sessionLabel = _uiState.value.session?.title?.takeIf { it.isNotBlank() },
-                terminalStatus = run.status,
+                terminalStatus = run?.status ?: tier.statusValue,
             ),
             appInBackground = true,
         )
+        if (tier == BackgroundNotificationTier.COMPLETED || tier == BackgroundNotificationTier.FAILED) {
+            backgroundAttentionContextKey = null
+        }
     }
 }

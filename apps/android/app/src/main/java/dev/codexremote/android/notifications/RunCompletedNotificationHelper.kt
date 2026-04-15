@@ -50,12 +50,11 @@ class RunCompletedNotificationHelper(context: Context) {
         val sessionLabel = displayLabel(payload.sessionLabel, payload.sessionId)
         val serverLabel = displayLabel(payload.serverLabel, payload.serverId)
         val hostLabel = displayLabel(payload.hostLabel, payload.hostId)
-        val title = appContext.getString(R.string.notification_run_completed_title)
-        val body = appContext.getString(
-            R.string.notification_run_completed_body,
-            sessionLabel,
-            serverLabel,
-            hostLabel,
+        val (title, body, priority, category) = notificationPresentation(
+            payload = payload,
+            sessionLabel = sessionLabel,
+            serverLabel = serverLabel,
+            hostLabel = hostLabel,
         )
 
         return NotificationCompat.Builder(appContext, ensureChannel())
@@ -63,15 +62,15 @@ class RunCompletedNotificationHelper(context: Context) {
             .setContentTitle(title)
             .setContentText(body)
             .setStyle(NotificationCompat.BigTextStyle().bigText(body))
-            .setCategory(NotificationCompat.CATEGORY_STATUS)
-            .setPriority(NotificationCompat.PRIORITY_DEFAULT)
+            .setCategory(category)
+            .setPriority(priority)
             .setAutoCancel(true)
             .setOnlyAlertOnce(true)
             .setContentIntent(buildContentIntent(payload))
             .build()
     }
 
-    fun postRunCompleted(
+    fun postRunNotification(
         payload: RunCompletedNotificationPayload,
         appInBackground: Boolean = true,
     ): Boolean {
@@ -86,10 +85,77 @@ class RunCompletedNotificationHelper(context: Context) {
         return true
     }
 
+    fun postRunCompleted(
+        payload: RunCompletedNotificationPayload,
+        appInBackground: Boolean = true,
+    ): Boolean = postRunNotification(
+        payload = payload.copy(tier = payload.tier),
+        appInBackground = appInBackground,
+    )
+
     companion object {
         const val CHANNEL_ID = "run_completed"
     }
 
     private fun displayLabel(label: String?, fallback: String): String =
         label?.trim()?.takeIf { it.isNotEmpty() } ?: fallback
+
+    private fun notificationPresentation(
+        payload: RunCompletedNotificationPayload,
+        sessionLabel: String,
+        serverLabel: String,
+        hostLabel: String,
+    ): NotificationPresentation = when (payload.tier) {
+        RunNotificationTier.COMPLETED -> NotificationPresentation(
+            title = appContext.getString(R.string.notification_run_completed_title),
+            body = appContext.getString(
+                R.string.notification_run_completed_body,
+                sessionLabel,
+                serverLabel,
+                hostLabel,
+            ),
+            priority = NotificationCompat.PRIORITY_DEFAULT,
+            category = NotificationCompat.CATEGORY_STATUS,
+        )
+        RunNotificationTier.FAILED -> NotificationPresentation(
+            title = appContext.getString(R.string.notification_run_failed_title),
+            body = appContext.getString(
+                R.string.notification_run_failed_body,
+                sessionLabel,
+                serverLabel,
+                hostLabel,
+            ),
+            priority = NotificationCompat.PRIORITY_HIGH,
+            category = NotificationCompat.CATEGORY_ERROR,
+        )
+        RunNotificationTier.NEEDS_ATTENTION -> NotificationPresentation(
+            title = appContext.getString(R.string.notification_run_attention_title),
+            body = appContext.getString(
+                R.string.notification_run_attention_body,
+                sessionLabel,
+                serverLabel,
+                hostLabel,
+            ),
+            priority = NotificationCompat.PRIORITY_HIGH,
+            category = NotificationCompat.CATEGORY_STATUS,
+        )
+        RunNotificationTier.RECOVERED -> NotificationPresentation(
+            title = appContext.getString(R.string.notification_run_recovered_title),
+            body = appContext.getString(
+                R.string.notification_run_recovered_body,
+                sessionLabel,
+                serverLabel,
+                hostLabel,
+            ),
+            priority = NotificationCompat.PRIORITY_DEFAULT,
+            category = NotificationCompat.CATEGORY_STATUS,
+        )
+    }
+
+    private data class NotificationPresentation(
+        val title: String,
+        val body: String,
+        val priority: Int,
+        val category: String,
+    )
 }

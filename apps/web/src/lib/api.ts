@@ -338,12 +338,20 @@ export async function getLiveRun(sessionId: string): Promise<Run | null> {
 export async function startLiveRun(
   sessionId: string,
   prompt: string,
+  opts?: {
+    model?: string | null;
+    reasoningEffort?: string | null;
+  },
 ): Promise<{ runId: string }> {
   return apiFetch(
     `/api/hosts/${HOST}/sessions/${encodeURIComponent(sessionId)}/live`,
     {
       method: "POST",
-      body: JSON.stringify({ prompt }),
+      body: JSON.stringify({
+        prompt,
+        model: opts?.model ?? undefined,
+        reasoningEffort: opts?.reasoningEffort ?? undefined,
+      }),
     },
   );
 }

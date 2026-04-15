@@ -18,6 +18,7 @@ import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -34,6 +35,8 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.ExpandLess
+import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.Replay
 import androidx.compose.material3.Button
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -298,12 +301,11 @@ internal fun AssistantReplyBlock(
                     )
                 }
 
-                // Streaming text with typewriter
                 if (renderOutput) {
-                    StreamingTextRenderer(
-                        targetText = output.orEmpty(),
+                    ReplySectionCard(
+                        output = output.orEmpty(),
                         active = isActive,
-                        modifier = Modifier.fillMaxWidth(),
+                        sectionLabel = null,
                     )
                 }
 
@@ -383,6 +385,176 @@ internal fun AssistantReplyBlock(
     }
 }
 
+@Composable
+internal fun AssistantMessageSnapshotCard(
+    output: String,
+    label: String? = null,
+    modifier: Modifier = Modifier,
+) {
+    Surface(
+        modifier = modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(18.dp),
+        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.56f),
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 12.dp, vertical = 10.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            label?.takeIf { it.isNotBlank() }?.let {
+                Text(
+                    text = it,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            RichBlockList(
+                text = output,
+                active = false,
+                modifier = Modifier.fillMaxWidth(),
+            )
+        }
+    }
+}
+
+@Composable
+internal fun SettledAssistantMessageCard(
+    message: dev.codexremote.android.data.model.SessionMessage,
+    collapsed: Boolean,
+    modifier: Modifier = Modifier,
+) {
+    Surface(
+        modifier = modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(18.dp),
+        color = if (collapsed) {
+            MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
+        } else {
+            MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.56f)
+        },
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 12.dp, vertical = 10.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            if (collapsed) {
+                Text(
+                    text = message.text.replace(Regex("\\s+"), " ").trim(),
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            } else {
+                RichBlockList(
+                    text = message.text,
+                    active = false,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            }
+        }
+    }
+}
+
+@Composable
+internal fun CurrentTurnCollapsedHeader(
+    messageCount: Int,
+    expanded: Boolean,
+    processedDuration: String?,
+    onToggle: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Surface(
+        modifier = modifier
+            .fillMaxWidth()
+            .clickable(onClick = onToggle),
+        shape = RoundedCornerShape(16.dp),
+        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.42f),
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 12.dp, vertical = 10.dp),
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Column(
+                modifier = Modifier.weight(1f),
+                verticalArrangement = Arrangement.spacedBy(4.dp),
+            ) {
+                Text(
+                    text = stringResource(R.string.session_timeline_current_turn_collapsed_title, messageCount),
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurface,
+                )
+                processedDuration?.takeIf { it.isNotBlank() }?.let {
+                    Text(
+                        text = stringResource(R.string.session_timeline_current_turn_collapsed_subtitle, it),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+            Icon(
+                imageVector = if (expanded) Icons.Filled.ExpandLess else Icons.Filled.ExpandMore,
+                contentDescription = if (expanded) {
+                    stringResource(R.string.session_timeline_current_turn_collapse)
+                } else {
+                    stringResource(R.string.session_timeline_current_turn_expand)
+                },
+                modifier = Modifier.size(18.dp),
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+    }
+}
+
+@Composable
+private fun ReplySectionCard(
+    output: String,
+    active: Boolean,
+    sectionLabel: String?,
+) {
+    Surface(
+        shape = RoundedCornerShape(18.dp),
+        color = if (active) {
+            MaterialTheme.colorScheme.surfaceContainerHigh
+        } else {
+            MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.56f)
+        },
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 12.dp, vertical = 10.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            if (!sectionLabel.isNullOrBlank()) {
+                Text(
+                    text = sectionLabel,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            if (active) {
+                StreamingTextRenderer(
+                    targetText = output,
+                    active = true,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            } else {
+                RichBlockList(
+                    text = output,
+                    active = false,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            }
+        }
+    }
+}
+
 // ── Incremental block parse cache ─────────────────────────────────
 
 /**
@@ -425,16 +597,48 @@ internal fun StreamingTextRenderer(
     val noVisibleOutputFooter = stringResource(R.string.session_timeline_reply_no_visible_output_footer)
     val noVisibleOutputState = stringResource(R.string.session_timeline_reply_no_visible_output_state_label)
     val cache = remember { BlockParseCache() }
+    var displayedText by remember { mutableStateOf(if (active) "" else targetText) }
+    val cursorTransition = rememberInfiniteTransition(label = "type-cursor")
+    val cursorAlpha by cursorTransition.animateFloat(
+        initialValue = 0.22f,
+        targetValue = 1f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(durationMillis = 720),
+            repeatMode = RepeatMode.Reverse,
+        ),
+        label = "type-cursor-alpha",
+    )
+
+    androidx.compose.runtime.LaunchedEffect(targetText, active) {
+        if (!active) {
+            displayedText = targetText
+            return@LaunchedEffect
+        }
+
+        displayedText = calmTypewriterBaseline(
+            targetText = targetText,
+            currentDisplayedText = displayedText,
+        )
+        while (displayedText.length < targetText.length) {
+            val remaining = targetText.length - displayedText.length
+            val nextCount = typewriterStepSize(remaining).coerceAtLeast(1)
+            val nextEnd = (displayedText.length + nextCount).coerceAtMost(targetText.length)
+            val nextSlice = targetText.substring(displayedText.length, nextEnd)
+            displayedText = targetText.substring(0, nextEnd)
+            val delayChar = nextSlice.lastOrNull() ?: break
+            kotlinx.coroutines.delay(typewriterDelayMs(delayChar))
+        }
+    }
 
     // Incremental parse: stable blocks keep the same reference when unchanged.
-    val (stableBlocks, tailBlock) = remember(targetText) {
-        cache.computeAndReturn(targetText)
+    val (stableBlocks, tailBlock) = remember(displayedText) {
+        cache.computeAndReturn(displayedText)
     }
     val hasVisibleBlocks = stableBlocks.isNotEmpty() || tailBlock != null
 
     Column(
         modifier = modifier,
-        verticalArrangement = Arrangement.spacedBy(10.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
         if (!hasVisibleBlocks) {
             if (active) {
@@ -459,7 +663,10 @@ internal fun StreamingTextRenderer(
             tailBlock?.let { block ->
                 key(block.id) {
                     AnimatedBlock(id = block.id) {
-                        RenderSingleBlock(block = block, cursorAlpha = 0f)
+                        RenderSingleBlock(
+                            block = block,
+                            cursorAlpha = if (active && displayedText.length < targetText.length) cursorAlpha else 0f,
+                        )
                     }
                 }
             }
@@ -481,7 +688,20 @@ private fun RenderSingleBlock(block: RichTextBlock, cursorAlpha: Float) {
 }
 
 @Composable
-private fun ThinkingPlaceholderCard() {
+internal fun ThinkingPlaceholderCard(
+    compact: Boolean = false,
+) {
+    if (compact) {
+        StreamingActivityChip(
+            hasVisibleOutput = true,
+            textOverride = localizedSessionText(
+                "继续处理中，下一段内容会接在后面。",
+                "Still working. The next chunk will append below.",
+            ),
+        )
+        return
+    }
+
     TimelineNoticeCard(
         title = localizedSessionText("思考中", "Thinking"),
         message = localizedSessionText(
@@ -501,6 +721,7 @@ private fun ThinkingPlaceholderCard() {
 @Composable
 private fun StreamingActivityChip(
     hasVisibleOutput: Boolean,
+    textOverride: String? = null,
     modifier: Modifier = Modifier,
 ) {
     val transition = rememberInfiniteTransition(label = "stream-activity")
@@ -533,7 +754,7 @@ private fun StreamingActivityChip(
                     ),
             )
             Text(
-                text = if (hasVisibleOutput) {
+                text = textOverride ?: if (hasVisibleOutput) {
                     localizedSessionText("继续生成中，后续内容会追加在这里。", "Still thinking, more content will append here.")
                 } else {
                     localizedSessionText("正在组织首段内容，请保持当前卡片可见。", "Preparing the first visible chunk. Keep this card in place.")

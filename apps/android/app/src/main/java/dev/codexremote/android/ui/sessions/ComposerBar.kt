@@ -1,16 +1,17 @@
 package dev.codexremote.android.ui.sessions
 
-import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.animateContentSize
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.spring
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
@@ -28,16 +29,16 @@ import androidx.compose.material.icons.filled.PhotoCamera
 import androidx.compose.material.icons.filled.PhotoLibrary
 import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material.icons.filled.Tune
-import androidx.compose.material3.Button
-import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
+import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -58,6 +59,7 @@ internal data class ComposerAttachmentItem(
 internal data class QueuedPromptItem(
     val id: String,
     val preview: String,
+    val runtimeSummary: String,
     val attachmentCount: Int,
     val model: String?,
     val reasoningEffort: String?,
@@ -150,6 +152,7 @@ internal fun ComposerBar(
                         queuedPrompts.forEach { queuedPrompt ->
                             SummaryPill(
                                 text = queuedPrompt.preview,
+                                subtitle = queuedPrompt.runtimeSummary,
                                 onClick = { onRestoreQueuedPrompt(queuedPrompt) },
                             )
                         }
@@ -207,10 +210,12 @@ internal fun ComposerBar(
                             )
                         }
 
-                        FlowRow(
-                            modifier = Modifier.fillMaxWidth(),
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .horizontalScroll(rememberScrollState()),
                             horizontalArrangement = Arrangement.spacedBy(8.dp),
-                            verticalArrangement = Arrangement.spacedBy(6.dp),
+                            verticalAlignment = Alignment.CenterVertically,
                         ) {
                             CompactIconButton(
                                 icon = Icons.Filled.AttachFile,
@@ -254,90 +259,61 @@ internal fun ComposerBar(
                                 enabled = !sending && !stopping,
                                 onClick = onReasoningEffortClick,
                             )
-                            AnimatedContent(
-                                targetState = isRunning,
-                                label = "composer-action",
-                            ) { running ->
-                                if (running) {
-                                    Row(
-                                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                                        verticalAlignment = Alignment.CenterVertically,
-                                    ) {
-                                        Button(
-                                            onClick = onQueue,
-                                            enabled = prompt.trim().isNotEmpty() && !uploading && !sending,
-                                            shape = RoundedCornerShape(14.dp),
-                                            colors = ButtonDefaults.buttonColors(
-                                                containerColor = MaterialTheme.colorScheme.primaryContainer,
-                                                contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
-                                            ),
-                                            modifier = Modifier.height(38.dp),
-                                        ) {
-                                            Icon(
-                                                Icons.Filled.ArrowUpward,
-                                                contentDescription = stringResource(R.string.composer_queue_add_desc),
-                                                modifier = Modifier.size(16.dp),
-                                            )
-                                            Text(
-                                                text = stringResource(R.string.composer_queue_label),
-                                                modifier = Modifier.padding(start = 4.dp),
-                                                style = MaterialTheme.typography.labelLarge,
-                                            )
-                                        }
+                            if (isRunning) {
+                                CompactActionButton(
+                                    onClick = onQueue,
+                                    enabled = prompt.trim().isNotEmpty() && !uploading && !sending,
+                                    containerColor = MaterialTheme.colorScheme.primaryContainer,
+                                    contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
+                                    contentDescription = stringResource(R.string.composer_queue_add_desc),
+                                ) {
+                                    Icon(
+                                        Icons.Filled.ArrowUpward,
+                                        contentDescription = null,
+                                        modifier = Modifier.size(15.dp),
+                                    )
+                                }
 
-                                        Button(
-                                            onClick = onStop,
-                                            enabled = !stopping,
-                                            shape = RoundedCornerShape(14.dp),
-                                            colors = ButtonDefaults.buttonColors(
-                                                containerColor = MaterialTheme.colorScheme.errorContainer,
-                                                contentColor = MaterialTheme.colorScheme.onErrorContainer,
-                                            ),
-                                            modifier = Modifier.height(38.dp),
-                                        ) {
-                                            if (stopping) {
-                                                CircularProgressIndicator(
-                                                    modifier = Modifier.size(18.dp),
-                                                    strokeWidth = 2.dp,
-                                                )
-                                            } else {
-                                                Icon(
-                                                    Icons.Filled.Stop,
-                                                    contentDescription = stringResource(R.string.composer_stop_run_desc),
-                                                    modifier = Modifier.size(16.dp),
-                                                )
-                                            }
-                                        }
+                                CompactActionButton(
+                                    onClick = onStop,
+                                    enabled = !stopping,
+                                    containerColor = MaterialTheme.colorScheme.errorContainer,
+                                    contentColor = MaterialTheme.colorScheme.onErrorContainer,
+                                    contentDescription = stringResource(R.string.composer_stop_run_desc),
+                                ) {
+                                    if (stopping) {
+                                        CircularProgressIndicator(
+                                            modifier = Modifier.size(16.dp),
+                                            strokeWidth = 2.dp,
+                                        )
+                                    } else {
+                                        Icon(
+                                            Icons.Filled.Stop,
+                                            contentDescription = null,
+                                            modifier = Modifier.size(15.dp),
+                                        )
                                     }
-                                } else {
-                                    Button(
-                                        onClick = onSend,
-                                        enabled = prompt.trim().isNotEmpty() && !sending && !uploading,
-                                        shape = RoundedCornerShape(14.dp),
-                                        colors = ButtonDefaults.buttonColors(
-                                            containerColor = MaterialTheme.colorScheme.primary,
-                                            contentColor = MaterialTheme.colorScheme.onPrimary,
-                                        ),
-                                        modifier = Modifier.height(38.dp),
-                                    ) {
-                                        if (sending) {
-                                            CircularProgressIndicator(
-                                                modifier = Modifier.size(18.dp),
-                                                strokeWidth = 2.dp,
-                                                color = MaterialTheme.colorScheme.onPrimary,
-                                            )
-                                        } else {
-                                            Icon(
-                                                Icons.Filled.ArrowUpward,
-                                                contentDescription = sendContentDescription,
-                                                modifier = Modifier.size(16.dp),
-                                            )
-                                            Text(
-                                                text = stringResource(R.string.composer_send_label),
-                                                modifier = Modifier.padding(start = 4.dp),
-                                                style = MaterialTheme.typography.labelLarge,
-                                            )
-                                        }
+                                }
+                            } else {
+                                CompactActionButton(
+                                    onClick = onSend,
+                                    enabled = prompt.trim().isNotEmpty() && !sending && !uploading,
+                                    containerColor = MaterialTheme.colorScheme.primary,
+                                    contentColor = MaterialTheme.colorScheme.onPrimary,
+                                    contentDescription = sendContentDescription,
+                                ) {
+                                    if (sending) {
+                                        CircularProgressIndicator(
+                                            modifier = Modifier.size(16.dp),
+                                            strokeWidth = 2.dp,
+                                            color = MaterialTheme.colorScheme.onPrimary,
+                                        )
+                                    } else {
+                                        Icon(
+                                            Icons.Filled.ArrowUpward,
+                                            contentDescription = null,
+                                            modifier = Modifier.size(15.dp),
+                                        )
                                     }
                                 }
                             }
@@ -371,12 +347,12 @@ private fun CompactIconButton(
         IconButton(
             onClick = onClick,
             enabled = enabled,
-            modifier = Modifier.size(38.dp),
+            modifier = Modifier.size(34.dp),
         ) {
             Icon(
                 imageVector = icon,
                 contentDescription = contentDescription,
-                modifier = Modifier.size(18.dp),
+                modifier = Modifier.size(16.dp),
                 tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = if (enabled) 1f else 0.4f),
             )
         }
@@ -384,24 +360,65 @@ private fun CompactIconButton(
 }
 
 @Composable
+private fun CompactActionButton(
+    onClick: () -> Unit,
+    enabled: Boolean,
+    containerColor: Color,
+    contentColor: Color,
+    contentDescription: String,
+    content: @Composable () -> Unit,
+) {
+    Surface(
+        shape = RoundedCornerShape(14.dp),
+        color = if (enabled) containerColor else containerColor.copy(alpha = 0.55f),
+    ) {
+        IconButton(
+            onClick = onClick,
+            enabled = enabled,
+            modifier = Modifier.size(34.dp),
+        ) {
+            CompositionLocalProvider(LocalContentColor provides contentColor) {
+                Box(contentAlignment = Alignment.Center) {
+                    content()
+                }
+            }
+        }
+    }
+}
+
+@Composable
 private fun SummaryPill(
     text: String,
+    subtitle: String? = null,
     onClick: (() -> Unit)? = null,
 ) {
     Surface(
         shape = RoundedCornerShape(999.dp),
         color = MaterialTheme.colorScheme.surfaceVariant,
     ) {
-        Text(
-            text = text,
+        Column(
             modifier = Modifier
                 .then(if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier)
                 .padding(horizontal = 10.dp, vertical = 6.dp),
-            style = MaterialTheme.typography.labelSmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-        )
+            verticalArrangement = Arrangement.spacedBy(1.dp),
+        ) {
+            Text(
+                text = text,
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            if (!subtitle.isNullOrBlank()) {
+                Text(
+                    text = subtitle,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.82f),
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+        }
     }
 }
 

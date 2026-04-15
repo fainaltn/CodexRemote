@@ -68,9 +68,9 @@ describe("session detail route", () => {
       lastPreview: "最终答案放在这里。",
     });
     expect(body.messages).toEqual([
-      expect.objectContaining({ role: "user", kind: "message" }),
-      expect.objectContaining({ role: "assistant", kind: "reasoning" }),
-      expect.objectContaining({ role: "assistant", kind: "message" }),
+      expect.objectContaining({ role: "user", kind: "message", orderIndex: 0, isStreaming: false }),
+      expect.objectContaining({ role: "assistant", kind: "reasoning", orderIndex: 1, isStreaming: false }),
+      expect.objectContaining({ role: "assistant", kind: "message", orderIndex: 2, isStreaming: false }),
     ]);
   });
 });

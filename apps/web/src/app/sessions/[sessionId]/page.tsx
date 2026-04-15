@@ -20,7 +20,7 @@ import {
   type Artifact,
   type UploadProgress,
 } from "@/lib/api";
-import { useLiveRun } from "@/lib/use-sse";
+import { useLiveRun, type LiveRunTransportState } from "@/lib/use-sse";
 import { useSearchParams } from "next/navigation";
 
 function formatDate(dateStr: string): string {
@@ -202,6 +202,80 @@ function runStageTone(
   return "terminal";
 }
 
+type StreamNoticeKind =
+  | "connecting"
+  | "recovering"
+  | "degraded"
+  | "recovered"
+  | "terminal";
+
+interface StreamNotice {
+  kind: StreamNoticeKind;
+  title: string;
+  copy: string;
+}
+
+function transportStateLabel(state: LiveRunTransportState): string {
+  switch (state) {
+    case "connecting":
+      return "同步中";
+    case "recovering":
+      return "静默重连";
+    case "degraded":
+      return "降级同步";
+    case "terminal":
+      return "通道停止";
+    case "idle":
+    case "live":
+    default:
+      return "实时在线";
+  }
+}
+
+function transportStateNotice(
+  state: LiveRunTransportState,
+): StreamNotice | null {
+  switch (state) {
+    case "connecting":
+      return {
+        kind: "connecting",
+        title: "正在建立实时通道",
+        copy: "当前内容先由快照填充，SSE 建立后会自动切回实时流。",
+      };
+    case "recovering":
+      return {
+        kind: "recovering",
+        title: "实时通道短暂中断",
+        copy: "后台正在静默重连，当前会话继续由轮询快照兜底，不会打断页面。",
+      };
+    case "degraded":
+      return {
+        kind: "degraded",
+        title: "实时通道已降级",
+        copy: "连续重试后仍不稳定，页面已切换为轮询同步，稍后会继续尝试恢复。",
+      };
+    case "terminal":
+      return {
+        kind: "terminal",
+        title: "实时通道已停止",
+        copy: "如果你刚刚切换了登录状态或权限发生变化，刷新后可以重新建立连接。",
+      };
+    default:
+      return null;
+  }
+}
+
+function runtimeSelectionLabel(value: string | null): string {
+  return value?.trim() || "Auto";
+}
+
+function runtimeSelectionSummary(
+  model: string | null,
+  reasoningEffort: string | null,
+): string {
+  return `下次发送将使用 ${runtimeSelectionLabel(model)} / ${runtimeSelectionLabel(reasoningEffort)}`;
+}
+
 interface HistoryGroup {
   id: string;
   messages: SessionMessage[];
@@ -366,6 +440,11 @@ export default function SessionDetailPage() {
   const [editingText, setEditingText] = useState("");
   const lastRefreshedRunIdRef = useRef<string | null>(null);
   const previousRunStatusRef = useRef<string | null>(null);
+  const previousTransportStateRef =
+    useRef<LiveRunTransportState>("idle");
+  const [streamNotice, setStreamNotice] = useState<StreamNotice | null>(null);
+  const [selectedModel, setSelectedModel] = useState<string | null>(null);
+  const [selectedReasoningEffort, setSelectedReasoningEffort] = useState<string | null>(null);
   const prefillAppliedRef = useRef(false);
 
   const loadSession = useCallback(async () => {
@@ -376,7 +455,12 @@ export default function SessionDetailPage() {
 
   // Only subscribe to SSE after the session has been validated by getSession().
   // This prevents endless reconnect loops for unknown session IDs.
-  const liveRun = useLiveRun(session ? sessionId : null);
+  const liveRunState = useLiveRun(session ? sessionId : null);
+  const liveRun = liveRunState.run;
+  const transportState = liveRunState.transportState;
+  const effectiveModel = selectedModel ?? liveRun?.model ?? null;
+  const effectiveReasoningEffort =
+    selectedReasoningEffort ?? liveRun?.reasoningEffort ?? null;
   const isRunning =
     liveRun?.status === "running" || liveRun?.status === "pending";
   const historyGroups = buildHistoryGroups(messages);
@@ -426,6 +510,10 @@ export default function SessionDetailPage() {
       : pendingArtifacts.length > 0
         ? "附件已挂载，等待指令"
         : "可直接发送";
+  const composerRuntimeSummary = runtimeSelectionSummary(
+    effectiveModel,
+    effectiveReasoningEffort,
+  );
   const composerActionKicker = isRunning
     ? "保持控制"
     : sending
@@ -444,11 +532,75 @@ export default function SessionDetailPage() {
   ).length;
 
   useEffect(() => {
+    const previousState = previousTransportStateRef.current;
+    previousTransportStateRef.current = transportState;
+
+    if (transportState === "idle") {
+      setStreamNotice(null);
+      return;
+    }
+
+    if (transportState === "live") {
+      if (previousState === "recovering" || previousState === "degraded") {
+        setStreamNotice({
+          kind: "recovered",
+          title: "实时通道已恢复",
+          copy: "内容已经重新同步，页面现在回到了实时流状态。",
+        });
+        const timer = setTimeout(() => {
+          setStreamNotice(null);
+        }, 3500);
+        return () => clearTimeout(timer);
+      }
+
+      setStreamNotice(null);
+      return;
+    }
+
+    const notice = transportStateNotice(transportState);
+    setStreamNotice(notice);
+  }, [transportState]);
+
+  const runPanelStateClass =
+    transportState === "recovering"
+      ? "detail-run-panel-recovering"
+      : transportState === "degraded"
+        ? "detail-run-panel-degraded"
+        : transportState === "connecting"
+          ? "detail-run-panel-connecting"
+          : transportState === "terminal"
+            ? "detail-run-panel-terminal"
+            : "";
+  const runTerminalStateClass =
+    transportState === "recovering"
+      ? "run-terminal-card-recovering"
+      : transportState === "degraded"
+        ? "run-terminal-card-degraded"
+        : transportState === "connecting"
+          ? "run-terminal-card-connecting"
+          : transportState === "terminal"
+            ? "run-terminal-card-terminal"
+            : "";
+  const transportBadge = transportStateLabel(transportState);
+
+  useEffect(() => {
     if (prefillAppliedRef.current) return;
     if (!prefill.trim()) return;
     setPrompt(prefill);
     prefillAppliedRef.current = true;
   }, [prefill]);
+
+  useEffect(() => {
+    if (selectedModel === null && liveRun?.model) {
+      setSelectedModel(liveRun.model);
+    }
+  }, [liveRun?.model, selectedModel]);
+
+  useEffect(() => {
+    if (selectedReasoningEffort === null && liveRun?.reasoningEffort) {
+      setSelectedReasoningEffort(liveRun.reasoningEffort);
+    }
+  }, [liveRun?.reasoningEffort, selectedReasoningEffort]);
 
   // Fetch session metadata.
   useEffect(() => {
@@ -581,7 +733,10 @@ export default function SessionDetailPage() {
             ].join("\n")
           : prompt.trim();
 
-      await startLiveRun(sessionId, nextPrompt);
+      await startLiveRun(sessionId, nextPrompt, {
+        model: effectiveModel,
+        reasoningEffort: effectiveReasoningEffort,
+      });
       setPrompt("");
       setPendingArtifacts([]);
       await loadSession();
@@ -613,7 +768,10 @@ export default function SessionDetailPage() {
     try {
       setSending(true);
       setError("");
-      await startLiveRun(sessionId, liveRun?.prompt ?? latestPrompt);
+      await startLiveRun(sessionId, liveRun?.prompt ?? latestPrompt, {
+        model: liveRun?.model ?? effectiveModel,
+        reasoningEffort: liveRun?.reasoningEffort ?? effectiveReasoningEffort,
+      });
       await loadSession();
     } catch (err) {
       setError(err instanceof Error ? err.message : "重试运行失败");
@@ -649,7 +807,10 @@ export default function SessionDetailPage() {
     try {
       setSending(true);
       setError("");
-      await startLiveRun(sessionId, nextPrompt);
+      await startLiveRun(sessionId, nextPrompt, {
+        model: effectiveModel,
+        reasoningEffort: effectiveReasoningEffort,
+      });
       handleCancelEditingMessage();
       await loadSession();
     } catch (err) {
@@ -1031,7 +1192,7 @@ export default function SessionDetailPage() {
                   </div>
                 </div>
 
-                <div className="detail-run-panel">
+                <div className={`detail-run-panel ${runPanelStateClass}`}>
                   {liveRun ? (
                     <>
                       <div className="run-header">
@@ -1039,6 +1200,13 @@ export default function SessionDetailPage() {
                           {isRunning && "● "}
                           {statusLabel(liveRun.status)}
                         </span>
+                        {transportState !== "live" && (
+                          <span
+                            className={`transport-badge transport-badge-${transportState}`}
+                          >
+                            {transportBadge}
+                          </span>
+                        )}
                         {liveRun.model && (
                           <span className="model-badge">{liveRun.model}</span>
                         )}
@@ -1048,6 +1216,21 @@ export default function SessionDetailPage() {
                           </span>
                         )}
                       </div>
+
+                      {streamNotice && (
+                        <div
+                          className={`sync-banner sync-banner-${streamNotice.kind}`}
+                          role="status"
+                          aria-live="polite"
+                        >
+                          <div className="sync-banner-title">
+                            {streamNotice.title}
+                          </div>
+                          <div className="sync-banner-copy">
+                            {streamNotice.copy}
+                          </div>
+                        </div>
+                      )}
 
                       <div className="run-stage-rail" aria-label="运行阶段">
                         <span
@@ -1090,21 +1273,39 @@ export default function SessionDetailPage() {
                           isRunning
                             ? "run-terminal-card-running"
                             : liveRun.status === "failed"
-                            ? "run-terminal-card-error"
-                            : "run-terminal-card-complete"
-                        }`}
+                              ? "run-terminal-card-error"
+                              : "run-terminal-card-complete"
+                        } ${runTerminalStateClass}`}
                       >
                         <div className="history-message-top">
                           <span className="history-role">Codex 输出</span>
                           <span className="history-time">
-                            {isRunning ? "实时流" : statusLabel(liveRun.status)}
+                            {transportState === "recovering"
+                              ? "重连中"
+                              : transportState === "degraded"
+                                ? "降级同步"
+                                : transportState === "connecting"
+                                  ? "同步中"
+                                  : transportState === "terminal"
+                                    ? "通道停止"
+                                    : isRunning
+                                      ? "实时流"
+                                      : statusLabel(liveRun.status)}
                           </span>
                         </div>
                         <div className="run-terminal-output" ref={outputRef}>
                           {liveOutput ??
-                            (isRunning
-                              ? "Codex 正在思考并等待下一段输出…"
-                              : "这次运行没有可显示的终端文本")}
+                            (transportState === "recovering"
+                              ? "实时通道暂时中断，正在静默重连…"
+                              : transportState === "degraded"
+                                ? "实时通道不稳定，已切换为轮询同步，稍后会继续尝试恢复。"
+                                : transportState === "connecting"
+                                  ? "正在建立实时通道，先由快照同步当前状态…"
+                                  : transportState === "terminal"
+                                    ? "实时通道已停止，当前仅保留已同步的会话内容。"
+                                    : isRunning
+                                      ? "Codex 正在思考并等待下一段输出…"
+                                      : "这次运行没有可显示的终端文本")}
                         </div>
                       </div>
 
@@ -1136,6 +1337,32 @@ export default function SessionDetailPage() {
                         </div>
                       )}
                     </>
+                  ) : transportState !== "idle" ? (
+                    <div
+                      className={`empty-state detail-run-empty detail-run-empty-sync detail-run-empty-${transportState}`}
+                      role="status"
+                      aria-live="polite"
+                    >
+                      <div className="empty-state-icon">↻</div>
+                      <div className="empty-state-text">
+                        {transportState === "recovering"
+                          ? "实时通道正在恢复"
+                          : transportState === "degraded"
+                            ? "实时通道已降级为轮询同步"
+                            : transportState === "connecting"
+                              ? "实时通道正在建立"
+                              : "实时通道已停止"}
+                      </div>
+                      <div className="empty-state-sub">
+                        {transportState === "recovering"
+                          ? "页面不会中断，最新内容会由快照继续兜底，稍后会自动切回实时流。"
+                          : transportState === "degraded"
+                            ? "当前网络不稳定，页面仍会持续同步最新快照，并继续尝试恢复 SSE。"
+                            : transportState === "connecting"
+                              ? "当前内容先由快照填充，实时流建立后会自动接管。"
+                              : "如果你只是暂时切走了网络，这里会在恢复后重新建立连接。"}
+                      </div>
+                    </div>
                   ) : (
                     <div className="empty-state detail-run-empty">
                       <div className="empty-state-icon">⚡</div>
@@ -1193,6 +1420,51 @@ export default function SessionDetailPage() {
             <span className="composer-pill composer-pill-muted">
               {isRunning ? "Live run" : "Ready for follow-up"}
             </span>
+          </div>
+        </div>
+
+        <div className="composer-runtime-panel" aria-label="runtime controls">
+          <div className="composer-runtime-copy">
+            <div className="composer-runtime-title">Runtime controls</div>
+            <div className="composer-runtime-summary">
+              {composerRuntimeSummary}
+            </div>
+            <div className="composer-runtime-note">
+              当前页面会把这里的选择直接带到下一次发送；如果已有运行在进行，等停止后再继续提交即可。
+            </div>
+          </div>
+          <div className="composer-runtime-grid">
+            <label className="composer-runtime-field">
+              <span>Model</span>
+              <select
+                value={selectedModel ?? ""}
+                onChange={(e) =>
+                  setSelectedModel(e.target.value.trim() ? e.target.value : null)
+                }
+                disabled={sending}
+              >
+                <option value="">Auto</option>
+                <option value="gpt-5.4">gpt-5.4</option>
+                <option value="o4-mini">o4-mini</option>
+              </select>
+            </label>
+            <label className="composer-runtime-field">
+              <span>Reasoning</span>
+              <select
+                value={selectedReasoningEffort ?? ""}
+                onChange={(e) =>
+                  setSelectedReasoningEffort(
+                    e.target.value.trim() ? e.target.value : null,
+                  )
+                }
+                disabled={sending}
+              >
+                <option value="">Auto</option>
+                <option value="low">low</option>
+                <option value="medium">medium</option>
+                <option value="high">high</option>
+              </select>
+            </label>
           </div>
         </div>
 

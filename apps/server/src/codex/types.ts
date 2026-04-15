@@ -33,6 +33,10 @@ export interface CodexSessionMessage {
   id: string;
   role: "user" | "assistant" | "system";
   kind: "message" | "reasoning";
+  turnId?: string;
+  itemId?: string;
+  orderIndex?: number;
+  isStreaming?: boolean;
   text: string;
   createdAt: string;
 }

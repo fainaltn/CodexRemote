@@ -112,12 +112,14 @@ internal fun RuntimeControlChips(
         RuntimeControlChip(
             title = stringResource(R.string.session_controls_runtime_model_chip_title),
             value = modelLabel,
+            detail = runtimeControlStateDetail(modelLabel),
             enabled = enabled,
             onClick = onModelClick,
         )
         RuntimeControlChip(
             title = stringResource(R.string.session_controls_runtime_reasoning_chip_title),
             value = reasoningLabel,
+            detail = runtimeControlStateDetail(reasoningLabel),
             enabled = enabled,
             onClick = onReasoningClick,
         )
@@ -128,6 +130,7 @@ internal fun RuntimeControlChips(
 private fun RuntimeControlChip(
     title: String,
     value: String,
+    detail: String,
     enabled: Boolean,
     onClick: () -> Unit,
 ) {
@@ -150,6 +153,13 @@ private fun RuntimeControlChip(
                 Text(
                     text = value,
                     style = MaterialTheme.typography.titleSmall,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                Text(
+                    text = detail,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSecondaryContainer.copy(alpha = 0.72f),
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )
@@ -180,6 +190,11 @@ internal fun RuntimeControlSheetContent(
         Text(
             text = runtimeControlTitle(target),
             style = MaterialTheme.typography.titleMedium,
+        )
+        Text(
+            text = stringResource(R.string.session_controls_runtime_section_title),
+            style = MaterialTheme.typography.labelMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
         Text(
             text = when (target) {
@@ -241,6 +256,14 @@ internal fun RuntimeControlSheetContent(
         )
     }
 }
+
+@Composable
+private fun runtimeControlStateDetail(value: String): String =
+    if (value == stringResource(R.string.session_controls_runtime_auto_label)) {
+        stringResource(R.string.session_controls_runtime_inherited_detail)
+    } else {
+        stringResource(R.string.session_controls_runtime_explicit_detail)
+    }
 
 private fun sessionControlsString(resId: Int, fallback: String, vararg args: Any): String {
     val application = runCatching {

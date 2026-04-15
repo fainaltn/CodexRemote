@@ -3,6 +3,10 @@
     <string name="session_detail_queue_default">Queued message</string>
     <string name="session_detail_queue_attachment_suffix"> +%1$d attachment(s)</string>
     <string name="session_detail_queue_reasoning_prefix"> · reasoning %1$s</string>
+    <string name="session_detail_queue_model_inherited">Model · using default</string>
+    <string name="session_detail_queue_model_overridden">Model · overridden to %1$s</string>
+    <string name="session_detail_queue_reasoning_inherited">Reasoning · using default</string>
+    <string name="session_detail_queue_reasoning_overridden">Reasoning · overridden to %1$s</string>
     <string name="session_detail_add_attachment_requires_session">Create the session before adding attachments.</string>
     <string name="session_detail_loading_title">Loading session</string>
     <string name="session_detail_loading_message">Syncing history, repo state, and the current run.</string>
@@ -46,6 +50,8 @@
     <string name="session_detail_retry_load">Retry</string>
     <string name="session_detail_recovery_title">Restoring sync</string>
     <string name="session_detail_recovery_footer">When the app returns from the background, it automatically catches up with the latest session state.</string>
+    <string name="session_detail_recovery_restoring">Reconnecting and syncing the latest state.</string>
+    <string name="session_detail_recovery_degraded">The connection is temporarily unstable, so the app switched to auto refresh and kept the current content.</string>
     <string name="session_detail_recovery_synced">Connection restored and the latest session state has been synced.</string>
     <string name="session_detail_voice_prompt">Say what you want to send</string>
     <string name="session_detail_voice_permission_denied">Microphone permission is off, so voice input is unavailable.</string>
@@ -61,14 +67,14 @@
     <string name="session_detail_error_load">Failed to load session</string>
     <string name="session_detail_error_refresh">Failed to refresh session</string>
     <string name="session_detail_stream_connecting">Connecting to the native live stream…</string>
-    <string name="session_detail_stream_resumed">Native live stream resumed</string>
+    <string name="session_detail_stream_resumed">Native live stream reconnected</string>
     <string name="session_detail_stream_connected">Native live stream connected</string>
     <string name="session_detail_stream_live">Native live stream is active</string>
     <string name="session_detail_stream_caught_up">Recovered missed live stream updates</string>
     <string name="session_detail_stream_waiting_next">Connected and waiting for the next run</string>
     <string name="session_detail_stream_finished_keep_alive">This run finished, keeping the live connection open</string>
-    <string name="session_detail_stream_idle_recovering">Live stream idle timeout, recovering…</string>
-    <string name="session_detail_stream_fallback_polling">Live stream unavailable, switched to auto refresh</string>
+    <string name="session_detail_stream_idle_recovering">Live stream idle timeout, reconnecting…</string>
+    <string name="session_detail_stream_fallback_polling">Live stream unavailable, switched to auto refresh recovery</string>
     <string name="session_detail_queue_requires_session">Create the session before using the queued message flow</string>
     <string name="session_detail_queue_no_active_run">There is no active run to queue behind.</string>
     <string name="session_detail_error_start_run">Failed to start the run</string>

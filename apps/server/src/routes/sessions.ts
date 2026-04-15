@@ -109,7 +109,12 @@ export function sessionRoutes(adapter: CodexAdapter, runManager?: RunManager) {
           });
         }
 
-        const messages = await adapter.getSessionMessages(parsed.data.sessionId);
+        const messages = (await adapter.getSessionMessages(parsed.data.sessionId))
+          .map((message, index) => ({
+            ...message,
+            orderIndex: message.orderIndex ?? index,
+            isStreaming: message.isStreaming ?? false,
+          }));
         const stored = getStoredSessionRow(parsed.data.sessionId);
 
         const now = new Date().toISOString();

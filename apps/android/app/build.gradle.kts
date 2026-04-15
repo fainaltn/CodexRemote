@@ -13,8 +13,8 @@ android {
         applicationId = "dev.codexremote.android"
         minSdk = 28
         targetSdk = 35
-        versionCode = 7
-        versionName = "0.2.1"
+        versionCode = 9
+        versionName = "0.3.0"
 
         vectorDrawables {
             useSupportLibrary = true
@@ -82,5 +82,7 @@ dependencies {
     implementation(libs.ktor.serialization.kotlinx.json)
     implementation(libs.kotlinx.serialization.json)
     implementation(libs.kotlinx.coroutines.android)
+
+    testImplementation(libs.junit4)
 
 }

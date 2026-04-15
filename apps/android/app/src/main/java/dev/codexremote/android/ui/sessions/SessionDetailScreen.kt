@@ -96,6 +96,33 @@ private fun createCameraCaptureUri(context: Context): Uri {
     )
 }
 
+private fun queuedPromptRuntimeSummary(
+    context: Context,
+    queuedPrompt: QueuedPrompt,
+): String = buildString {
+    append(
+        if (queuedPrompt.model.isNullOrBlank()) {
+            context.getString(R.string.session_detail_queue_model_inherited)
+        } else {
+            context.getString(
+                R.string.session_detail_queue_model_overridden,
+                runtimeControlLabel(RuntimeControlTarget.Model, queuedPrompt.model),
+            )
+        },
+    )
+    append(" · ")
+    append(
+        if (queuedPrompt.reasoningEffort.isNullOrBlank()) {
+            context.getString(R.string.session_detail_queue_reasoning_inherited)
+        } else {
+            context.getString(
+                R.string.session_detail_queue_reasoning_overridden,
+                runtimeControlLabel(RuntimeControlTarget.ReasoningEffort, queuedPrompt.reasoningEffort),
+            )
+        },
+    )
+}
+
 @Composable
 private fun SessionLoadingCard(stage: SessionLoadingStage) {
     TimelineNoticeCard(
@@ -302,6 +329,7 @@ fun SessionDetailScreen(
                         )
                     }
                 },
+                runtimeSummary = queuedPromptRuntimeSummary(context, queuedPrompt),
                 attachmentCount = queuedPrompt.artifacts.size,
                 model = queuedPrompt.model,
                 reasoningEffort = queuedPrompt.reasoningEffort,
@@ -474,8 +502,10 @@ fun SessionDetailScreen(
 
     LaunchedEffect(uiState.recoveryNotice) {
         if (uiState.recoveryNotice != null) {
-            delay(3_000L)
-            viewModel.clearRecoveryNotice()
+            if (uiState.recoveryNotice != context.getString(R.string.session_detail_recovery_degraded)) {
+                delay(3_000L)
+                viewModel.clearRecoveryNotice()
+            }
         }
     }
 
@@ -637,6 +667,8 @@ fun SessionDetailScreen(
                         liveRun = uiState.liveRun,
                         liveStreamConnected = uiState.liveStreamConnected,
                         liveStreamStatus = uiState.liveStreamStatus,
+                        selectedModel = uiState.selectedModel,
+                        selectedReasoningEffort = uiState.selectedReasoningEffort,
                         queuedPromptCount = uiState.queuedPrompts.size,
                         isRefreshing = uiState.refreshing,
                         modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
@@ -769,6 +801,7 @@ fun SessionDetailScreen(
                     if (
                         uiState.error != null &&
                         !uiState.appInBackground &&
+                        uiState.recoveryNotice.isNullOrBlank() &&
                         !(isRunning && uiState.liveStreamConnected) &&
                         !(hasVisibleConversation && isTimeoutStyleError)
                     ) {

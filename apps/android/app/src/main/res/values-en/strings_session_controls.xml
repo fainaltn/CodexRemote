@@ -39,8 +39,13 @@
     <string name="session_controls_runtime_reasoning_high_detail">Stronger reasoning</string>
     <string name="session_controls_runtime_model_chip_title">Model</string>
     <string name="session_controls_runtime_reasoning_chip_title">Reasoning</string>
+    <string name="session_controls_runtime_section_title">Current runtime config</string>
+    <string name="session_controls_runtime_inherited_detail">Using server default</string>
+    <string name="session_controls_runtime_explicit_detail">Explicitly set</string>
     <string name="session_controls_runtime_model_sheet_summary">Pick a model better suited to the task.</string>
     <string name="session_controls_runtime_reasoning_sheet_summary">Pick a reasoning effort better suited to the task.</string>
     <string name="session_controls_runtime_next_send_note">The selection applies to the next send.</string>
+    <string name="session_control_model_format">Model · %1$s</string>
+    <string name="session_control_reasoning_format">Reasoning · %1$s</string>
     <string name="session_controls_micro_status_active">Generating</string>
 </resources>

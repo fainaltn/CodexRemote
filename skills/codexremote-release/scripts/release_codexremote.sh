@@ -130,9 +130,21 @@ if gh release view "${TAG}" >/dev/null 2>&1; then
   fi
 fi
 
+if git ls-remote --exit-code --tags origin "refs/tags/${TAG}" >/dev/null 2>&1; then
+  if [[ "${DRY_RUN}" -eq 1 ]]; then
+    printf '[dry-run] remote git tag already exists: %s\n' "${TAG}"
+  else
+    fail "remote git tag already exists: ${TAG}"
+  fi
+fi
+
 printf 'Release version: %s\n' "${VERSION}"
 printf 'Release notes: %s\n' "${NOTES_FILE}"
 printf 'Branch: %s\n' "${CURRENT_BRANCH}"
+
+if [[ "${SKIP_PUSH}" -eq 1 && "${SKIP_RELEASE}" -ne 1 ]]; then
+  fail "--skip-push cannot be combined with GitHub release creation; push the release tag first or add --skip-release"
+fi
 
 if [[ "${SKIP_VALIDATE}" -ne 1 ]]; then
   run_cmd npm run typecheck --workspace @codexremote/web
@@ -154,13 +166,15 @@ fi
 
 run_cmd git add README.md apps docs package.json package-lock.json packages skills
 run_cmd git commit -m "Release ${TAG}"
+run_cmd git tag "${TAG}"
 
 if [[ "${SKIP_PUSH}" -ne 1 ]]; then
   run_cmd git push origin main
+  run_cmd git push origin "${TAG}"
 fi
 
 if [[ "${SKIP_RELEASE}" -ne 1 ]]; then
-  run_cmd gh release create "${TAG}" --target HEAD --title "${TAG}" --notes-file "${NOTES_FILE}"
+  run_cmd gh release create "${TAG}" --verify-tag --title "${TAG}" --notes-file "${NOTES_FILE}"
 fi
 
 printf 'Release flow completed for %s\n' "${TAG}"

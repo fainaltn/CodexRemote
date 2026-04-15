@@ -1,0 +1,50 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="common_back">Back</string>
+
+    <string name="splash_brand_chip">Precision Console</string>
+    <string name="splash_tagline">A remote workspace for the Codex CLI</string>
+    <string name="splash_description">Connect to your host, unlock the workspace, and steer sessions from a calmer mobile control surface.</string>
+    <string name="splash_status">Preparing secure host access…</string>
+
+    <string name="login_current_host">Current host</string>
+    <string name="login_preparing_environment">Preparing login environment</string>
+    <string name="login_screen_title">Unlock host</string>
+    <string name="login_brand_title">Precision Console</string>
+    <string name="login_brand_subtitle">Verify the connection first, then enter the app password to unlock this host securely.</string>
+    <string name="login_selected_host_title">Host selected</string>
+    <string name="login_unlock_method_title">Unlock method</string>
+    <string name="login_unlock_method_body">Use the CodexRemote app password, not the system account password.</string>
+    <string name="login_password_label">App password</string>
+    <string name="login_password_hint">We will check host reachability first, then submit the unlock request.</string>
+    <string name="login_saved_password_detected">Saved password detected on this device</string>
+    <string name="login_saved_password_local_only">Stored on this device only</string>
+    <string name="login_unlocking">Unlocking</string>
+    <string name="login_unlock_button">Unlock host</string>
+    <string name="login_footer">After entry, we will check connectivity for %1$s, save the password, and open the workspace.</string>
+    <string name="login_brand_unlock_target">Unlock %1$s</string>
+    <string name="error_server_not_found">Server not found</string>
+
+    <string name="server_connection_checking">Checking connection…</string>
+    <string name="server_add_action">Add server</string>
+    <string name="server_empty_title">No servers configured yet</string>
+    <string name="server_empty_message">Add a CodexRemote host and this page will show its connection status and sign-in entry.</string>
+    <string name="server_empty_footer">Tap the + in the bottom-right corner to start the add flow.</string>
+    <string name="server_empty_state_label">Empty state</string>
+    <string name="server_add_button">Add server</string>
+    <string name="server_refresh_action">Refresh connection</string>
+    <string name="server_status_connection_error">Connection issue</string>
+    <string name="server_status_logged_in">Signed in</string>
+    <string name="server_login_action">Sign in</string>
+
+    <string name="add_server_title">Add server</string>
+    <string name="add_server_help">Connect to the CodexRemote service running on macOS. Enter the API address and the web UI address. You can type IP:port directly and the app will auto-fill http://.</string>
+    <string name="add_server_name_label">Name (optional)</string>
+    <string name="add_server_name_placeholder">My Mac</string>
+    <string name="add_server_api_label">API address</string>
+    <string name="add_server_web_label">Web UI address (optional)</string>
+    <string name="add_server_web_hint">Leave it blank if it goes through the same reverse proxy</string>
+    <string name="add_server_save_button">Connect and save</string>
+    <string name="add_server_default_api_url">http://192.168.2.146:31807</string>
+    <string name="add_server_default_web_url">http://192.168.2.146:31817</string>
+</resources>

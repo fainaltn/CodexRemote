@@ -1,12 +1,12 @@
 # Release Checklist
 
-## Release focus for v0.1.4
+## Release focus for v0.2.1
 
-- Web and Android now share a clearer `Precision Console` visual language across login, navigation, session detail, and feedback states
-- Web session navigation and session detail are more productized, with stronger hierarchy for current project, active thread, and live-run status
-- Android session detail now prioritizes Codex output more aggressively by compressing status chrome and giving more space back to the timeline
-- Android composer behaves more like a compact command bar, with clearer run-state affordances and follow-up controls
-- Empty states, loading states, upload feedback, and inline error treatment are more consistent across the product
+- Android now supports bilingual system-language switching across the main flow
+- Android session detail now recovers more gracefully after lock screen / background pauses
+- Android composer now supports voice input, photo library intake, and camera capture
+- Android can notify when a background run finishes and route back into the matching session
+- Android repo controls now include `pull`, `stash`, and recent commit log in addition to the previous branch / commit / push actions
 
 ## Verified in this workspace
 
@@ -17,6 +17,7 @@
 - `npm test --workspace @codexremote/web`
 - `npm run build --workspace @codexremote/server`
 - `npm run build --workspace @codexremote/web`
+- `cd apps/android && ./gradlew :app:compileDebugKotlin`
 - `cd apps/android && ANDROID_HOME=/opt/homebrew/share/android-commandlinetools ANDROID_SDK_ROOT=/opt/homebrew/share/android-commandlinetools ./gradlew :app:assembleDebug`
 - resumed-session manual check: resume an existing thread and verify it can create a file under the project root
 - Android manual check: session detail shows final replies without requiring re-entry after a completed run
@@ -24,9 +25,15 @@
 - Android manual check: runtime control chips change the next run's model / reasoning settings
 - Android manual check: repo surface shows branch / dirty-state and repo actions complete successfully when no run is active
 - Android manual check: settings can change the server password, the service restarts, and the app can reconnect with the new password
+- Android manual check: background run completion notification appears and routes back into the right session
+- Android manual check: voice input records, shows the capsule, and writes transcript text back into the composer
+- Android manual check: photo library and camera attachments both enter the current session attachment flow
 
 ## Before publishing to GitHub
 
+- keep release responsibilities split clearly:
+  - `skills/codexremote-release/` is for GitHub repo release only
+  - `skills/apk-smb-sync/` is for APK delivery to the SMB share only
 - set a fresh password in `.env.local`
 - if you changed the password through the app, confirm `.env.local` and the generated launchd plist agree on the same value before release
 - do not commit `.env.local`, `data/`, `.run/`, or build outputs

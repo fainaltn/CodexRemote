@@ -24,6 +24,8 @@ import androidx.compose.material.icons.filled.AttachFile
 import androidx.compose.material.icons.filled.Circle
 import androidx.compose.material.icons.filled.Memory
 import androidx.compose.material.icons.filled.Mic
+import androidx.compose.material.icons.filled.PhotoCamera
+import androidx.compose.material.icons.filled.PhotoLibrary
 import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material3.Button
@@ -40,8 +42,10 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import dev.codexremote.android.R
 
 internal data class ComposerAttachmentItem(
     val id: String,
@@ -75,10 +79,13 @@ internal fun ComposerBar(
     queuedPrompts: List<QueuedPromptItem>,
     onPromptChange: (String) -> Unit,
     onUploadClick: () -> Unit,
+    onGalleryClick: () -> Unit,
+    onCameraClick: () -> Unit,
     onRemoveAttachment: (ComposerAttachmentItem) -> Unit,
     onRestoreQueuedPrompt: (QueuedPromptItem) -> Unit,
     onModelClick: () -> Unit,
     onReasoningEffortClick: () -> Unit,
+    onVoiceClick: () -> Unit,
     onSend: () -> Unit,
     onQueue: () -> Unit,
     onStop: () -> Unit,
@@ -86,11 +93,11 @@ internal fun ComposerBar(
     modifier: Modifier = Modifier,
 ) {
     val statusLabel = when {
-        stopping -> "停止中"
-        sending -> "发送中"
-        isRunning -> "运行中"
-        queuedPrompts.isNotEmpty() -> "待发送"
-        else -> "就绪"
+        stopping -> stringResource(R.string.composer_status_stopping)
+        sending -> stringResource(R.string.composer_status_sending)
+        isRunning -> stringResource(R.string.composer_status_running)
+        queuedPrompts.isNotEmpty() -> stringResource(R.string.composer_status_queued)
+        else -> stringResource(R.string.composer_status_ready)
     }
     val statusColor = when {
         stopping -> MaterialTheme.colorScheme.error
@@ -178,7 +185,13 @@ internal fun ComposerBar(
                                 decorationBox = { innerTextField ->
                                     if (prompt.isBlank()) {
                                         Text(
-                                            text = if (isRunning) "输入下一条，结束后自动排队" else "输入指令…",
+                                            text = stringResource(
+                                                if (isRunning) {
+                                                    R.string.composer_placeholder_running
+                                                } else {
+                                                    R.string.composer_placeholder_idle
+                                                },
+                                            ),
                                             style = MaterialTheme.typography.bodyLarge,
                                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                                         )
@@ -201,25 +214,43 @@ internal fun ComposerBar(
                         ) {
                             CompactIconButton(
                                 icon = Icons.Filled.AttachFile,
-                                contentDescription = "上传附件",
+                                contentDescription = stringResource(R.string.composer_upload_attachment),
                                 enabled = !uploading && !sending,
                                 onClick = onUploadClick,
                             )
                             CompactIconButton(
+                                icon = Icons.Filled.PhotoLibrary,
+                                contentDescription = stringResource(R.string.composer_gallery_attachment),
+                                enabled = !uploading && !sending,
+                                onClick = onGalleryClick,
+                            )
+                            CompactIconButton(
+                                icon = Icons.Filled.PhotoCamera,
+                                contentDescription = stringResource(R.string.composer_camera_attachment),
+                                enabled = !uploading && !sending,
+                                onClick = onCameraClick,
+                            )
+                            CompactIconButton(
                                 icon = Icons.Filled.Mic,
-                                contentDescription = "语音输入（稍后开放）",
-                                enabled = false,
-                                onClick = {},
+                                contentDescription = stringResource(R.string.session_detail_voice_content_description),
+                                enabled = !sending && !stopping,
+                                onClick = onVoiceClick,
                             )
                             CompactIconButton(
                                 icon = Icons.Filled.Memory,
-                                contentDescription = "切换模型，当前 ${runtimeControlLabel(RuntimeControlTarget.Model, selectedModel)}",
+                                contentDescription = stringResource(
+                                    R.string.composer_model_desc,
+                                    runtimeControlLabel(RuntimeControlTarget.Model, selectedModel),
+                                ),
                                 enabled = !sending && !stopping,
                                 onClick = onModelClick,
                             )
                             CompactIconButton(
                                 icon = Icons.Filled.Tune,
-                                contentDescription = "切换思考强度，当前 ${runtimeControlLabel(RuntimeControlTarget.ReasoningEffort, selectedReasoningEffort)}",
+                                contentDescription = stringResource(
+                                    R.string.composer_reasoning_desc,
+                                    runtimeControlLabel(RuntimeControlTarget.ReasoningEffort, selectedReasoningEffort),
+                                ),
                                 enabled = !sending && !stopping,
                                 onClick = onReasoningEffortClick,
                             )
@@ -244,11 +275,11 @@ internal fun ComposerBar(
                                         ) {
                                             Icon(
                                                 Icons.Filled.ArrowUpward,
-                                                contentDescription = "加入待发送队列",
+                                                contentDescription = stringResource(R.string.composer_queue_add_desc),
                                                 modifier = Modifier.size(16.dp),
                                             )
                                             Text(
-                                                text = "排队",
+                                                text = stringResource(R.string.composer_queue_label),
                                                 modifier = Modifier.padding(start = 4.dp),
                                                 style = MaterialTheme.typography.labelLarge,
                                             )
@@ -272,7 +303,7 @@ internal fun ComposerBar(
                                             } else {
                                                 Icon(
                                                     Icons.Filled.Stop,
-                                                    contentDescription = "停止运行",
+                                                    contentDescription = stringResource(R.string.composer_stop_run_desc),
                                                     modifier = Modifier.size(16.dp),
                                                 )
                                             }
@@ -302,7 +333,7 @@ internal fun ComposerBar(
                                                 modifier = Modifier.size(16.dp),
                                             )
                                             Text(
-                                                text = "发送",
+                                                text = stringResource(R.string.composer_send_label),
                                                 modifier = Modifier.padding(start = 4.dp),
                                                 style = MaterialTheme.typography.labelLarge,
                                             )

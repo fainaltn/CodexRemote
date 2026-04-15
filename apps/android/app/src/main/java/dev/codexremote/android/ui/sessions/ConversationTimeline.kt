@@ -14,7 +14,10 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.pluralStringResource
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
+import dev.codexremote.android.R
 import dev.codexremote.android.data.model.Run
 
 /**
@@ -37,6 +40,8 @@ internal fun ConversationTimeline(
     latestUserPrompt: String?,
     latestAssistantReply: String?,
     cleanedOutput: String?,
+    pendingTurnPrompt: String?,
+    retainedLiveOutput: String?,
     sending: Boolean,
     isDraft: Boolean,
     liveStreamConnected: Boolean,
@@ -47,22 +52,38 @@ internal fun ConversationTimeline(
 ) {
     val liveRunStatus = liveRun?.status
     val isActive = liveRunStatus in activeRunStatuses
+    val pendingUserText = pendingTurnPrompt?.trim()?.ifBlank { null }
+    val latestTimelineUser = latestUserPrompt?.trim()?.ifBlank { null }
+    val latestTimelineUserDisplay = latestTimelineUser?.let(::sanitizePromptDisplay)
+    val continuousLiveOutput = cleanedOutput ?: retainedLiveOutput
 
     val currentUserText = when {
-        liveRun == null -> latestUserPrompt
-        isActive -> sanitizePromptDisplay(liveRun.prompt)
-        else -> latestUserPrompt ?: sanitizePromptDisplay(liveRun.prompt)
+        liveRun != null && isActive -> sanitizePromptDisplay(liveRun.prompt)
+        liveRun != null -> pendingUserText ?: latestTimelineUserDisplay ?: sanitizePromptDisplay(liveRun.prompt)
+        !pendingUserText.isNullOrBlank() -> pendingUserText
+        else -> latestTimelineUserDisplay
+    }
+
+    val currentTurnStoredReply = if (
+        !currentUserText.isNullOrBlank() &&
+        latestTimelineUserDisplay == currentUserText
+    ) {
+        latestAssistantReply
+    } else {
+        null
     }
 
     val replyOutput = when {
-        liveRun == null -> latestAssistantReply ?: cleanedOutput
-        isActive -> cleanedOutput
-        else -> latestAssistantReply ?: cleanedOutput
+        isActive -> continuousLiveOutput
+        liveRun != null || !pendingUserText.isNullOrBlank() -> currentTurnStoredReply ?: continuousLiveOutput
+        else -> latestAssistantReply ?: continuousLiveOutput
     }
 
-    val showWaitingPlaceholder = liveRun == null && replyOutput.isNullOrBlank()
+    val showWaitingPlaceholder = replyOutput.isNullOrBlank() &&
+        (isDraft || liveRun != null || !currentUserText.isNullOrBlank())
     val showAssistantReply = isDraft ||
         liveRun != null ||
+        !pendingUserText.isNullOrBlank() ||
         !replyOutput.isNullOrBlank() ||
         showWaitingPlaceholder
     val showStreamDegradedCard = isActive && !liveStreamConnected && !liveStreamStatus.isNullOrBlank()
@@ -87,13 +108,21 @@ internal fun ConversationTimeline(
         ) {
             item(key = "history-header") {
                 TimelineSectionHeader(
-                    title = "历史记录",
+                    title = stringResource(R.string.session_timeline_history_title),
                     subtitle = if (historicalRounds.isNotEmpty()) {
-                        "过去的回合会按时间沉淀成可展开的历史卡片"
+                        stringResource(R.string.session_timeline_history_subtitle_with_rounds)
                     } else {
-                        "当前会话还没有形成历史回合"
+                        stringResource(R.string.session_timeline_history_subtitle_empty)
                     },
-                    stateLabel = if (historicalRounds.isNotEmpty()) "${historicalRounds.size} 个回合" else "空",
+                    stateLabel = if (historicalRounds.isNotEmpty()) {
+                        pluralStringResource(
+                            R.plurals.session_timeline_history_round_count,
+                            historicalRounds.size,
+                            historicalRounds.size,
+                        )
+                    } else {
+                        stringResource(R.string.session_timeline_history_empty_state_label)
+                    },
                 )
             }
 
@@ -112,11 +141,11 @@ internal fun ConversationTimeline(
             } else {
                 item(key = "history-empty") {
                     TimelineNoticeCard(
-                        title = "暂无历史记录",
-                        message = "当前会话还没有过去的回合。等到新的消息往前推进后，历史会在这里自动沉淀。",
-                        footer = "你可以先看当前运行，再回到这里展开已经完成的回合。",
+                        title = stringResource(R.string.session_timeline_history_empty_title),
+                        message = stringResource(R.string.session_timeline_history_empty_message),
+                        footer = stringResource(R.string.session_timeline_history_empty_footer),
                         tone = TimelineNoticeTone.Neutral,
-                        stateLabel = "历史为空",
+                        stateLabel = stringResource(R.string.session_timeline_history_empty_state_label),
                     )
                 }
             }
@@ -132,9 +161,9 @@ internal fun ConversationTimeline(
             if (showStreamDegradedCard) {
                 item(key = "connection-notice") {
                     TimelineNoticeCard(
-                        title = "实时流已降级",
+                        title = stringResource(R.string.session_timeline_stream_degraded_title),
                         message = liveStreamStatus.orEmpty(),
-                        footer = "会话仍在继续，界面会自动刷新补齐内容。",
+                        footer = stringResource(R.string.session_timeline_stream_degraded_footer),
                         tone = TimelineNoticeTone.Warning,
                     )
                 }

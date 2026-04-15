@@ -1,6 +1,6 @@
 {
   "name": "codexremote",
-  "version": "0.1.4",
+  "version": "0.2.1",
   "private": true,
   "description": "Remote control system for Codex CLI",
   "scripts": {

@@ -1,0 +1,46 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="session_controls_repo_status_title">仓库状态</string>
+    <string name="session_controls_repo_status_clean">干净</string>
+    <string name="session_controls_repo_status_dirty">有变更</string>
+    <string name="session_controls_repo_status_connected">已连接</string>
+    <string name="session_controls_repo_branch_format">分支 · %1$s</string>
+    <string name="session_controls_repo_root_format">根目录 · %1$s</string>
+    <string name="session_controls_repo_ahead_format">领先 %1$d</string>
+    <string name="session_controls_repo_behind_format">落后 %1$d</string>
+    <string name="session_controls_repo_staged_format">已暂存 %1$d</string>
+    <string name="session_controls_repo_unstaged_format">未暂存 %1$d</string>
+    <string name="session_controls_repo_untracked_format">未跟踪 %1$d</string>
+    <string name="session_controls_repo_action_new_branch">新分支</string>
+    <string name="session_controls_repo_action_checkout_branch">切换分支</string>
+    <string name="session_controls_repo_action_commit">提交</string>
+    <string name="session_controls_repo_action_push">推送</string>
+    <string name="session_controls_repo_action_pull">拉取</string>
+    <string name="session_controls_repo_action_stash">暂存</string>
+    <string name="session_controls_repo_action_log">日志</string>
+    <string name="session_controls_repo_action_busy">正在执行仓库操作…</string>
+    <string name="session_controls_repo_log_title">最近提交</string>
+    <string name="session_controls_repo_log_empty">当前仓库还没有可显示的提交记录。</string>
+
+    <string name="session_controls_runtime_model_title">选择模型</string>
+    <string name="session_controls_runtime_reasoning_title">选择思考强度</string>
+    <string name="session_controls_runtime_auto_label">自动</string>
+    <string name="session_controls_runtime_model_auto_detail">沿用服务端默认模型</string>
+    <string name="session_controls_runtime_model_gpt_5_4_label">gpt-5.4</string>
+    <string name="session_controls_runtime_model_gpt_5_4_detail">通用平衡档</string>
+    <string name="session_controls_runtime_model_o4_mini_label">o4-mini</string>
+    <string name="session_controls_runtime_model_o4_mini_detail">更轻量、更快</string>
+    <string name="session_controls_runtime_reasoning_auto_detail">沿用服务端默认推理强度</string>
+    <string name="session_controls_runtime_reasoning_low_label">低</string>
+    <string name="session_controls_runtime_reasoning_low_detail">更快响应</string>
+    <string name="session_controls_runtime_reasoning_medium_label">中</string>
+    <string name="session_controls_runtime_reasoning_medium_detail">默认平衡档</string>
+    <string name="session_controls_runtime_reasoning_high_label">高</string>
+    <string name="session_controls_runtime_reasoning_high_detail">更强推理</string>
+    <string name="session_controls_runtime_model_chip_title">模型</string>
+    <string name="session_controls_runtime_reasoning_chip_title">思考</string>
+    <string name="session_controls_runtime_model_sheet_summary">选一个更适合当前任务的模型。</string>
+    <string name="session_controls_runtime_reasoning_sheet_summary">选一个更适合当前任务的思考强度。</string>
+    <string name="session_controls_runtime_next_send_note">选择会作用于下一次发送。</string>
+    <string name="session_controls_micro_status_active">生成中</string>
+</resources>

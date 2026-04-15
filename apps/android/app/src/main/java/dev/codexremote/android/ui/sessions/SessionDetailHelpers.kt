@@ -10,24 +10,35 @@ import java.util.Locale
 
 // ── Formatting helpers ────────────────────────────────────────────
 
-internal val timeFormatter: DateTimeFormatter =
-    DateTimeFormatter.ofPattern("M月d日 HH:mm", Locale.CHINA)
+private fun currentLocale(): Locale = Locale.getDefault()
+
+internal fun localizedSessionText(
+    zhHans: String,
+    en: String,
+    locale: Locale = currentLocale(),
+): String = if (locale.language.startsWith("zh")) zhHans else en
 
 internal val activeRunStatuses = setOf("pending", "running")
 internal val terminalRunStatuses = setOf("completed", "failed", "stopped")
 
 internal fun formatDate(dateStr: String): String {
     return runCatching {
-        Instant.parse(dateStr).atZone(ZoneId.systemDefault()).format(timeFormatter)
+        val locale = currentLocale()
+        val formatter = if (locale.language.startsWith("zh")) {
+            DateTimeFormatter.ofPattern("M月d日 HH:mm", locale)
+        } else {
+            DateTimeFormatter.ofPattern("MMM d HH:mm", locale)
+        }
+        Instant.parse(dateStr).atZone(ZoneId.systemDefault()).format(formatter)
     }.getOrElse { dateStr }
 }
 
 internal fun statusLabel(status: String): String = when (status) {
-    "pending" -> "等待中"
-    "running" -> "运行中"
-    "completed" -> "已完成"
-    "failed" -> "失败"
-    "stopped" -> "已停止"
+    "pending" -> localizedSessionText("等待中", "Pending")
+    "running" -> localizedSessionText("运行中", "Running")
+    "completed" -> localizedSessionText("已完成", "Completed")
+    "failed" -> localizedSessionText("失败", "Failed")
+    "stopped" -> localizedSessionText("已停止", "Stopped")
     else -> status
 }
 
@@ -42,22 +53,31 @@ internal fun formatRunElapsed(
     finishedAt: String? = null,
 ): String {
     return runCatching {
+        val locale = currentLocale()
         val started = Instant.parse(startedAt)
         val ended = finishedAt?.let(Instant::parse) ?: Instant.now()
         val rawDuration = Duration.between(started, ended)
         val duration = if (rawDuration.isNegative) Duration.ZERO else rawDuration
         val minutes = duration.toMinutes()
         val seconds = duration.seconds % 60
-        when {
-            minutes >= 60 -> "${minutes / 60}小时${minutes % 60}分"
-            minutes > 0 -> "${minutes}分${seconds}秒"
-            else -> "${seconds}秒"
+        if (locale.language.startsWith("zh")) {
+            when {
+                minutes >= 60 -> "${minutes / 60}小时${minutes % 60}分"
+                minutes > 0 -> "${minutes}分${seconds}秒"
+                else -> "${seconds}秒"
+            }
+        } else {
+            when {
+                minutes >= 60 -> "${minutes / 60}h ${minutes % 60}m"
+                minutes > 0 -> "${minutes}m ${seconds}s"
+                else -> "${seconds}s"
+            }
         }
-    }.getOrElse { "刚刚" }
+    }.getOrElse { localizedSessionText("刚刚", "Just now") }
 }
 
 internal fun detailProjectLabel(path: String?): String = when {
-    path.isNullOrBlank() -> "会话详情"
+    path.isNullOrBlank() -> localizedSessionText("会话详情", "Session Detail")
     else -> java.io.File(path).name.ifBlank { path }
 }
 
@@ -95,15 +115,25 @@ internal fun repoDirtyLabel(repoStatus: RepoStatus?): String? {
     val stagedCount = status.stagedCount ?: 0
     val unstagedCount = status.unstagedCount ?: 0
     val untrackedCount = status.untrackedCount ?: 0
-    if (stagedCount > 0) parts += "$stagedCount 处已暂存"
-    if (unstagedCount > 0) parts += "$unstagedCount 处未暂存"
-    if (untrackedCount > 0) parts += "$untrackedCount 个未跟踪"
-    status.aheadBy?.takeIf { it > 0 }?.let { parts += "领先 $it" }
-    status.behindBy?.takeIf { it > 0 }?.let { parts += "落后 $it" }
+    if (stagedCount > 0) {
+        parts += localizedSessionText("$stagedCount 处已暂存", "$stagedCount staged")
+    }
+    if (unstagedCount > 0) {
+        parts += localizedSessionText("$unstagedCount 处未暂存", "$unstagedCount unstaged")
+    }
+    if (untrackedCount > 0) {
+        parts += localizedSessionText("$untrackedCount 个未跟踪", "$untrackedCount untracked")
+    }
+    status.aheadBy?.takeIf { it > 0 }?.let {
+        parts += localizedSessionText("领先 $it", "ahead $it")
+    }
+    status.behindBy?.takeIf { it > 0 }?.let {
+        parts += localizedSessionText("落后 $it", "behind $it")
+    }
     return when {
         parts.isNotEmpty() -> parts.joinToString(" · ")
-        dirtyCount > 0 -> "$dirtyCount 处已修改"
-        status.isRepo == true -> "工作区干净"
+        dirtyCount > 0 -> localizedSessionText("$dirtyCount 处已修改", "$dirtyCount modified")
+        status.isRepo == true -> localizedSessionText("工作区干净", "Working tree clean")
         else -> null
     }
 }

@@ -1,6 +1,7 @@
 package dev.codexremote.android.navigation
 
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.collectAsState
 import androidx.navigation.NavHostController
@@ -9,6 +10,7 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
+import dev.codexremote.android.notifications.RunCompletedNotificationPayload
 import dev.codexremote.android.ui.theme.ThemePreference
 import dev.codexremote.android.ui.login.LoginScreen
 import dev.codexremote.android.ui.inbox.InboxScreen
@@ -37,8 +39,18 @@ private fun NavHostController.navigateToServerScopedTopLevel(
 fun AppNavHost(
     themePreference: ThemePreference,
     onToggleTheme: () -> Unit,
+    pendingNotificationPayload: RunCompletedNotificationPayload? = null,
+    onPendingNotificationHandled: () -> Unit = {},
 ) {
     val navController = rememberNavController()
+
+    LaunchedEffect(pendingNotificationPayload) {
+        val payload = pendingNotificationPayload ?: return@LaunchedEffect
+        navController.navigate(payload.toSessionDetailRoute()) {
+            launchSingleTop = true
+        }
+        onPendingNotificationHandled()
+    }
 
     NavHost(navController = navController, startDestination = Screen.Splash.route) {
 

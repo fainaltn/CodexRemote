@@ -219,16 +219,16 @@ internal fun currentRunStateLabel(
     sending: Boolean,
     isDraft: Boolean,
 ): String? = when {
-    liveRunStatus == null && isDraft && sending -> "等待创建"
-    liveRunStatus == null && isDraft -> "待发送"
+    liveRunStatus == null && isDraft && sending -> localizedSessionText("等待创建", "Creating")
+    liveRunStatus == null && isDraft -> localizedSessionText("待发送", "Queued")
     liveRunStatus == null -> null
-    liveRunStatus == "pending" -> if (sending) "等待调度" else "等待中"
-    liveRunStatus == "running" && !hasVisibleOutput && liveStreamConnected -> "思考中"
-    liveRunStatus == "running" && hasVisibleOutput && liveStreamConnected -> "流式输出"
-    liveRunStatus == "running" && !liveStreamConnected -> "后台执行"
-    liveRunStatus == "completed" -> "已完成"
-    liveRunStatus == "failed" -> "失败"
-    liveRunStatus == "stopped" -> "已停止"
+    liveRunStatus == "pending" -> if (sending) localizedSessionText("等待调度", "Scheduling") else localizedSessionText("等待中", "Waiting")
+    liveRunStatus == "running" && !hasVisibleOutput && liveStreamConnected -> localizedSessionText("思考中", "Thinking")
+    liveRunStatus == "running" && hasVisibleOutput && liveStreamConnected -> localizedSessionText("流式输出", "Streaming output")
+    liveRunStatus == "running" && !liveStreamConnected -> localizedSessionText("后台执行", "Running in background")
+    liveRunStatus == "completed" -> localizedSessionText("已完成", "Completed")
+    liveRunStatus == "failed" -> localizedSessionText("失败", "Failed")
+    liveRunStatus == "stopped" -> localizedSessionText("已停止", "Stopped")
     else -> statusLabel(liveRunStatus)
 }
 
@@ -238,16 +238,16 @@ internal fun currentRunSummaryTitle(
     isDraft: Boolean,
     sending: Boolean,
 ): String = when {
-    liveRunStatus == null && isDraft && sending -> "正在创建会话"
-    liveRunStatus == null && isDraft -> "等待首条消息"
-    liveRunStatus == null && hasVisibleOutput -> "本轮输出"
-    liveRunStatus == null -> "当前运行"
-    liveRunStatus == "running" -> "当前运行"
-    liveRunStatus == "pending" -> "运行排队中"
-    liveRunStatus == "completed" -> "本轮已结束"
-    liveRunStatus == "failed" -> "本轮运行失败"
-    liveRunStatus == "stopped" -> "本轮已停止"
-    else -> "当前运行"
+    liveRunStatus == null && isDraft && sending -> localizedSessionText("正在创建会话", "Creating session")
+    liveRunStatus == null && isDraft -> localizedSessionText("等待首条消息", "Waiting for the first message")
+    liveRunStatus == null && hasVisibleOutput -> localizedSessionText("本轮输出", "This run's output")
+    liveRunStatus == null -> localizedSessionText("当前运行", "Current run")
+    liveRunStatus == "running" -> localizedSessionText("当前运行", "Current run")
+    liveRunStatus == "pending" -> localizedSessionText("运行排队中", "Run queued")
+    liveRunStatus == "completed" -> localizedSessionText("本轮已结束", "This run has finished")
+    liveRunStatus == "failed" -> localizedSessionText("本轮运行失败", "This run failed")
+    liveRunStatus == "stopped" -> localizedSessionText("本轮已停止", "This run was stopped")
+    else -> localizedSessionText("当前运行", "Current run")
 }
 
 internal fun currentRunSummaryMessage(
@@ -258,24 +258,54 @@ internal fun currentRunSummaryMessage(
     isDraft: Boolean,
 ): String = when {
     liveRunStatus == null && isDraft ->
-        "输入首条消息后，这里会展示实时流、终端输出和本轮状态。"
+        localizedSessionText(
+            "输入首条消息后，这里会展示实时流、终端输出和本轮状态。",
+            "After the first message, this area will show the live stream, terminal output, and run status.",
+        )
     liveRunStatus == null && hasVisibleOutput ->
-        "这次运行已经结束，下面保留本轮最终输出和上下文。"
+        localizedSessionText(
+            "这次运行已经结束，下面保留本轮最终输出和上下文。",
+            "This run has finished, and the final output and context are kept below.",
+        )
     liveRunStatus == "pending" ->
-        "消息已经进入队列，等待服务端开始处理。"
+        localizedSessionText(
+            "消息已经进入队列，等待服务端开始处理。",
+            "The message is queued and waiting for the server to start processing it.",
+        )
     liveRunStatus == "running" && !hasVisibleOutput && liveStreamConnected ->
-        "AI 正在思考并整理首段输出，内容会随着流式结果持续追加。"
+        localizedSessionText(
+            "AI 正在思考并整理首段输出，内容会随着流式结果持续追加。",
+            "AI is thinking and shaping the first output chunk. More content will keep streaming in.",
+        )
     liveRunStatus == "running" && hasVisibleOutput && liveStreamConnected ->
-        "当前显示的是最新可见内容，后续输出会继续追加在这里。"
+        localizedSessionText(
+            "当前显示的是最新可见内容，后续输出会继续追加在这里。",
+            "This is the latest visible content, and more output will continue to append here.",
+        )
     liveRunStatus == "running" && !liveStreamConnected ->
-        "实时流暂时不可用，界面会继续刷新补齐内容。"
+        localizedSessionText(
+            "实时流暂时不可用，界面会继续刷新补齐内容。",
+            "The live stream is temporarily unavailable, and the UI will keep refreshing to catch up.",
+        )
     liveRunStatus == "completed" ->
-        "本轮已经完成，下面保留最终输出和历史上下文。"
+        localizedSessionText(
+            "本轮已经完成，下面保留最终输出和历史上下文。",
+            "This run is complete, and the final output plus history context stay below.",
+        )
     liveRunStatus == "failed" ->
-        "本轮未正常结束，下面保留最后一次可见输出以便排查。"
+        localizedSessionText(
+            "本轮未正常结束，下面保留最后一次可见输出以便排查。",
+            "This run did not finish normally, so the last visible output is kept for troubleshooting.",
+        )
     liveRunStatus == "stopped" ->
-        "本轮已经被停止，下面保留停止前的内容。"
-    else -> liveStreamStatus ?: "这里会同步当前运行、思考过程和最终输出。"
+        localizedSessionText(
+            "本轮已经被停止，下面保留停止前的内容。",
+            "This run was stopped, and the content before it stopped is kept below.",
+        )
+    else -> liveStreamStatus ?: localizedSessionText(
+        "这里会同步当前运行、思考过程和最终输出。",
+        "This area syncs the current run, thinking process, and final output.",
+    )
 }
 
 internal fun currentRunSummaryFooter(
@@ -293,8 +323,8 @@ internal fun currentRunSummaryFooter(
 }
 
 internal fun terminalRunTitle(status: String): String = when (status) {
-    "failed" -> "运行失败"
-    "stopped" -> "运行已停止"
+    "failed" -> localizedSessionText("运行失败", "Run failed")
+    "stopped" -> localizedSessionText("运行已停止", "Run stopped")
     else -> statusLabel(status)
 }
 
@@ -302,7 +332,7 @@ internal fun terminalRunMessage(
     status: String,
     error: String?,
 ): String = when (status) {
-    "failed" -> error ?: "本次运行未完成，下面保留最后一次可见输出。"
-    "stopped" -> error ?: "本次运行已被停止。"
-    else -> error ?: "本次运行已结束。"
+    "failed" -> error ?: localizedSessionText("本次运行未完成，下面保留最后一次可见输出。", "This run did not finish, and the last visible output is kept below.")
+    "stopped" -> error ?: localizedSessionText("本次运行已被停止。", "This run was stopped.")
+    else -> error ?: localizedSessionText("本次运行已结束。", "This run has ended.")
 }

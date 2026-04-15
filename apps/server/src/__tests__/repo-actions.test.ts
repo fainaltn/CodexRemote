@@ -119,6 +119,98 @@ describe("repo action route", () => {
     expect(remoteHead).toBeTruthy();
   });
 
+  it("pulls the latest remote changes", async () => {
+    const { repoDir, remoteDir } = await createGitRepo({ withRemote: true });
+    tempDirs.push(repoDir, remoteDir);
+
+    const branch = await currentBranch(repoDir);
+    await runGit(repoDir, ["push", "-u", "origin", branch]);
+    const cloneDir = await mkdtemp(path.join(tmpdir(), "codexremote-git-clone-"));
+    tempDirs.push(cloneDir);
+    await execFileAsync("git", ["clone", remoteDir, cloneDir], { encoding: "utf8" });
+    await runGit(cloneDir, ["config", "user.name", "Codex Clone"]);
+    await runGit(cloneDir, ["config", "user.email", "clone@example.com"]);
+    await writeFile(path.join(cloneDir, "tracked.txt"), "base\nremote\n", "utf8");
+    await runGit(cloneDir, ["commit", "-am", "remote change"]);
+    await runGit(cloneDir, ["push", "origin", branch]);
+
+    const adapter = new MockCodexAdapter();
+    adapter.addSession("repo-session", { cwd: repoDir });
+
+    const created = await createTestApp(adapter);
+    app = created.app;
+    const token = await loginHelper(app);
+
+    const res = await app.inject({
+      method: "POST",
+      url: "/api/hosts/local/sessions/repo-session/repo-action",
+      headers: authHeader(token),
+      payload: { action: "pull" },
+    });
+
+    expect(res.statusCode).toBe(200);
+    const body = RepoActionResponse.parse(res.json());
+    expect(body.summary).toContain("拉取");
+    const content = await gitOutput(repoDir, ["show", "HEAD:tracked.txt"]);
+    expect(content).toContain("remote");
+  });
+
+  it("stashes current changes including untracked files", async () => {
+    const { repoDir } = await createGitRepo({ dirty: true });
+    tempDirs.push(repoDir);
+
+    const adapter = new MockCodexAdapter();
+    adapter.addSession("repo-session", { cwd: repoDir });
+
+    const created = await createTestApp(adapter);
+    app = created.app;
+    const token = await loginHelper(app);
+
+    const res = await app.inject({
+      method: "POST",
+      url: "/api/hosts/local/sessions/repo-session/repo-action",
+      headers: authHeader(token),
+      payload: { action: "stash", message: "stash mobile edits" },
+    });
+
+    expect(res.statusCode).toBe(200);
+    const body = RepoActionResponse.parse(res.json());
+    expect(body.summary).toContain("暂存");
+    expect(body.repoStatus).toMatchObject({
+      isRepo: true,
+      dirtyCount: 0,
+      untrackedCount: 0,
+    });
+    const stashMessage = await gitOutput(repoDir, ["stash", "list"]);
+    expect(stashMessage).toContain("stash mobile edits");
+  });
+
+  it("returns recent commit log entries", async () => {
+    const { repoDir } = await createGitRepo();
+    tempDirs.push(repoDir);
+    await writeFile(path.join(repoDir, "tracked.txt"), "base\nsecond\n", "utf8");
+    await runGit(repoDir, ["commit", "-am", "second commit"]);
+
+    const adapter = new MockCodexAdapter();
+    adapter.addSession("repo-session", { cwd: repoDir });
+
+    const created = await createTestApp(adapter);
+    app = created.app;
+    const token = await loginHelper(app);
+
+    const res = await app.inject({
+      method: "GET",
+      url: "/api/hosts/local/sessions/repo-session/repo-log",
+      headers: authHeader(token),
+    });
+
+    expect(res.statusCode).toBe(200);
+    const body = res.json() as { entries: Array<{ subject: string; shortHash: string }> };
+    expect(body.entries.length).toBeGreaterThanOrEqual(2);
+    expect(body.entries[0]?.subject).toContain("second commit");
+    expect(body.entries[0]?.shortHash).toBeTruthy();
+  });
+
   it("returns 409 for non-repo sessions", async () => {
     const plainDir = await mkdtemp(path.join(tmpdir(), "codexremote-repo-actions-"));
     tempDirs.push(plainDir);

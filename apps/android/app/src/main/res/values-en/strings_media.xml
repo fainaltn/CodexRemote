@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="composer_gallery_attachment">Pick from gallery</string>
+    <string name="composer_camera_attachment">Take photo</string>
+    <string name="session_media_camera_create_failed">Unable to create a photo file. Please try again later.</string>
+</resources>

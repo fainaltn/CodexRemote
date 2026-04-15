@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="notification_channel_run_completed_name">Run completion alerts</string>
+    <string name="notification_channel_run_completed_description">Shows a local notification when a background session run finishes.</string>
+    <string name="notification_run_completed_title">Run completed</string>
+    <string name="notification_run_completed_body">Session %1$s finished on server %2$s, host %3$s.</string>
+</resources>

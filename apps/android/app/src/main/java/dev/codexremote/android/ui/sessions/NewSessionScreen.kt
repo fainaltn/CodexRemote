@@ -37,9 +37,11 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.res.stringResource
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.compose.viewModel
+import dev.codexremote.android.R
 import dev.codexremote.android.data.model.BrowseProjectsResponse
 import dev.codexremote.android.data.repository.ServerRepository
 import dev.codexremote.android.data.network.ApiClient
@@ -73,8 +75,8 @@ class NewSessionViewModel(application: Application) : AndroidViewModel(applicati
         try {
             val servers = repo.servers.first()
             val server = servers.find { it.id == serverId }
-                ?: throw IllegalStateException("服务器不存在")
-            val token = server.token ?: throw IllegalStateException("尚未登录")
+                ?: throw IllegalStateException(getApplication<Application>().getString(R.string.new_session_error_server_missing))
+            val token = server.token ?: throw IllegalStateException(getApplication<Application>().getString(R.string.new_session_error_not_logged_in))
             val client = ApiClient(server.baseUrl)
             try {
                 _browser.value = client.browseProjects(token, HOST_ID, path)
@@ -82,7 +84,10 @@ class NewSessionViewModel(application: Application) : AndroidViewModel(applicati
                 client.close()
             }
         } catch (e: Exception) {
-            _error.value = userFacingMessage(e, "读取目录失败")
+            _error.value = userFacingMessage(
+                e,
+                getApplication<Application>().getString(R.string.new_session_error_load_failed),
+            )
         } finally {
             _loading.value = false
         }
@@ -116,16 +121,22 @@ fun NewSessionScreen(
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("新建线程") },
+                title = { Text(stringResource(R.string.new_session_title)) },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "返回")
+                        Icon(
+                            Icons.AutoMirrored.Filled.ArrowBack,
+                            contentDescription = stringResource(R.string.content_desc_back),
+                        )
                     }
                 },
                 actions = {
                     if (browser?.parentPath != null) {
                         IconButton(onClick = { viewModel.openPath(serverId, browser?.parentPath) }) {
-                            Icon(Icons.Filled.ArrowUpward, contentDescription = "上一级")
+                            Icon(
+                                Icons.Filled.ArrowUpward,
+                                contentDescription = stringResource(R.string.new_session_content_desc_parent),
+                            )
                         }
                     }
                     IconButton(
@@ -135,10 +146,16 @@ fun NewSessionScreen(
                         },
                         enabled = !loading && !browser?.currentPath.isNullOrBlank(),
                     ) {
-                        Icon(Icons.Filled.Check, contentDescription = "将当前目录设为工作区")
+                        Icon(
+                            Icons.Filled.Check,
+                            contentDescription = stringResource(R.string.new_session_content_desc_use_current_directory),
+                        )
                     }
                     IconButton(onClick = { viewModel.openPath(serverId, browser?.currentPath ?: initialCwd) }) {
-                        Icon(Icons.Filled.Refresh, contentDescription = "刷新")
+                        Icon(
+                            Icons.Filled.Refresh,
+                            contentDescription = stringResource(R.string.content_desc_refresh),
+                        )
                     }
                 }
             )
@@ -152,12 +169,12 @@ fun NewSessionScreen(
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
             Text(
-                text = "当前目录",
+                text = stringResource(R.string.new_session_current_directory_label),
                 style = MaterialTheme.typography.labelMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
             Text(
-                text = browser?.currentPath ?: "正在读取…",
+                text = browser?.currentPath ?: stringResource(R.string.new_session_current_directory_loading),
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -165,11 +182,11 @@ fun NewSessionScreen(
             when {
                 loading && browser == null -> {
                     TimelineNoticeCard(
-                        title = "正在读取目录",
-                        message = "正在扫描当前主机上的项目文件夹。",
-                        footer = "这通常只需要几秒钟。",
+                        title = stringResource(R.string.new_session_loading_title),
+                        message = stringResource(R.string.new_session_loading_message),
+                        footer = stringResource(R.string.new_session_loading_footer),
                         tone = TimelineNoticeTone.Neutral,
-                        stateLabel = "加载中",
+                        stateLabel = stringResource(R.string.new_session_loading_state_label),
                         content = {
                             ShimmerBlock(lines = 2)
                         },
@@ -178,24 +195,24 @@ fun NewSessionScreen(
 
                 !loading && browser?.entries.isNullOrEmpty() -> {
                     TimelineNoticeCard(
-                        title = "当前目录没有可选项目",
-                        message = "这个位置下还没有项目文件夹，或者目录暂时无法列出。",
-                        footer = "你可以返回上一级，或刷新后再看一次。",
+                        title = stringResource(R.string.new_session_empty_title),
+                        message = stringResource(R.string.new_session_empty_message),
+                        footer = stringResource(R.string.new_session_empty_footer),
                         tone = TimelineNoticeTone.Warning,
-                        stateLabel = "空目录",
+                        stateLabel = stringResource(R.string.new_session_empty_state_label),
                         content = {
                             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                                 Button(
                                     onClick = { viewModel.openPath(serverId, browser?.parentPath ?: initialCwd) },
                                     enabled = browser?.parentPath != null || initialCwd != null,
                                 ) {
-                                    Text("返回上一级")
+                                    Text(stringResource(R.string.new_session_button_parent))
                                 }
                                 Button(
                                     onClick = { viewModel.openPath(serverId, browser?.currentPath ?: initialCwd) },
                                     enabled = !loading,
                                 ) {
-                                    Text("刷新")
+                                    Text(stringResource(R.string.new_session_button_refresh))
                                 }
                             }
                         },
@@ -226,7 +243,7 @@ fun NewSessionScreen(
                                         overflow = TextOverflow.Ellipsis,
                                         modifier = Modifier.weight(1f),
                                     )
-                                    Text("›")
+                                    Text(stringResource(R.string.new_session_entry_separator))
                                 }
                             }
                         }
@@ -235,23 +252,23 @@ fun NewSessionScreen(
             }
 
             Text(
-                text = "这里只负责挑选当前主机上的项目目录。确定目录后，会先把项目区块加入会话列表，再从项目详情页发送首条消息来创建会话。",
+                text = stringResource(R.string.new_session_intro_text),
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
 
             if (error != null) {
                 TimelineNoticeCard(
-                    title = "目录读取失败",
+                    title = stringResource(R.string.new_session_error_title),
                     message = error ?: "",
-                    footer = "确认主机在线后，再试一次通常就能恢复。",
+                    footer = stringResource(R.string.new_session_error_footer),
                     tone = TimelineNoticeTone.Error,
-                    stateLabel = "错误",
+                    stateLabel = stringResource(R.string.new_session_error_state_label),
                     content = {
                         Button(
                             onClick = { viewModel.openPath(serverId, browser?.currentPath ?: initialCwd) },
                         ) {
-                            Text("重试")
+                            Text(stringResource(R.string.new_session_error_retry_button))
                         }
                     },
                 )
@@ -265,7 +282,13 @@ fun NewSessionScreen(
                 modifier = Modifier.fillMaxWidth(),
                 enabled = !loading && !browser?.currentPath.isNullOrBlank(),
             ) {
-                Text(if (loading) "处理中…" else "将当前目录加入会话列表")
+                Text(
+                    if (loading) {
+                        stringResource(R.string.new_session_submit_button_loading)
+                    } else {
+                        stringResource(R.string.new_session_submit_button_ready)
+                    },
+                )
             }
 
             Spacer(modifier = Modifier.height(4.dp))

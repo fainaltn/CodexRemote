@@ -24,7 +24,9 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
+import dev.codexremote.android.R
 import kotlinx.coroutines.delay
 
 @Composable
@@ -77,7 +79,7 @@ fun SplashScreen(onNavigateToServers: () -> Unit) {
                             Box(contentAlignment = Alignment.Center) {
                                 Icon(
                                     imageVector = Icons.Filled.Terminal,
-                                    contentDescription = "CodexRemote",
+                                    contentDescription = stringResource(R.string.app_name),
                                     modifier = Modifier.size(42.dp),
                                     tint = MaterialTheme.colorScheme.primary,
                                 )
@@ -91,7 +93,7 @@ fun SplashScreen(onNavigateToServers: () -> Unit) {
                             color = MaterialTheme.colorScheme.secondaryContainer,
                         ) {
                             Text(
-                                text = "PRECISION CONSOLE",
+                                text = stringResource(R.string.splash_brand_chip),
                                 modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
                                 style = MaterialTheme.typography.labelSmall,
                                 color = MaterialTheme.colorScheme.onSecondaryContainer,
@@ -101,19 +103,19 @@ fun SplashScreen(onNavigateToServers: () -> Unit) {
                         Spacer(modifier = Modifier.height(18.dp))
 
                         Text(
-                            text = "CodexRemote",
+                            text = stringResource(R.string.app_name),
                             style = MaterialTheme.typography.displayLarge,
                             color = MaterialTheme.colorScheme.onBackground,
                         )
                         Spacer(modifier = Modifier.height(8.dp))
                         Text(
-                            text = "面向 Codex CLI 的远程工作台",
+                            text = stringResource(R.string.splash_tagline),
                             style = MaterialTheme.typography.titleMedium,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
                         Spacer(modifier = Modifier.height(18.dp))
                         Text(
-                            text = "Connect to your host, unlock the workspace, and steer sessions with a calmer mobile control surface.",
+                            text = stringResource(R.string.splash_description),
                             style = MaterialTheme.typography.bodyMedium,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
@@ -135,7 +137,7 @@ fun SplashScreen(onNavigateToServers: () -> Unit) {
                                 ) {}
                             }
                             Text(
-                                text = "Preparing secure host access…",
+                                text = stringResource(R.string.splash_status),
                                 style = MaterialTheme.typography.labelLarge,
                                 color = MaterialTheme.colorScheme.primary,
                             )

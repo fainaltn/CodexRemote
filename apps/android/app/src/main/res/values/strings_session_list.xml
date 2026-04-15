@@ -1,0 +1,117 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="session_list_project_label_ungrouped">未归类</string>
+    <string name="session_list_recency_history">历史</string>
+    <string name="session_list_recency_just_active">刚刚活跃</string>
+    <string name="session_list_recency_recent_hour">近 1 小时</string>
+    <string name="session_list_recency_today">今日更新</string>
+
+    <string name="session_list_sort_recent">最近更新</string>
+    <string name="session_list_sort_name_asc">名称 A-Z</string>
+    <string name="session_list_sort_name_desc">名称 Z-A</string>
+    <string name="session_list_sort_custom">自定义排序</string>
+
+    <string name="session_list_title_project_folders">项目文件夹</string>
+    <string name="session_list_title_selected_sessions">已选择 %1$d 个会话</string>
+    <string name="session_list_subtitle_selected_sessions">可批量重命名或归档</string>
+    <string name="session_list_subtitle_refreshing">%1$s · 正在刷新</string>
+    <string name="session_list_subtitle_overview">%1$s · %2$s</string>
+
+    <string name="session_list_content_desc_cancel_selection">取消选择</string>
+    <string name="session_list_content_desc_rename">重命名</string>
+    <string name="session_list_content_desc_archive">归档</string>
+    <string name="session_list_content_desc_new_project">新项目</string>
+    <string name="session_list_content_desc_menu">菜单</string>
+    <string name="session_list_menu_inbox">收件箱</string>
+    <string name="session_list_menu_refresh">刷新</string>
+    <string name="session_list_menu_settings">设置</string>
+
+    <string name="session_list_error_unknown">未知错误</string>
+    <string name="session_list_error_hint">请刷新重试，或检查网络连接。</string>
+    <string name="session_list_error_retry">重新连接</string>
+    <string name="session_list_empty_projects_title">还没有项目文件夹</string>
+
+    <string name="session_list_dialog_rename_title">重命名会话</string>
+    <string name="session_list_dialog_rename_label">主题名称</string>
+    <string name="session_list_dialog_save">保存</string>
+    <string name="session_list_dialog_cancel">取消</string>
+    <string name="session_list_dialog_project_exists_title">项目已存在</string>
+    <string name="session_list_dialog_project_exists_body">会话列表里已经有这个项目目录了，不会重复创建项目区块。</string>
+    <string name="session_list_dialog_acknowledge">知道了</string>
+    <string name="session_list_dialog_hide_title">隐藏项目文件夹</string>
+    <string name="session_list_dialog_hide_body">这不会删除项目目录或已有会话，只是先把“%1$s”从会话列表里隐藏。之后如果再次从“新项目”里选择同一路径，它会重新显示。</string>
+    <string name="session_list_dialog_hide_confirm">隐藏</string>
+
+    <string name="session_list_navigation_title_selected">正在多选</string>
+    <string name="session_list_navigation_title_default">项目导航</string>
+    <string name="session_list_navigation_subtitle_selected">已选择 %1$s，继续点按可追加选择。</string>
+    <string name="session_list_navigation_subtitle_current_project">当前聚焦 %1$s，会话与项目层级更容易扫读。</string>
+    <string name="session_list_navigation_subtitle_default">项目按更新时间分组，最近活动会自动更显眼。</string>
+    <plurals name="session_list_navigation_project_count">
+        <item quantity="one">%1$d 个项目</item>
+        <item quantity="other">%1$d 个项目</item>
+    </plurals>
+    <plurals name="session_list_navigation_session_count">
+        <item quantity="one">%1$d 条会话</item>
+        <item quantity="other">%1$d 条会话</item>
+    </plurals>
+    <plurals name="session_list_navigation_recent_count">
+        <item quantity="one">%1$d 个近活跃</item>
+        <item quantity="other">%1$d 个近活跃</item>
+    </plurals>
+    <string name="session_list_navigation_current_project_label">当前项目 · %1$s</string>
+
+    <string name="session_list_browse_title">浏览方式</string>
+    <string name="session_list_browse_help">长按可隐藏，右侧把手可拖动排序。当前：%1$s</string>
+    <string name="session_list_browse_sort_toggle_description">切换文件夹排序，当前为 %1$s</string>
+
+    <string name="session_list_folder_current_project_chip">当前项目</string>
+    <string name="session_list_folder_draft_chip">草稿</string>
+    <string name="session_list_folder_waiting_first_session">等待第一条会话</string>
+    <string name="session_list_folder_expand">展开文件夹</string>
+    <string name="session_list_folder_collapse">折叠文件夹</string>
+    <string name="session_list_folder_summary_with_recent">%1$s · %2$s</string>
+    <string name="session_list_folder_summary_total">%1$s</string>
+    <string name="session_list_folder_new_session_desc">在该项目中新建会话</string>
+    <string name="session_list_folder_drag_sort_desc">按住拖拽排序</string>
+    <string name="session_list_session_selected_chip">已选中</string>
+    <string name="session_list_session_long_press_multi_select_chip">长按多选</string>
+
+    <string name="session_list_draft_title">这个项目还没有会话</string>
+    <string name="session_list_draft_message">点击右侧 + 创建第一条会话。</string>
+    <string name="session_list_draft_chip">草稿项目</string>
+
+    <string name="session_list_error_auth_expired">登录已失效，请重新登录</string>
+    <string name="session_list_error_server_missing">服务器不存在</string>
+    <string name="session_list_error_not_logged_in">尚未登录</string>
+    <string name="session_list_error_load_failed">加载会话失败</string>
+    <string name="session_list_error_rename_failed">重命名会话失败</string>
+    <string name="session_list_error_archive_failed">归档会话失败</string>
+
+    <string name="new_session_title">新建线程</string>
+    <string name="new_session_content_desc_parent">上一级</string>
+    <string name="new_session_content_desc_use_current_directory">将当前目录设为工作区</string>
+    <string name="new_session_button_parent">返回上一级</string>
+    <string name="new_session_button_refresh">刷新</string>
+    <string name="new_session_entry_separator">›</string>
+    <string name="new_session_current_directory_label">当前目录</string>
+    <string name="new_session_current_directory_loading">正在读取…</string>
+    <string name="new_session_loading_title">正在读取目录</string>
+    <string name="new_session_loading_message">正在扫描当前主机上的项目文件夹。</string>
+    <string name="new_session_loading_footer">这通常只需要几秒钟。</string>
+    <string name="new_session_loading_state_label">加载中</string>
+    <string name="new_session_empty_title">当前目录没有可选项目</string>
+    <string name="new_session_empty_message">这个位置下还没有项目文件夹，或者目录暂时无法列出。</string>
+    <string name="new_session_empty_footer">你可以返回上一级，或刷新后再看一次。</string>
+    <string name="new_session_empty_state_label">空目录</string>
+    <string name="new_session_intro_text">这里只负责挑选当前主机上的项目目录。确定目录后，会先把项目区块加入会话列表，再从项目详情页发送首条消息来创建会话。</string>
+    <string name="new_session_error_title">目录读取失败</string>
+    <string name="new_session_error_footer">确认主机在线后，再试一次通常就能恢复。</string>
+    <string name="new_session_error_state_label">错误</string>
+    <string name="new_session_error_retry_button">重试</string>
+    <string name="new_session_submit_button_loading">处理中…</string>
+    <string name="new_session_submit_button_ready">将当前目录加入会话列表</string>
+    <string name="new_session_error_load_failed">读取目录失败</string>
+    <string name="new_session_error_server_missing">服务器不存在</string>
+    <string name="new_session_error_not_logged_in">尚未登录</string>
+</resources>

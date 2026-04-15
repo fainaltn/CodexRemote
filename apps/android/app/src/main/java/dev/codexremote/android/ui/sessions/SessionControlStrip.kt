@@ -16,7 +16,9 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
+import dev.codexremote.android.R
 import dev.codexremote.android.data.model.Run
 
 @OptIn(ExperimentalLayoutApi::class)
@@ -32,16 +34,16 @@ internal fun SessionControlStrip(
     if (liveRun == null && liveStreamStatus.isNullOrBlank() && queuedPromptCount == 0 && !isRefreshing) return
 
     val statusText = when {
-        isRefreshing && liveRun == null -> "正在同步界面"
+        isRefreshing && liveRun == null -> stringResource(R.string.session_control_refreshing)
         liveRun != null -> statusLabel(liveRun.status)
-        liveStreamConnected -> "实时连接已就绪"
-        else -> "等待下一次运行"
+        liveStreamConnected -> stringResource(R.string.session_control_stream_ready)
+        else -> stringResource(R.string.session_control_waiting_next)
     }
     val detailItems = buildList {
         liveRun?.model?.takeIf { it.isNotBlank() }?.let { add(it) }
         liveRun?.reasoningEffort?.takeIf { it.isNotBlank() }?.let { add(it) }
-        if (queuedPromptCount > 0) add("队列 $queuedPromptCount")
-        if (isRefreshing) add("同步中")
+        if (queuedPromptCount > 0) add(stringResource(R.string.session_control_queue_count, queuedPromptCount))
+        if (isRefreshing) add(stringResource(R.string.session_control_syncing))
     }
     val elapsedText = liveRun?.let { formatRunElapsed(it.startedAt, it.finishedAt) }
     val containerColor = when {
@@ -97,7 +99,7 @@ internal fun SessionControlStrip(
                         color = contentColor.copy(alpha = 0.1f),
                     ) {
                         Text(
-                            text = "降级",
+                            text = stringResource(R.string.session_control_degraded),
                             modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
                             style = MaterialTheme.typography.labelSmall,
                             color = contentColor,

@@ -1,0 +1,50 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="common_back">返回</string>
+
+    <string name="splash_brand_chip">精准控制台</string>
+    <string name="splash_tagline">面向 Codex CLI 的远程工作台</string>
+    <string name="splash_description">连接主机、解锁工作区，并以更稳定的移动端控制面板管理会话。</string>
+    <string name="splash_status">正在准备安全连接…</string>
+
+    <string name="login_current_host">当前主机</string>
+    <string name="login_preparing_environment">正在准备登录环境</string>
+    <string name="login_screen_title">解锁主机</string>
+    <string name="login_brand_title">精准控制台</string>
+    <string name="login_brand_subtitle">先验证连接，再输入应用密码，安全解锁当前主机。</string>
+    <string name="login_selected_host_title">主机已选中</string>
+    <string name="login_unlock_method_title">解锁方式</string>
+    <string name="login_unlock_method_body">使用 CodexRemote 应用密码，而不是系统账户密码。</string>
+    <string name="login_password_label">应用密码</string>
+    <string name="login_password_hint">会先验证主机可达性，再提交解锁请求。</string>
+    <string name="login_saved_password_detected">已检测到本机保存的密码</string>
+    <string name="login_saved_password_local_only">仅保存在本机</string>
+    <string name="login_unlocking">正在解锁</string>
+    <string name="login_unlock_button">解锁主机</string>
+    <string name="login_footer">输入后会先检查 %1$s 的连通性，然后保存密码并进入工作区。</string>
+    <string name="login_brand_unlock_target">解锁 %1$s</string>
+    <string name="error_server_not_found">服务器不存在</string>
+
+    <string name="server_connection_checking">检查连接中…</string>
+    <string name="server_add_action">添加服务器</string>
+    <string name="server_empty_title">还没有配置服务器</string>
+    <string name="server_empty_message">添加一个 CodexRemote 主机后，这里会显示它的连接状态和登录入口。</string>
+    <string name="server_empty_footer">右下角的 + 会带你进入添加流程。</string>
+    <string name="server_empty_state_label">空状态</string>
+    <string name="server_add_button">添加服务器</string>
+    <string name="server_refresh_action">重新检查连接</string>
+    <string name="server_status_connection_error">连接异常</string>
+    <string name="server_status_logged_in">已登录</string>
+    <string name="server_login_action">登录</string>
+
+    <string name="add_server_title">添加服务器</string>
+    <string name="add_server_help">连接运行在 macOS 上的 CodexRemote 服务。请输入 API 地址，以及网页界面地址。可以直接填 IP:端口，应用会自动补全 http://。</string>
+    <string name="add_server_name_label">名称（可选）</string>
+    <string name="add_server_name_placeholder">我的 Mac</string>
+    <string name="add_server_api_label">API 地址</string>
+    <string name="add_server_web_label">网页界面地址（可选）</string>
+    <string name="add_server_web_hint">如果走同一个反向代理，也可以留空</string>
+    <string name="add_server_save_button">连接并保存</string>
+    <string name="add_server_default_api_url">http://192.168.2.146:31807</string>
+    <string name="add_server_default_web_url">http://192.168.2.146:31817</string>
+</resources>

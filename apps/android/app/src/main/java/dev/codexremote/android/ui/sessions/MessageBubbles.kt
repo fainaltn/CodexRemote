@@ -45,7 +45,6 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
@@ -62,8 +61,9 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
-import kotlinx.coroutines.delay
+import dev.codexremote.android.R
 
 // ── User message bubble ───────────────────────────────────────────
 
@@ -83,6 +83,8 @@ internal fun UserMessageBubble(
 ) {
     val displayText = remember(text) { sanitizePromptDisplay(text) }
     var showSheet by remember { mutableStateOf(false) }
+    val copyLabel = stringResource(R.string.session_timeline_message_copy)
+    val editAndResendLabel = stringResource(R.string.session_timeline_message_edit_and_resend)
 
     Row(
         modifier = modifier.fillMaxWidth(),
@@ -132,24 +134,24 @@ internal fun UserMessageBubble(
 
     if (showSheet) {
         val clipboardManager = LocalClipboardManager.current
-        MessageActionSheet(
-            onDismiss = { showSheet = false },
-            actions = buildList {
-                add(
-                    MessageAction(
-                        label = "复制",
-                        icon = Icons.Filled.ContentCopy,
-                        onClick = {
-                            clipboardManager.setText(AnnotatedString(text))
-                            showSheet = false
-                        },
+            MessageActionSheet(
+                onDismiss = { showSheet = false },
+                actions = buildList {
+                    add(
+                        MessageAction(
+                            label = copyLabel,
+                            icon = Icons.Filled.ContentCopy,
+                            onClick = {
+                                clipboardManager.setText(AnnotatedString(text))
+                                showSheet = false
+                            },
                     )
                 )
                 onCopy?.let { /* already handled above */ }
                 onEdit?.let { editFn ->
                     add(
                         MessageAction(
-                            label = "编辑并重发",
+                            label = editAndResendLabel,
                             icon = Icons.Filled.Edit,
                             onClick = {
                                 showSheet = false
@@ -167,7 +169,7 @@ internal fun UserMessageBubble(
 
 /**
  * The hero composable: shows the AI's response with a primary-color accent bar,
- * rich text blocks, typewriter cursor, and micro-status footer.
+ * rich text blocks, a live progress indicator, and a micro-status footer.
  */
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
@@ -193,6 +195,15 @@ internal fun AssistantReplyBlock(
         sending = sending,
         isDraft = false,
     )
+    val settledTitle = stringResource(R.string.session_timeline_reply_settled_title)
+    val settledStateLabel = stringResource(R.string.session_timeline_reply_settled_state_label)
+    val replyErrorTitle = stringResource(R.string.session_timeline_reply_error_title)
+    val replyErrorFooter = stringResource(R.string.session_timeline_reply_error_footer)
+    val replyErrorState = stringResource(R.string.session_timeline_reply_error_state_label)
+    val reusePromptLabel = stringResource(R.string.session_timeline_reply_reuse_prompt)
+    val retryLabel = stringResource(R.string.session_timeline_reply_retry)
+    val copyReplyLabel = stringResource(R.string.session_timeline_reply_copy_reply)
+    val retryRunLabel = stringResource(R.string.session_timeline_reply_retry_run)
     val accentColor = when {
         terminalStatus != null -> MaterialTheme.colorScheme.error
         hasSettled -> MaterialTheme.colorScheme.secondary
@@ -265,12 +276,12 @@ internal fun AssistantReplyBlock(
                     TimelineNoticeCard(
                         title = when {
                             terminalStatus != null -> terminalRunTitle(terminalStatus)
-                            else -> "本轮已收束"
+                            else -> settledTitle
                         },
                         message = when {
                             terminalStatus != null -> terminalRunMessage(terminalStatus, error)
-                            !output.isNullOrBlank() -> "流式输出已经沉淀为最终结果，当前内容可继续浏览、复制或直接重试。"
-                            else -> "本轮已经结束，当前没有额外的文本输出。"
+                            !output.isNullOrBlank() -> stringResource(R.string.session_timeline_reply_settled_message_with_output)
+                            else -> stringResource(R.string.session_timeline_reply_settled_message_empty)
                         },
                         tone = when {
                             terminalStatus != null -> TimelineNoticeTone.Error
@@ -278,7 +289,7 @@ internal fun AssistantReplyBlock(
                         },
                         stateLabel = when {
                             terminalStatus != null -> statusLabel(terminalStatus)
-                            else -> "已同步"
+                            else -> settledStateLabel
                         },
                         stateTone = when {
                             terminalStatus != null -> TimelineNoticeTone.Error
@@ -300,11 +311,11 @@ internal fun AssistantReplyBlock(
                     // Error inline
                     error?.let { errorMsg ->
                         TimelineNoticeCard(
-                            title = "本轮运行有问题",
+                            title = replyErrorTitle,
                             message = errorMsg,
-                            footer = "你仍然可以重试本轮或回填提示词。",
+                            footer = replyErrorFooter,
                             tone = TimelineNoticeTone.Error,
-                            stateLabel = "错误",
+                            stateLabel = replyErrorState,
                         ) {
                             // Intentionally left empty: the message itself carries the feedback.
                         }
@@ -326,14 +337,14 @@ internal fun AssistantReplyBlock(
                         horizontalArrangement = Arrangement.spacedBy(8.dp),
                     ) {
                         TextButton(onClick = onReusePrompt, enabled = !sending) {
-                            Text("回填提示词", style = MaterialTheme.typography.labelMedium)
+                            Text(reusePromptLabel, style = MaterialTheme.typography.labelMedium)
                         }
                         Button(
                             onClick = onRetry,
                             enabled = !sending,
                             shape = RoundedCornerShape(16.dp),
                         ) {
-                            Text("重试", style = MaterialTheme.typography.labelMedium)
+                            Text(retryLabel, style = MaterialTheme.typography.labelMedium)
                         }
                     }
                 }
@@ -346,7 +357,7 @@ internal fun AssistantReplyBlock(
                 actions = buildList {
                     add(
                         MessageAction(
-                            label = "复制回复",
+                            label = copyReplyLabel,
                             icon = Icons.Filled.ContentCopy,
                             onClick = {
                                 clipboardManager.setText(AnnotatedString(output.orEmpty()))
@@ -357,7 +368,7 @@ internal fun AssistantReplyBlock(
                     onRetry?.let { retryFn ->
                         add(
                             MessageAction(
-                                label = "重试本轮",
+                                label = retryRunLabel,
                                 icon = Icons.Filled.Replay,
                                 onClick = {
                                     showSheet = false
@@ -402,7 +413,7 @@ internal class BlockParseCache {
     }
 }
 
-// ── Streaming text renderer (typewriter + incremental blocks) ─────
+// ── Streaming text renderer (block-based + live indicator) ─────────
 
 @Composable
 internal fun StreamingTextRenderer(
@@ -410,64 +421,34 @@ internal fun StreamingTextRenderer(
     active: Boolean,
     modifier: Modifier = Modifier,
 ) {
-    var renderedText by remember { mutableStateOf(targetText) }
+    val noVisibleOutputTitle = stringResource(R.string.session_timeline_reply_no_visible_output_title)
+    val noVisibleOutputFooter = stringResource(R.string.session_timeline_reply_no_visible_output_footer)
+    val noVisibleOutputState = stringResource(R.string.session_timeline_reply_no_visible_output_state_label)
     val cache = remember { BlockParseCache() }
-    val transition = rememberInfiniteTransition(label = "stream-cursor")
-    val cursorAlpha by transition.animateFloat(
-        initialValue = 0.25f,
-        targetValue = 1f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(durationMillis = 700),
-            repeatMode = RepeatMode.Reverse,
-        ),
-        label = "stream-cursor-alpha",
-    )
 
-    LaunchedEffect(targetText, active) {
-        if (!active) {
-            renderedText = targetText
-            return@LaunchedEffect
-        }
-
-        if (!targetText.startsWith(renderedText)) {
-            renderedText = targetText
-            return@LaunchedEffect
-        }
-
-        var cursor = renderedText.length
-        while (cursor < targetText.length) {
-            val step = typewriterStepSize(targetText.length - cursor)
-            val nextCursor = (cursor + step).coerceAtMost(targetText.length)
-            renderedText = targetText.substring(0, nextCursor)
-            val pauseChar = targetText.getOrNull(nextCursor - 1) ?: ' '
-            cursor = nextCursor
-            delay(typewriterDelayMs(pauseChar))
-        }
+    // Incremental parse: stable blocks keep the same reference when unchanged.
+    val (stableBlocks, tailBlock) = remember(targetText) {
+        cache.computeAndReturn(targetText)
     }
-
-    // Incremental parse: stable blocks keep the same reference when unchanged
-    val (stableBlocks, tailBlock) = remember(renderedText) {
-        cache.computeAndReturn(renderedText)
-    }
+    val hasVisibleBlocks = stableBlocks.isNotEmpty() || tailBlock != null
 
     Column(
         modifier = modifier,
         verticalArrangement = Arrangement.spacedBy(10.dp),
     ) {
-        if (stableBlocks.isEmpty() && tailBlock == null) {
+        if (!hasVisibleBlocks) {
             if (active) {
-                ShimmerBlock(modifier = Modifier.fillMaxWidth())
+                ThinkingPlaceholderCard()
             } else {
                 TimelineNoticeCard(
-                    title = "没有可见输出",
-                    message = "这次运行没有返回文本内容，但它仍然会保留在当前回合中。",
-                    footer = "你仍然可以重试本轮或回填提示词。",
+                    title = noVisibleOutputTitle,
+                    message = stringResource(R.string.session_timeline_reply_no_visible_output_message),
+                    footer = noVisibleOutputFooter,
                     tone = TimelineNoticeTone.Neutral,
-                    stateLabel = "空输出",
+                    stateLabel = noVisibleOutputState,
                 )
             }
         } else {
-            // Stable blocks — only recompose when a new block is finalized
             for (block in stableBlocks) {
                 key(block.id) {
                     AnimatedBlock(id = block.id) {
@@ -475,17 +456,17 @@ internal fun StreamingTextRenderer(
                     }
                 }
             }
-            // Tail block — recomposes on every typewriter tick
             tailBlock?.let { block ->
                 key(block.id) {
                     AnimatedBlock(id = block.id) {
-                        RenderSingleBlock(
-                            block = block,
-                            cursorAlpha = if (active) cursorAlpha else 0f,
-                        )
+                        RenderSingleBlock(block = block, cursorAlpha = 0f)
                     }
                 }
             }
+        }
+
+        if (active) {
+            StreamingActivityChip(hasVisibleOutput = hasVisibleBlocks)
         }
     }
 }
@@ -496,6 +477,71 @@ private fun RenderSingleBlock(block: RichTextBlock, cursorAlpha: Float) {
         is RichTextBlock.Paragraph -> ParagraphBlock(block, cursorAlpha)
         is RichTextBlock.CodeBlock -> RichCodeBlock(block = block, cursorAlpha = cursorAlpha)
         is RichTextBlock.ListBlock -> RichListBlock(block, cursorAlpha)
+    }
+}
+
+@Composable
+private fun ThinkingPlaceholderCard() {
+    TimelineNoticeCard(
+        title = localizedSessionText("思考中", "Thinking"),
+        message = localizedSessionText(
+            "这一轮先保持思考状态，拿到可见内容后会继续在下面追加，不会中断当前区域。",
+            "This run stays in a thinking state first, then appends visible output below without replacing this area.",
+        ),
+        footer = localizedSessionText("正在等待首段内容", "Waiting for the first visible chunk"),
+        tone = TimelineNoticeTone.Neutral,
+        stateLabel = localizedSessionText("实时中", "Live"),
+    ) {
+        ShimmerBlock(lines = 2)
+        Spacer(modifier = Modifier.height(4.dp))
+        StreamingActivityChip(hasVisibleOutput = false)
+    }
+}
+
+@Composable
+private fun StreamingActivityChip(
+    hasVisibleOutput: Boolean,
+    modifier: Modifier = Modifier,
+) {
+    val transition = rememberInfiniteTransition(label = "stream-activity")
+    val pulseAlpha by transition.animateFloat(
+        initialValue = 0.24f,
+        targetValue = 1f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(durationMillis = 820),
+            repeatMode = RepeatMode.Reverse,
+        ),
+        label = "stream-activity-alpha",
+    )
+
+    Surface(
+        modifier = modifier,
+        shape = RoundedCornerShape(999.dp),
+        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(8.dp)
+                    .background(
+                        MaterialTheme.colorScheme.primary.copy(alpha = pulseAlpha),
+                        RoundedCornerShape(999.dp),
+                    ),
+            )
+            Text(
+                text = if (hasVisibleOutput) {
+                    localizedSessionText("继续生成中，后续内容会追加在这里。", "Still thinking, more content will append here.")
+                } else {
+                    localizedSessionText("正在组织首段内容，请保持当前卡片可见。", "Preparing the first visible chunk. Keep this card in place.")
+                },
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
     }
 }
 
@@ -560,6 +606,15 @@ internal fun WaitingReplyPlaceholder(
     draft: Boolean,
     modifier: Modifier = Modifier,
 ) {
+    val waitingDraftTitle = stringResource(R.string.session_timeline_reply_waiting_draft_title)
+    val waitingDraftMessage = stringResource(R.string.session_timeline_reply_waiting_draft_message)
+    val waitingDraftFooter = stringResource(R.string.session_timeline_reply_waiting_draft_footer)
+    val waitingDraftState = stringResource(R.string.session_timeline_reply_waiting_draft_state_label)
+    val waitingTitle = stringResource(R.string.session_timeline_reply_waiting_title)
+    val waitingMessage = stringResource(R.string.session_timeline_reply_waiting_message)
+    val waitingFooter = stringResource(R.string.session_timeline_reply_waiting_footer)
+    val waitingState = stringResource(R.string.session_timeline_reply_waiting_state_label)
+
     Column(
         modifier = modifier
             .fillMaxWidth()
@@ -567,19 +622,11 @@ internal fun WaitingReplyPlaceholder(
         verticalArrangement = Arrangement.spacedBy(10.dp),
     ) {
         TimelineNoticeCard(
-            title = if (draft) "等待首条消息" else "等待新的回复",
-            message = if (draft) {
-                "输入首条消息后，这里会开始显示当前会话的运行过程。"
-            } else {
-                "发送一条消息后，回复和运行状态会在这里展开。"
-            },
-            footer = if (draft) {
-                "首条消息会创建会话并立即进入处理流程。"
-            } else {
-                "当前没有活跃运行时，这里会保持安静而不突兀。"
-            },
+            title = if (draft) waitingDraftTitle else waitingTitle,
+            message = if (draft) waitingDraftMessage else waitingMessage,
+            footer = if (draft) waitingDraftFooter else waitingFooter,
             tone = TimelineNoticeTone.Neutral,
-            stateLabel = if (draft) "待发送" else "空闲",
+            stateLabel = if (draft) waitingDraftState else waitingState,
             content = {
                 ShimmerBlock(lines = if (draft) 2 else 3)
             },

@@ -80,6 +80,13 @@ export const RepoActionRequest = z.discriminatedUnion("action", [
   z.object({
     action: z.literal("push"),
   }),
+  z.object({
+    action: z.literal("pull"),
+  }),
+  z.object({
+    action: z.literal("stash"),
+    message: z.string().trim().min(1).max(MAX_PROMPT_LENGTH).optional(),
+  }),
 ]);
 export type RepoActionRequest = z.infer<typeof RepoActionRequest>;
 
@@ -89,6 +96,20 @@ export const RepoActionResponse = z.object({
   repoStatus: RepoStatus,
 });
 export type RepoActionResponse = z.infer<typeof RepoActionResponse>;
+
+export const RepoLogEntry = z.object({
+  hash: z.string(),
+  shortHash: z.string(),
+  subject: z.string(),
+  author: z.string(),
+  authoredAt: z.string(),
+});
+export type RepoLogEntry = z.infer<typeof RepoLogEntry>;
+
+export const RepoLogResponse = z.object({
+  entries: z.array(RepoLogEntry),
+});
+export type RepoLogResponse = z.infer<typeof RepoLogResponse>;
 
 // --- POST /api/hosts/:hostId/sessions/:sessionId/message ---
 

@@ -1,0 +1,117 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="session_list_project_label_ungrouped">Uncategorized</string>
+    <string name="session_list_recency_history">History</string>
+    <string name="session_list_recency_just_active">Just active</string>
+    <string name="session_list_recency_recent_hour">Within 1 hour</string>
+    <string name="session_list_recency_today">Updated today</string>
+
+    <string name="session_list_sort_recent">Most recent</string>
+    <string name="session_list_sort_name_asc">Name A-Z</string>
+    <string name="session_list_sort_name_desc">Name Z-A</string>
+    <string name="session_list_sort_custom">Custom order</string>
+
+    <string name="session_list_title_project_folders">Project folders</string>
+    <string name="session_list_title_selected_sessions">Selected %1$d sessions</string>
+    <string name="session_list_subtitle_selected_sessions">Batch rename or archive available</string>
+    <string name="session_list_subtitle_refreshing">%1$s · Refreshing</string>
+    <string name="session_list_subtitle_overview">%1$s · %2$s</string>
+
+    <string name="session_list_content_desc_cancel_selection">Cancel selection</string>
+    <string name="session_list_content_desc_rename">Rename</string>
+    <string name="session_list_content_desc_archive">Archive</string>
+    <string name="session_list_content_desc_new_project">New project</string>
+    <string name="session_list_content_desc_menu">Menu</string>
+    <string name="session_list_menu_inbox">Inbox</string>
+    <string name="session_list_menu_refresh">Refresh</string>
+    <string name="session_list_menu_settings">Settings</string>
+
+    <string name="session_list_error_unknown">Unknown error</string>
+    <string name="session_list_error_hint">Please refresh and try again, or check the network connection.</string>
+    <string name="session_list_error_retry">Reconnect</string>
+    <string name="session_list_empty_projects_title">No project folders yet</string>
+
+    <string name="session_list_dialog_rename_title">Rename session</string>
+    <string name="session_list_dialog_rename_label">Topic name</string>
+    <string name="session_list_dialog_save">Save</string>
+    <string name="session_list_dialog_cancel">Cancel</string>
+    <string name="session_list_dialog_project_exists_title">Project already exists</string>
+    <string name="session_list_dialog_project_exists_body">This project folder is already in the session list, so it will not create another project section.</string>
+    <string name="session_list_dialog_acknowledge">Got it</string>
+    <string name="session_list_dialog_hide_title">Hide project folder</string>
+    <string name="session_list_dialog_hide_body">This will not delete the project folder or existing sessions. It only hides “%1$s” from the session list for now. If you pick the same path again from “New project”, it will show up again.</string>
+    <string name="session_list_dialog_hide_confirm">Hide</string>
+
+    <string name="session_list_navigation_title_selected">Multi-select mode</string>
+    <string name="session_list_navigation_title_default">Project navigation</string>
+    <string name="session_list_navigation_subtitle_selected">Selected %1$s. Keep tapping to add more.</string>
+    <string name="session_list_navigation_subtitle_current_project">Focused on %1$s, making the session and project hierarchy easier to scan.</string>
+    <string name="session_list_navigation_subtitle_default">Projects are grouped by update time, and recent activity stands out automatically.</string>
+    <plurals name="session_list_navigation_project_count">
+        <item quantity="one">%1$d project</item>
+        <item quantity="other">%1$d projects</item>
+    </plurals>
+    <plurals name="session_list_navigation_session_count">
+        <item quantity="one">%1$d session</item>
+        <item quantity="other">%1$d sessions</item>
+    </plurals>
+    <plurals name="session_list_navigation_recent_count">
+        <item quantity="one">%1$d recent session</item>
+        <item quantity="other">%1$d recent sessions</item>
+    </plurals>
+    <string name="session_list_navigation_current_project_label">Current project · %1$s</string>
+
+    <string name="session_list_browse_title">Browse mode</string>
+    <string name="session_list_browse_help">Long-press to hide, drag the handle on the right to reorder. Current: %1$s</string>
+    <string name="session_list_browse_sort_toggle_description">Switch folder sorting, current: %1$s</string>
+
+    <string name="session_list_folder_current_project_chip">Current project</string>
+    <string name="session_list_folder_draft_chip">Draft</string>
+    <string name="session_list_folder_waiting_first_session">Waiting for the first session</string>
+    <string name="session_list_folder_expand">Expand folder</string>
+    <string name="session_list_folder_collapse">Collapse folder</string>
+    <string name="session_list_folder_summary_with_recent">%1$s · %2$s</string>
+    <string name="session_list_folder_summary_total">%1$s</string>
+    <string name="session_list_folder_new_session_desc">Create a new session in this project</string>
+    <string name="session_list_folder_drag_sort_desc">Press and hold to drag and reorder</string>
+    <string name="session_list_session_selected_chip">Selected</string>
+    <string name="session_list_session_long_press_multi_select_chip">Long-press to multi-select</string>
+
+    <string name="session_list_draft_title">This project has no sessions yet</string>
+    <string name="session_list_draft_message">Tap + on the right to create the first session.</string>
+    <string name="session_list_draft_chip">Draft project</string>
+
+    <string name="session_list_error_auth_expired">Your login has expired. Please sign in again</string>
+    <string name="session_list_error_server_missing">Server not found</string>
+    <string name="session_list_error_not_logged_in">Not logged in yet</string>
+    <string name="session_list_error_load_failed">Failed to load sessions</string>
+    <string name="session_list_error_rename_failed">Failed to rename session</string>
+    <string name="session_list_error_archive_failed">Failed to archive sessions</string>
+
+    <string name="new_session_title">New thread</string>
+    <string name="new_session_content_desc_parent">Go up one level</string>
+    <string name="new_session_content_desc_use_current_directory">Use current directory as workspace</string>
+    <string name="new_session_button_parent">Back to parent</string>
+    <string name="new_session_button_refresh">Refresh</string>
+    <string name="new_session_entry_separator">›</string>
+    <string name="new_session_current_directory_label">Current directory</string>
+    <string name="new_session_current_directory_loading">Loading…</string>
+    <string name="new_session_loading_title">Loading directory</string>
+    <string name="new_session_loading_message">Scanning the project folders on the current host.</string>
+    <string name="new_session_loading_footer">This usually only takes a few seconds.</string>
+    <string name="new_session_loading_state_label">Loading</string>
+    <string name="new_session_empty_title">No selectable projects in this directory</string>
+    <string name="new_session_empty_message">There are no project folders here yet, or the directory cannot be listed right now.</string>
+    <string name="new_session_empty_footer">You can go up one level, or refresh and check again.</string>
+    <string name="new_session_empty_state_label">Empty directory</string>
+    <string name="new_session_intro_text">This page is only for choosing a project directory on the current host. After confirming the directory, it adds the project section to the session list first, then creates the session by sending the first message from the project detail page.</string>
+    <string name="new_session_error_title">Failed to load directory</string>
+    <string name="new_session_error_footer">If the host is online, trying again usually recovers it.</string>
+    <string name="new_session_error_state_label">Error</string>
+    <string name="new_session_error_retry_button">Retry</string>
+    <string name="new_session_submit_button_loading">Processing…</string>
+    <string name="new_session_submit_button_ready">Add current directory to session list</string>
+    <string name="new_session_error_load_failed">Failed to load directory</string>
+    <string name="new_session_error_server_missing">Server not found</string>
+    <string name="new_session_error_not_logged_in">Not logged in yet</string>
+</resources>

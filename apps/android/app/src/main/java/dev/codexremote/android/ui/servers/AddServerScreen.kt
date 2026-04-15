@@ -29,11 +29,13 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.compose.viewModel
+import dev.codexremote.android.R
 import dev.codexremote.android.data.model.Server
 import dev.codexremote.android.data.network.ApiClient
 import dev.codexremote.android.data.repository.ServerRepository
@@ -103,8 +105,10 @@ fun AddServerScreen(
     viewModel: AddServerViewModel = viewModel(),
 ) {
     var label by remember { mutableStateOf("") }
-    var url by remember { mutableStateOf("http://192.168.2.146:31807") }
-    var webUrl by remember { mutableStateOf("http://192.168.2.146:31817") }
+    val defaultApiUrl = stringResource(R.string.add_server_default_api_url)
+    val defaultWebUrl = stringResource(R.string.add_server_default_web_url)
+    var url by remember { mutableStateOf(defaultApiUrl) }
+    var webUrl by remember { mutableStateOf(defaultWebUrl) }
     val saving by viewModel.saving.collectAsState()
     val snackbarHostState = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
@@ -112,10 +116,13 @@ fun AddServerScreen(
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("添加服务器") },
+                title = { Text(stringResource(R.string.add_server_title)) },
                 navigationIcon = {
                     IconButton(onClick = onCancel) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "返回")
+                        Icon(
+                            Icons.AutoMirrored.Filled.ArrowBack,
+                            contentDescription = stringResource(R.string.common_back),
+                        )
                     }
                 }
             )
@@ -132,8 +139,7 @@ fun AddServerScreen(
             Spacer(modifier = Modifier.height(8.dp))
 
             Text(
-                text = "连接运行在 macOS 上的 CodexRemote 服务。请输入 API 地址，" +
-                    "以及网页界面地址。可以直接填 IP:端口，应用会自动补全 http://。",
+                text = stringResource(R.string.add_server_help),
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -143,8 +149,8 @@ fun AddServerScreen(
             OutlinedTextField(
                 value = label,
                 onValueChange = { label = it },
-                label = { Text("名称（可选）") },
-                placeholder = { Text("我的 Mac") },
+                label = { Text(stringResource(R.string.add_server_name_label)) },
+                placeholder = { Text(stringResource(R.string.add_server_name_placeholder)) },
                 singleLine = true,
                 modifier = Modifier.fillMaxWidth(),
             )
@@ -154,8 +160,8 @@ fun AddServerScreen(
             OutlinedTextField(
                 value = url,
                 onValueChange = { url = it },
-                label = { Text("API 地址") },
-                placeholder = { Text("http://192.168.2.146:31807") },
+                label = { Text(stringResource(R.string.add_server_api_label)) },
+                placeholder = { Text(defaultApiUrl) },
                 singleLine = true,
                 modifier = Modifier.fillMaxWidth(),
             )
@@ -165,9 +171,9 @@ fun AddServerScreen(
             OutlinedTextField(
                 value = webUrl,
                 onValueChange = { webUrl = it },
-                label = { Text("网页界面地址（可选）") },
-                placeholder = { Text("http://192.168.2.146:31817") },
-                supportingText = { Text("如果走同一个反向代理，也可以留空") },
+                label = { Text(stringResource(R.string.add_server_web_label)) },
+                placeholder = { Text(defaultWebUrl) },
+                supportingText = { Text(stringResource(R.string.add_server_web_hint)) },
                 singleLine = true,
                 modifier = Modifier.fillMaxWidth(),
             )
@@ -195,7 +201,7 @@ fun AddServerScreen(
                         strokeWidth = 2.dp,
                     )
                 } else {
-                    Text("连接并保存")
+                    Text(stringResource(R.string.add_server_save_button))
                 }
             }
         }

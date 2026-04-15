@@ -1,7 +1,16 @@
 package dev.codexremote.android.ui.sessions
 
+import android.Manifest
+import android.app.Activity
+import android.content.Context
+import android.content.pm.PackageManager
+import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.combinedClickable
@@ -49,22 +58,130 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.input.nestedscroll.nestedScroll
+import androidx.core.content.ContextCompat
+import androidx.core.content.FileProvider
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.viewmodel.compose.viewModel
+import dev.codexremote.android.R
 import dev.codexremote.android.ui.theme.ThemePreference
 import dev.codexremote.android.ui.theme.ThemeToggleAction
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.isActive
+import java.io.File
 
 private enum class AttachmentTarget { Composer, Edit }
 private enum class RepoActionDialogTarget { CreateBranch, CheckoutBranch, Commit }
+private enum class SessionLoadingStage { Host, Stream, Timeline }
+
+private fun createCameraCaptureUri(context: Context): Uri {
+    val cameraDirectory = File(context.cacheDir, "camera").apply { mkdirs() }
+    val imageFile = File.createTempFile("camera_", ".jpg", cameraDirectory)
+    return FileProvider.getUriForFile(
+        context,
+        "${context.packageName}.fileprovider",
+        imageFile,
+    )
+}
+
+@Composable
+private fun SessionLoadingCard(stage: SessionLoadingStage) {
+    TimelineNoticeCard(
+        title = stringResource(R.string.session_detail_loading_title),
+        message = stringResource(R.string.session_detail_loading_message),
+        footer = stringResource(R.string.session_detail_loading_footer),
+        tone = TimelineNoticeTone.Neutral,
+        stateLabel = stringResource(R.string.session_detail_loading_state),
+        content = {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                SessionLoadingStage.entries.forEachIndexed { index, item ->
+                    val isActive = item.ordinal <= stage.ordinal
+                    Surface(
+                        modifier = Modifier.weight(1f),
+                        shape = RoundedCornerShape(14.dp),
+                        color = if (isActive) {
+                            MaterialTheme.colorScheme.primary.copy(alpha = 0.12f)
+                        } else {
+                            MaterialTheme.colorScheme.surface.copy(alpha = 0.8f)
+                        },
+                    ) {
+                        Column(
+                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 10.dp),
+                            verticalArrangement = Arrangement.spacedBy(4.dp),
+                        ) {
+                            Text(
+                                text = "${index + 1}",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = if (isActive) {
+                                    MaterialTheme.colorScheme.primary
+                                } else {
+                                    MaterialTheme.colorScheme.onSurfaceVariant
+                                },
+                            )
+                            Text(
+                                text = when (item) {
+                                    SessionLoadingStage.Host -> stringResource(R.string.session_detail_loading_stage_host)
+                                    SessionLoadingStage.Stream -> stringResource(R.string.session_detail_loading_stage_stream)
+                                    SessionLoadingStage.Timeline -> stringResource(R.string.session_detail_loading_stage_timeline)
+                                },
+                                style = MaterialTheme.typography.labelMedium,
+                                color = if (isActive) {
+                                    MaterialTheme.colorScheme.onSurface
+                                } else {
+                                    MaterialTheme.colorScheme.onSurfaceVariant
+                                },
+                            )
+                        }
+                    }
+                }
+            }
+
+            AnimatedContent(stage, label = "session-loading-stage") { currentStage ->
+                val stageTitle = when (currentStage) {
+                    SessionLoadingStage.Host -> stringResource(R.string.session_detail_loading_stage_host)
+                    SessionLoadingStage.Stream -> stringResource(R.string.session_detail_loading_stage_stream)
+                    SessionLoadingStage.Timeline -> stringResource(R.string.session_detail_loading_stage_timeline)
+                }
+                val stageMessage = when (currentStage) {
+                    SessionLoadingStage.Host -> stringResource(R.string.session_detail_loading_stage_host_desc)
+                    SessionLoadingStage.Stream -> stringResource(R.string.session_detail_loading_stage_stream_desc)
+                    SessionLoadingStage.Timeline -> stringResource(R.string.session_detail_loading_stage_timeline_desc)
+                }
+                Column(
+                    modifier = Modifier.padding(top = 2.dp),
+                    verticalArrangement = Arrangement.spacedBy(6.dp),
+                ) {
+                    Text(
+                        text = stageTitle,
+                        style = MaterialTheme.typography.titleSmall,
+                        color = MaterialTheme.colorScheme.onSurface,
+                    )
+                    Text(
+                        text = stageMessage,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    ShimmerBlock(lines = 2)
+                }
+            }
+        },
+    )
+}
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
 @Composable
@@ -79,6 +196,9 @@ fun SessionDetailScreen(
     onBack: () -> Unit,
     viewModel: SessionDetailViewModel = viewModel(),
 ) {
+    val context = LocalContext.current
+    val lifecycleOwner = LocalLifecycleOwner.current
+    val coroutineScope = rememberCoroutineScope()
     val uiState by viewModel.uiState.collectAsState()
     val session = uiState.session
     val topBarState = rememberTopAppBarState()
@@ -101,6 +221,30 @@ fun SessionDetailScreen(
     var runtimeSheetTarget by remember(stableDetailKey) { mutableStateOf<RuntimeControlTarget?>(null) }
     var repoActionDialogTarget by remember(stableDetailKey) { mutableStateOf<RepoActionDialogTarget?>(null) }
     var repoActionInput by remember(stableDetailKey) { mutableStateOf("") }
+    var showRepoLogSheet by remember(stableDetailKey) { mutableStateOf(false) }
+    var wasBackgrounded by remember(stableDetailKey) { mutableStateOf(false) }
+    var pendingCameraCaptureUri by remember(stableDetailKey) { mutableStateOf<Uri?>(null) }
+    val voiceController = remember(stableDetailKey) {
+        SessionVoiceInputController(
+            context = context.applicationContext,
+            scope = coroutineScope,
+            onTranscript = { transcript -> viewModel.appendPrompt(transcript) },
+            onError = { error ->
+                val message = when (error) {
+                    SessionVoiceInputError.PermissionDenied ->
+                        context.getString(R.string.session_detail_voice_permission_denied)
+                    SessionVoiceInputError.Unavailable ->
+                        context.getString(R.string.session_detail_voice_unavailable)
+                    SessionVoiceInputError.NoMatch ->
+                        context.getString(R.string.session_detail_voice_no_match)
+                    SessionVoiceInputError.Failed ->
+                        context.getString(R.string.session_detail_voice_failed)
+                }
+                viewModel.showError(message)
+            },
+        )
+    }
+    val voiceUiState by voiceController.uiState.collectAsState()
     val composerAttachments = remember(uiState.pendingArtifacts, uiState.pendingLocalAttachments) {
         buildList {
             addAll(
@@ -132,17 +276,30 @@ fun SessionDetailScreen(
             QueuedPromptItem(
                 id = queuedPrompt.id,
                 preview = buildString {
-                    append(queuedPrompt.rawPrompt.trim().ifBlank { "待发送消息" })
+                    append(
+                        queuedPrompt.rawPrompt.trim().ifBlank {
+                            context.getString(R.string.session_detail_queue_default)
+                        },
+                    )
                     if (queuedPrompt.artifacts.isNotEmpty()) {
-                        append(" +${queuedPrompt.artifacts.size}附件")
+                        append(
+                            context.getString(
+                                R.string.session_detail_queue_attachment_suffix,
+                                queuedPrompt.artifacts.size,
+                            ),
+                        )
                     }
                     queuedPrompt.model?.takeIf { it.isNotBlank() }?.let {
                         append(" · ")
                         append(runtimeControlLabel(RuntimeControlTarget.Model, it))
                     }
                     queuedPrompt.reasoningEffort?.takeIf { it.isNotBlank() }?.let {
-                        append(" · 思考 ")
-                        append(runtimeControlLabel(RuntimeControlTarget.ReasoningEffort, it))
+                        append(
+                            context.getString(
+                                R.string.session_detail_queue_reasoning_prefix,
+                                runtimeControlLabel(RuntimeControlTarget.ReasoningEffort, it),
+                            ),
+                        )
                     }
                 },
                 attachmentCount = queuedPrompt.artifacts.size,
@@ -151,23 +308,54 @@ fun SessionDetailScreen(
             )
         }
     }
-    val attachmentPicker = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.OpenDocument(),
-    ) { uri ->
-        if (uri != null) {
-            if (sessionId.isNullOrBlank() && attachmentTarget == AttachmentTarget.Composer) {
-                viewModel.queueLocalAttachment(uri)
+    val attachPickedUri: (Uri) -> Unit = { uri ->
+        if (sessionId.isNullOrBlank() && attachmentTarget == AttachmentTarget.Composer) {
+            viewModel.queueLocalAttachment(uri)
+        } else {
+            if (sessionId.isNullOrBlank()) {
+                viewModel.showError(context.getString(R.string.session_detail_add_attachment_requires_session))
             } else {
-                if (sessionId.isNullOrBlank()) {
-                    viewModel.showError("请先创建会话后再添加附件。")
-                } else {
-                    viewModel.uploadAttachment(serverId, sessionId, uri)
-                }
+                viewModel.uploadAttachment(serverId, sessionId, uri)
             }
         }
     }
+    val attachmentPicker = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenDocument(),
+    ) { uri ->
+        uri?.let(attachPickedUri)
+    }
+    val cameraLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.TakePicture(),
+    ) { success ->
+        val captureUri = pendingCameraCaptureUri
+        pendingCameraCaptureUri = null
+        if (success && captureUri != null) {
+            attachPickedUri(captureUri)
+        }
+    }
+    val voicePermissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestPermission(),
+    ) { granted ->
+        if (!granted) {
+            viewModel.showError(context.getString(R.string.session_detail_voice_permission_denied))
+            return@rememberLauncherForActivityResult
+        }
+        if (!voiceController.isAvailable()) {
+            viewModel.showError(context.getString(R.string.session_detail_voice_unavailable))
+            return@rememberLauncherForActivityResult
+        }
+        voiceController.start(context.getString(R.string.session_detail_voice_prompt))
+    }
+    val notificationPermissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestPermission(),
+    ) { }
     val isRunning = uiState.liveRun?.status in activeRunStatuses
     val cleanedOutput by viewModel.cleanedOutputFlow.collectAsState(initial = null)
+    val loadingStage = when {
+        uiState.session == null && uiState.liveStreamStatus.isNullOrBlank() -> SessionLoadingStage.Host
+        uiState.liveStreamStatus == context.getString(R.string.session_detail_stream_connecting) -> SessionLoadingStage.Stream
+        else -> SessionLoadingStage.Timeline
+    }
 
     // ── Side effects ─────────────────────────────────────────────
 
@@ -176,6 +364,16 @@ fun SessionDetailScreen(
             viewModel.load(serverId, sessionId)
         } else {
             viewModel.prepareDraft()
+        }
+    }
+
+    LaunchedEffect(sessionId) {
+        val notificationPermissionGranted = ContextCompat.checkSelfPermission(
+            context,
+            Manifest.permission.POST_NOTIFICATIONS,
+        ) == PackageManager.PERMISSION_GRANTED
+        if (!notificationPermissionGranted) {
+            notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
         }
     }
 
@@ -198,6 +396,35 @@ fun SessionDetailScreen(
         }
         onDispose {
             viewModel.stopLiveRunStream()
+        }
+    }
+
+    DisposableEffect(voiceController) {
+        onDispose {
+            voiceController.release()
+        }
+    }
+
+    DisposableEffect(lifecycleOwner, serverId, sessionId, stableDetailKey) {
+        val observer = LifecycleEventObserver { _, event ->
+            when (event) {
+                Lifecycle.Event.ON_STOP -> {
+                    wasBackgrounded = true
+                    voiceController.cancel()
+                    viewModel.onAppBackgrounded()
+                }
+                Lifecycle.Event.ON_START -> {
+                    if (wasBackgrounded) {
+                        wasBackgrounded = false
+                        viewModel.onAppForegrounded(serverId, sessionId)
+                    }
+                }
+                else -> Unit
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose {
+            lifecycleOwner.lifecycle.removeObserver(observer)
         }
     }
 
@@ -245,11 +472,19 @@ fun SessionDetailScreen(
         previousLiveStatus = status
     }
 
+    LaunchedEffect(uiState.recoveryNotice) {
+        if (uiState.recoveryNotice != null) {
+            delay(3_000L)
+            viewModel.clearRecoveryNotice()
+        }
+    }
+
     // Fallback polling when SSE is disconnected
-    LaunchedEffect(serverId, sessionId, uiState.liveStreamConnected, uiState.liveRun?.status) {
+    LaunchedEffect(serverId, sessionId, uiState.liveStreamConnected, uiState.liveRun?.status, uiState.appInBackground) {
         if (sessionId.isNullOrBlank()) return@LaunchedEffect
+        if (uiState.appInBackground) return@LaunchedEffect
         if (uiState.liveStreamConnected) return@LaunchedEffect
-        if (uiState.liveStreamStatus == "正在连接原生实时流…") return@LaunchedEffect
+        if (uiState.liveStreamStatus == context.getString(R.string.session_detail_stream_connecting)) return@LaunchedEffect
 
         while (isActive && !uiState.liveStreamConnected) {
             viewModel.refreshLiveRun(serverId, sessionId)
@@ -318,7 +553,10 @@ fun SessionDetailScreen(
                 scrollBehavior = topBarScrollBehavior,
                 navigationIcon = {
                     IconButton(onClick = onBack) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "返回")
+                        Icon(
+                            Icons.AutoMirrored.Filled.ArrowBack,
+                            contentDescription = stringResource(R.string.session_detail_nav_back),
+                        )
                     }
                 },
                 actions = {
@@ -337,7 +575,10 @@ fun SessionDetailScreen(
                                     strokeWidth = 2.dp,
                                 )
                             } else {
-                                Icon(Icons.Filled.Archive, contentDescription = "归档")
+                                Icon(
+                                    Icons.Filled.Archive,
+                                    contentDescription = stringResource(R.string.session_detail_archive),
+                                )
                             }
                         }
                     }
@@ -356,7 +597,10 @@ fun SessionDetailScreen(
                                 strokeWidth = 2.dp,
                             )
                         } else {
-                            Icon(Icons.Filled.Refresh, contentDescription = "刷新")
+                            Icon(
+                                Icons.Filled.Refresh,
+                                contentDescription = stringResource(R.string.session_detail_refresh),
+                            )
                         }
                     }
                 },
@@ -371,22 +615,13 @@ fun SessionDetailScreen(
                         .padding(padding),
                     contentAlignment = Alignment.Center,
                 ) {
-                    TimelineNoticeCard(
-                        title = "正在加载会话",
-                        message = "正在整理历史消息、仓库状态和当前运行信息。",
-                        footer = "这通常只需要几秒钟。",
-                        tone = TimelineNoticeTone.Neutral,
-                        stateLabel = "加载中",
-                        content = {
-                            ShimmerBlock(lines = 2)
-                        },
-                    )
+                    SessionLoadingCard(stage = loadingStage)
                 }
             }
 
             session == null && !isDraftSession -> {
                 ErrorState(
-                    message = uiState.error ?: "会话不可用",
+                    message = uiState.error ?: stringResource(R.string.session_detail_unavailable),
                     onRetry = { if (!sessionId.isNullOrBlank()) viewModel.load(serverId, sessionId) },
                 )
             }
@@ -406,6 +641,20 @@ fun SessionDetailScreen(
                         isRefreshing = uiState.refreshing,
                         modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
                     )
+
+                    AnimatedVisibility(
+                        visible = !uiState.recoveryNotice.isNullOrBlank(),
+                        enter = fadeIn(),
+                        exit = fadeOut(),
+                    ) {
+                        TimelineNoticeCard(
+                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp),
+                            title = stringResource(R.string.session_detail_recovery_title),
+                            message = uiState.recoveryNotice.orEmpty(),
+                            footer = stringResource(R.string.session_detail_recovery_footer),
+                            tone = TimelineNoticeTone.Neutral,
+                        )
+                    }
 
                     RepoStatusSurface(
                         repoStatus = uiState.repoStatus,
@@ -427,6 +676,22 @@ fun SessionDetailScreen(
                         onPush = {
                             if (!sessionId.isNullOrBlank()) {
                                 viewModel.pushRepo(serverId, sessionId)
+                            }
+                        },
+                        onPull = {
+                            if (!sessionId.isNullOrBlank()) {
+                                viewModel.pullRepo(serverId, sessionId)
+                            }
+                        },
+                        onStash = {
+                            if (!sessionId.isNullOrBlank()) {
+                                viewModel.stashRepo(serverId, sessionId)
+                            }
+                        },
+                        onShowLog = {
+                            if (!sessionId.isNullOrBlank()) {
+                                viewModel.loadRepoLog(serverId, sessionId)
+                                showRepoLogSheet = true
                             }
                         },
                         onDismissSummary = { viewModel.dismissRepoActionSummary() },
@@ -461,6 +726,8 @@ fun SessionDetailScreen(
                                 latestUserPrompt = latestPrompt,
                                 latestAssistantReply = latestReply,
                                 cleanedOutput = cleanedOutput,
+                                pendingTurnPrompt = uiState.currentTurnPromptOverride,
+                                retainedLiveOutput = uiState.retainedLiveOutput,
                                 sending = uiState.sending,
                                 isDraft = isDraftSession,
                                 liveStreamConnected = uiState.liveStreamConnected,
@@ -491,12 +758,17 @@ fun SessionDetailScreen(
                     }
 
                     // Error banner — hide timeout-style blips whenever usable content is already visible.
-                    val hasVisibleConversation = session != null || uiState.messages.isNotEmpty() || !cleanedOutput.isNullOrBlank()
+                    val hasVisibleConversation = session != null ||
+                        uiState.messages.isNotEmpty() ||
+                        !cleanedOutput.isNullOrBlank() ||
+                        !uiState.retainedLiveOutput.isNullOrBlank() ||
+                        !uiState.currentTurnPromptOverride.isNullOrBlank()
                     val isTimeoutStyleError = uiState.error?.contains("timeout", ignoreCase = true) == true
                         || uiState.error?.contains("超时") == true
 
                     if (
                         uiState.error != null &&
+                        !uiState.appInBackground &&
                         !(isRunning && uiState.liveStreamConnected) &&
                         !(hasVisibleConversation && isTimeoutStyleError)
                     ) {
@@ -505,6 +777,14 @@ fun SessionDetailScreen(
                             onDismiss = { viewModel.clearError() },
                         )
                     }
+
+                    VoiceRecordingCapsule(
+                        visible = voiceUiState.recording || voiceUiState.transcribing,
+                        uiState = voiceUiState,
+                        onStop = { voiceController.stop() },
+                        onCancel = { voiceController.cancel() },
+                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp),
+                    )
 
                     // Composer bar (always pinned to bottom)
                     ComposerBar(
@@ -524,6 +804,23 @@ fun SessionDetailScreen(
                             attachmentTarget = AttachmentTarget.Composer
                             attachmentPicker.launch(arrayOf("*/*"))
                         },
+                        onGalleryClick = {
+                            attachmentTarget = AttachmentTarget.Composer
+                            attachmentPicker.launch(arrayOf("image/*"))
+                        },
+                        onCameraClick = {
+                            attachmentTarget = AttachmentTarget.Composer
+                            runCatching { createCameraCaptureUri(context) }
+                                .onSuccess { captureUri ->
+                                    pendingCameraCaptureUri = captureUri
+                                    cameraLauncher.launch(captureUri)
+                                }
+                                .onFailure {
+                                    viewModel.showError(
+                                        context.getString(R.string.session_media_camera_create_failed),
+                                    )
+                                }
+                        },
                         onRemoveAttachment = { attachment ->
                             if (attachment.localOnly) {
                                 viewModel.removeLocalAttachment(attachment.id)
@@ -538,6 +835,25 @@ fun SessionDetailScreen(
                         onReasoningEffortClick = {
                             runtimeSheetTarget = RuntimeControlTarget.ReasoningEffort
                         },
+                        onVoiceClick = {
+                            if (voiceUiState.recording) {
+                                voiceController.stop()
+                            } else if (voiceUiState.transcribing) {
+                                // Keep current transcription running.
+                            } else if (!voiceController.isAvailable()) {
+                                viewModel.showError(context.getString(R.string.session_detail_voice_unavailable))
+                            } else {
+                                val permissionGranted = ContextCompat.checkSelfPermission(
+                                    context,
+                                    Manifest.permission.RECORD_AUDIO,
+                                ) == PackageManager.PERMISSION_GRANTED
+                                if (permissionGranted) {
+                                    voiceController.start(context.getString(R.string.session_detail_voice_prompt))
+                                } else {
+                                    voicePermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
+                                }
+                            }
+                        },
                         onSend = {
                             viewModel.sendPrompt(serverId, sessionId, initialCwd)
                         },
@@ -545,7 +861,13 @@ fun SessionDetailScreen(
                             viewModel.queuePrompt(sessionId)
                         },
                         onStop = { viewModel.stopRun(serverId, sessionId) },
-                        sendContentDescription = if (isDraftSession) "发送首条消息并创建会话" else "发送消息",
+                        sendContentDescription = stringResource(
+                            if (isDraftSession) {
+                                R.string.session_detail_send_first
+                            } else {
+                                R.string.session_detail_send_message
+                            },
+                        ),
                     )
                 }
             }
@@ -576,6 +898,67 @@ fun SessionDetailScreen(
         }
     }
 
+    if (showRepoLogSheet) {
+        val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+        ModalBottomSheet(
+            onDismissRequest = { showRepoLogSheet = false },
+            sheetState = sheetState,
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 20.dp, vertical = 12.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                Text(
+                    text = stringResource(R.string.session_controls_repo_log_title),
+                    style = MaterialTheme.typography.titleMedium,
+                )
+                if (uiState.repoLogLoading) {
+                    ShimmerBlock(lines = 3)
+                } else if (uiState.repoLogEntries.isEmpty()) {
+                    TimelineNoticeCard(
+                        title = stringResource(R.string.session_controls_repo_log_title),
+                        message = stringResource(R.string.session_controls_repo_log_empty),
+                        tone = TimelineNoticeTone.Neutral,
+                    )
+                } else {
+                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        uiState.repoLogEntries.forEach { entry ->
+                            Surface(
+                                shape = RoundedCornerShape(14.dp),
+                                color = MaterialTheme.colorScheme.surfaceVariant,
+                                modifier = Modifier.fillMaxWidth(),
+                            ) {
+                                Column(
+                                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
+                                    verticalArrangement = Arrangement.spacedBy(4.dp),
+                                ) {
+                                    Text(
+                                        text = entry.subject,
+                                        style = MaterialTheme.typography.titleSmall,
+                                        color = MaterialTheme.colorScheme.onSurface,
+                                    )
+                                    Text(
+                                        text = "${entry.shortHash} · ${entry.author}",
+                                        style = MaterialTheme.typography.labelMedium,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    )
+                                    Text(
+                                        text = formatDate(entry.authoredAt),
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+                Spacer(modifier = Modifier.height(12.dp))
+            }
+        }
+    }
+
     if (repoActionDialogTarget != null) {
         val target = repoActionDialogTarget ?: RepoActionDialogTarget.CreateBranch
         AlertDialog(
@@ -583,9 +966,9 @@ fun SessionDetailScreen(
             title = {
                 Text(
                     when (target) {
-                        RepoActionDialogTarget.CreateBranch -> "新建分支"
-                        RepoActionDialogTarget.CheckoutBranch -> "切换分支"
-                        RepoActionDialogTarget.Commit -> "提交改动"
+                        RepoActionDialogTarget.CreateBranch -> stringResource(R.string.session_detail_repo_create_branch_title)
+                        RepoActionDialogTarget.CheckoutBranch -> stringResource(R.string.session_detail_repo_checkout_branch_title)
+                        RepoActionDialogTarget.Commit -> stringResource(R.string.session_detail_repo_commit_title)
                     },
                 )
             },
@@ -597,9 +980,9 @@ fun SessionDetailScreen(
                     label = {
                         Text(
                             when (target) {
-                                RepoActionDialogTarget.CreateBranch -> "分支名"
-                                RepoActionDialogTarget.CheckoutBranch -> "目标分支"
-                                RepoActionDialogTarget.Commit -> "提交说明"
+                                RepoActionDialogTarget.CreateBranch -> stringResource(R.string.session_detail_repo_branch_name)
+                                RepoActionDialogTarget.CheckoutBranch -> stringResource(R.string.session_detail_repo_target_branch)
+                                RepoActionDialogTarget.Commit -> stringResource(R.string.session_detail_repo_commit_message)
                             },
                         )
                     },
@@ -620,12 +1003,12 @@ fun SessionDetailScreen(
                     },
                     enabled = repoActionInput.trim().isNotEmpty() && !uiState.repoActionBusy,
                 ) {
-                    Text("执行")
+                    Text(stringResource(R.string.session_detail_execute))
                 }
             },
             dismissButton = {
                 TextButton(onClick = { repoActionDialogTarget = null }) {
-                    Text("取消")
+                    Text(stringResource(R.string.session_detail_cancel))
                 }
             },
         )
@@ -645,19 +1028,29 @@ fun SessionDetailScreen(
                 verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
                 Text(
-                    text = "开发者诊断",
+                    text = stringResource(R.string.session_detail_dev_diag_title),
                     style = MaterialTheme.typography.titleMedium,
                 )
                 DiagnosticRow("Session ID", sessionId ?: "(draft)")
                 DiagnosticRow("Server", serverId)
                 DiagnosticRow("Host", hostId)
-                DiagnosticRow("SSE 连接", if (uiState.liveStreamConnected) "已连接" else "未连接")
-                DiagnosticRow("SSE 状态", uiState.liveStreamStatus ?: "—")
+                DiagnosticRow(
+                    stringResource(R.string.session_detail_diag_sse_connection),
+                    if (uiState.liveStreamConnected) {
+                        stringResource(R.string.session_detail_diag_connected)
+                    } else {
+                        stringResource(R.string.session_detail_diag_disconnected)
+                    },
+                )
+                DiagnosticRow(stringResource(R.string.session_detail_diag_sse_status), uiState.liveStreamStatus ?: "—")
                 DiagnosticRow("Run ID", uiState.liveRun?.id ?: "—")
-                DiagnosticRow("Run 状态", uiState.liveRun?.status ?: "—")
-                DiagnosticRow("模型", uiState.liveRun?.model ?: "—")
-                DiagnosticRow("消息数", "${uiState.messages.size}")
-                DiagnosticRow("输出长度", "${uiState.liveRun?.lastOutput?.length ?: 0} chars")
+                DiagnosticRow(stringResource(R.string.session_detail_diag_run_status), uiState.liveRun?.status ?: "—")
+                DiagnosticRow(stringResource(R.string.session_detail_diag_model), uiState.liveRun?.model ?: "—")
+                DiagnosticRow(stringResource(R.string.session_detail_diag_message_count), "${uiState.messages.size}")
+                DiagnosticRow(
+                    stringResource(R.string.session_detail_diag_output_length),
+                    "${uiState.liveRun?.lastOutput?.length ?: 0} chars",
+                )
                 Spacer(modifier = Modifier.height(24.dp))
             }
         }
@@ -673,14 +1066,14 @@ private fun ErrorBanner(
         modifier = Modifier
             .fillMaxWidth()
             .padding(horizontal = 12.dp, vertical = 4.dp),
-        title = "运行提示",
+        title = stringResource(R.string.session_detail_error_banner_title),
         message = message,
-        footer = "点按关闭后，提示会收起。",
+        footer = stringResource(R.string.session_detail_error_banner_footer),
         tone = TimelineNoticeTone.Error,
-        stateLabel = "错误",
+        stateLabel = stringResource(R.string.session_detail_error_state),
         content = {
             TextButton(onClick = onDismiss) {
-                Text("关闭")
+                Text(stringResource(R.string.session_detail_close))
             }
         }
     )
@@ -699,14 +1092,14 @@ private fun ErrorState(
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(24.dp),
-            title = "会话加载失败",
+            title = stringResource(R.string.session_detail_error_state_title),
             message = message,
-            footer = "请确认网络连接或主机可用后重试。",
+            footer = stringResource(R.string.session_detail_error_state_footer),
             tone = TimelineNoticeTone.Error,
-            stateLabel = "错误",
+            stateLabel = stringResource(R.string.session_detail_error_state),
             content = {
                 Button(onClick = onRetry) {
-                    Text("重试加载")
+                    Text(stringResource(R.string.session_detail_retry_load))
                 }
             }
         )

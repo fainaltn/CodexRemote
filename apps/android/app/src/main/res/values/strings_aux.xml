@@ -1,0 +1,82 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="content_desc_back">返回</string>
+    <string name="content_desc_refresh">刷新</string>
+
+    <string name="inbox_screen_title">收件箱</string>
+    <string name="inbox_kind_link">链接</string>
+    <string name="inbox_kind_file">文件</string>
+    <string name="inbox_meta_status_prefix">状态：</string>
+    <string name="inbox_meta_source_prefix"> · 来源：</string>
+    <string name="inbox_meta_size_suffix"> 字节</string>
+    <string name="inbox_contract_review_bundle">review bundle</string>
+    <string name="inbox_contract_skill_runbook">skill-runbook</string>
+    <string name="inbox_retry_prefix">重试：</string>
+    <string name="inbox_retry_times_suffix"> 次</string>
+    <string name="inbox_error_load_failed">加载收件箱失败</string>
+    <string name="inbox_error_submit_failed">提交链接失败</string>
+    <string name="inbox_error_upload_failed">上传文件失败</string>
+    <string name="inbox_error_file_read_failed">无法读取文件</string>
+    <string name="inbox_error_server_missing">服务器不存在</string>
+    <string name="inbox_error_not_logged_in">尚未登录</string>
+    <string name="inbox_upload_fallback_name">收件箱上传</string>
+    <string name="inbox_loading_title">正在加载收件箱</string>
+    <string name="inbox_loading_message">正在拉取最近投递、链接和文件记录。</string>
+    <string name="inbox_loading_footer">新内容会在这里按时间倒序出现。</string>
+    <string name="inbox_loading_state_label">加载中</string>
+    <string name="inbox_error_title">收件箱加载失败</string>
+    <string name="inbox_error_footer">你可以稍后刷新再试，或先继续投递新内容。</string>
+    <string name="inbox_error_state_label">错误</string>
+    <string name="inbox_error_retry_button">重试</string>
+    <string name="inbox_intro_text">把链接或文件投递到主机的收件箱。这里是后续知识系统整理前的轻量待收集区。</string>
+    <string name="inbox_submit_link_title">提交链接</string>
+    <string name="inbox_url_label">URL</string>
+    <string name="inbox_link_hint_text">可直接粘贴包含标题或短语的分享文本，应用会自动提取其中的链接。</string>
+    <string name="inbox_title_optional_label">标题（可选）</string>
+    <string name="inbox_note_optional_label">备注（可选）</string>
+    <string name="inbox_send_link_button">发送链接</string>
+    <string name="inbox_upload_title">上传文件</string>
+    <string name="inbox_pick_files_button">选择文件（可多选）</string>
+    <string name="inbox_recent_deliveries_title">最近投递</string>
+    <string name="inbox_empty_title">收件箱还是空的</string>
+    <string name="inbox_empty_message">这里会收集你从链接、文件和分享面板投递的内容。</string>
+    <string name="inbox_empty_footer">投递第一条内容后，列表会自动沉淀出最近记录。</string>
+    <string name="inbox_empty_state_label">空状态</string>
+    <string name="inbox_link_success_message">链接已投递到收件箱</string>
+    <string name="inbox_invalid_link_message">未识别到有效链接，请粘贴 URL 或包含 URL 的分享文本</string>
+    <plurals name="inbox_upload_success_message">
+        <item quantity="one">已投递 %1$d 个文件到收件箱</item>
+        <item quantity="other">已投递 %1$d 个文件到收件箱</item>
+    </plurals>
+    <plurals name="inbox_capture_sessions_message">
+        <item quantity="one">采集会话：%1$d</item>
+        <item quantity="other">采集会话：%1$d</item>
+    </plurals>
+
+    <string name="server_settings_title">设置</string>
+    <string name="server_settings_loading_title">正在读取设置</string>
+    <string name="server_settings_loading_message">正在校验当前服务器并整理它的连接配置。</string>
+    <string name="server_settings_loading_footer">这通常只需要几秒钟。</string>
+    <string name="server_settings_loading_state_label">加载中</string>
+    <string name="server_settings_error_title">设置加载失败</string>
+    <string name="server_settings_error_footer">检查网络或主机状态后再试。</string>
+    <string name="server_settings_error_state_label">错误</string>
+    <string name="server_settings_retry_button">重试加载</string>
+    <string name="server_settings_description">修改服务端密码。保存后会自动让当前 app 用新密码重新连接。</string>
+    <string name="server_settings_current_password_label">原密码</string>
+    <string name="server_settings_new_password_label">新密码</string>
+    <string name="server_settings_confirm_password_label">重复新密码</string>
+    <string name="server_settings_validation_current_password_required">请输入原密码</string>
+    <string name="server_settings_validation_new_password_required">请输入新密码</string>
+    <string name="server_settings_validation_confirm_password_required">请再次输入新密码</string>
+    <string name="server_settings_validation_password_mismatch">两次输入的新密码不一致</string>
+    <string name="server_settings_validation_same_password">新密码不能和原密码相同</string>
+    <string name="server_settings_save_button">保存并应用新密码</string>
+    <string name="server_settings_error_load_failed">加载设置失败</string>
+    <string name="server_settings_error_server_missing">服务器不存在</string>
+    <string name="server_settings_error_not_logged_in">当前登录已失效，请重新登录</string>
+    <string name="server_settings_error_update_failed">更新密码失败</string>
+    <string name="server_settings_password_updated_reconnected">密码已更新并重新连接</string>
+    <string name="server_settings_password_updated_restarting">密码已更新，服务正在重启，请稍后再试</string>
+    <string name="server_settings_current_server_unavailable">当前服务器不可用</string>
+</resources>

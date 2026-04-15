@@ -17,7 +17,9 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
+import dev.codexremote.android.R
 
 /**
  * Compact single-line status row shown beneath an AI reply:
@@ -61,7 +63,11 @@ internal fun MicroStatusRow(
             )
         }
 
-        val label = stateLabel?.takeIf { it.isNotBlank() } ?: if (isActive) "生成中" else null
+        val label = stateLabel?.takeIf { it.isNotBlank() } ?: if (isActive) {
+            stringResource(R.string.session_controls_micro_status_active)
+        } else {
+            null
+        }
         if (label != null) {
             Surface(
                 shape = RoundedCornerShape(999.dp),

@@ -20,7 +20,9 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
+import dev.codexremote.android.R
 
 /**
  * Floating pill that appears when the user scrolls up during an active run.
@@ -58,7 +60,13 @@ internal fun ScrollToBottomFab(
                     ) {}
                 }
                 Text(
-                    text = if (hasNewContent) "收到新内容" else "回到底部",
+                    text = stringResource(
+                        if (hasNewContent) {
+                            R.string.scroll_to_bottom_new_content
+                        } else {
+                            R.string.scroll_to_bottom_default
+                        },
+                    ),
                     style = MaterialTheme.typography.labelLarge,
                     color = MaterialTheme.colorScheme.onPrimaryContainer,
                 )

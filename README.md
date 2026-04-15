@@ -103,7 +103,7 @@ English:
 - Architecture / 架构说明: [docs/architecture.md](./docs/architecture.md)
 - Operations / 运维说明: [docs/operations.md](./docs/operations.md)
 - Release checklist / 发布检查单: [docs/release-checklist.md](./docs/release-checklist.md)
-- Release notes / 发布说明: [docs/release-notes-v0.1.4.md](./docs/release-notes-v0.1.4.md)
+- Release notes / 发布说明: [docs/release-notes-v0.2.1.md](./docs/release-notes-v0.2.1.md)
 
 ## Inbox Cleanup / Inbox 清理
 

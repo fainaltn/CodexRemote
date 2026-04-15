@@ -1,0 +1,82 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="content_desc_back">Back</string>
+    <string name="content_desc_refresh">Refresh</string>
+
+    <string name="inbox_screen_title">Inbox</string>
+    <string name="inbox_kind_link">Link</string>
+    <string name="inbox_kind_file">File</string>
+    <string name="inbox_meta_status_prefix">Status: </string>
+    <string name="inbox_meta_source_prefix"> · Source: </string>
+    <string name="inbox_meta_size_suffix"> bytes</string>
+    <string name="inbox_contract_review_bundle">review bundle</string>
+    <string name="inbox_contract_skill_runbook">skill-runbook</string>
+    <string name="inbox_retry_prefix">Retry: </string>
+    <string name="inbox_retry_times_suffix"> times</string>
+    <string name="inbox_error_load_failed">Failed to load inbox</string>
+    <string name="inbox_error_submit_failed">Failed to submit link</string>
+    <string name="inbox_error_upload_failed">Failed to upload files</string>
+    <string name="inbox_error_file_read_failed">Unable to read file</string>
+    <string name="inbox_error_server_missing">Server not found</string>
+    <string name="inbox_error_not_logged_in">Not logged in yet</string>
+    <string name="inbox_upload_fallback_name">Inbox upload</string>
+    <string name="inbox_loading_title">Loading inbox</string>
+    <string name="inbox_loading_message">Fetching recent submissions, links, and file records.</string>
+    <string name="inbox_loading_footer">New content will appear here in reverse chronological order.</string>
+    <string name="inbox_loading_state_label">Loading</string>
+    <string name="inbox_error_title">Inbox failed to load</string>
+    <string name="inbox_error_footer">You can refresh later, or keep submitting new content first.</string>
+    <string name="inbox_error_state_label">Error</string>
+    <string name="inbox_error_retry_button">Retry</string>
+    <string name="inbox_intro_text">Drop links or files into the host inbox. This is the lightweight intake area before the knowledge system organizes everything.</string>
+    <string name="inbox_submit_link_title">Submit link</string>
+    <string name="inbox_url_label">URL</string>
+    <string name="inbox_link_hint_text">You can paste shared text with a title or phrase, and the app will extract the link automatically.</string>
+    <string name="inbox_title_optional_label">Title (optional)</string>
+    <string name="inbox_note_optional_label">Note (optional)</string>
+    <string name="inbox_send_link_button">Send link</string>
+    <string name="inbox_upload_title">Upload files</string>
+    <string name="inbox_pick_files_button">Choose files (multi-select)</string>
+    <string name="inbox_recent_deliveries_title">Recent deliveries</string>
+    <string name="inbox_empty_title">Inbox is empty</string>
+    <string name="inbox_empty_message">This area collects content you submit from links, files, and the share sheet.</string>
+    <string name="inbox_empty_footer">After the first item arrives, the list will start showing recent records automatically.</string>
+    <string name="inbox_empty_state_label">Empty state</string>
+    <string name="inbox_link_success_message">Link delivered to inbox</string>
+    <string name="inbox_invalid_link_message">No valid link found. Paste a URL or shared text containing one.</string>
+    <plurals name="inbox_upload_success_message">
+        <item quantity="one">Delivered %1$d file to inbox</item>
+        <item quantity="other">Delivered %1$d files to inbox</item>
+    </plurals>
+    <plurals name="inbox_capture_sessions_message">
+        <item quantity="one">capture sessions: %1$d</item>
+        <item quantity="other">capture sessions: %1$d</item>
+    </plurals>
+
+    <string name="server_settings_title">Settings</string>
+    <string name="server_settings_loading_title">Loading settings</string>
+    <string name="server_settings_loading_message">Checking the current server and organizing its connection settings.</string>
+    <string name="server_settings_loading_footer">This usually only takes a few seconds.</string>
+    <string name="server_settings_loading_state_label">Loading</string>
+    <string name="server_settings_error_title">Settings failed to load</string>
+    <string name="server_settings_error_footer">Check the network or host status and try again.</string>
+    <string name="server_settings_error_state_label">Error</string>
+    <string name="server_settings_retry_button">Retry load</string>
+    <string name="server_settings_description">Change the server password. After saving, the app will reconnect using the new password automatically.</string>
+    <string name="server_settings_current_password_label">Current password</string>
+    <string name="server_settings_new_password_label">New password</string>
+    <string name="server_settings_confirm_password_label">Repeat new password</string>
+    <string name="server_settings_validation_current_password_required">Please enter the current password</string>
+    <string name="server_settings_validation_new_password_required">Please enter a new password</string>
+    <string name="server_settings_validation_confirm_password_required">Please enter the new password again</string>
+    <string name="server_settings_validation_password_mismatch">The two new passwords do not match</string>
+    <string name="server_settings_validation_same_password">The new password cannot match the current password</string>
+    <string name="server_settings_save_button">Save and apply new password</string>
+    <string name="server_settings_error_load_failed">Failed to load settings</string>
+    <string name="server_settings_error_server_missing">Server not found</string>
+    <string name="server_settings_error_not_logged_in">Your login has expired. Please sign in again</string>
+    <string name="server_settings_error_update_failed">Failed to update password</string>
+    <string name="server_settings_password_updated_reconnected">Password updated and reconnected</string>
+    <string name="server_settings_password_updated_restarting">Password updated. The service is restarting, please try again later</string>
+    <string name="server_settings_current_server_unavailable">The current server is unavailable</string>
+</resources>

@@ -1,6 +1,6 @@
 {
   "name": "@codexremote/server",
-  "version": "0.1.4",
+  "version": "0.2.1",
   "private": true,
   "description": "Fastify backend for CodexRemote",
   "type": "module",

@@ -33,11 +33,13 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.unit.dp
+import dev.codexremote.android.R
 import kotlinx.coroutines.delay
 
 @Composable
@@ -45,12 +47,14 @@ fun RichBlockList(
     text: String?,
     modifier: Modifier = Modifier,
     active: Boolean = false,
-    emptyActiveMessage: String = "Codex 正在整理思路，内容会陆续流入这里…",
-    emptyIdleMessage: String = "这次运行没有可显示的文本输出",
+    emptyActiveMessage: String? = null,
+    emptyIdleMessage: String? = null,
     showCursor: Boolean = false,
     cursorAlpha: Float = 0f,
 ) {
     val blocks = remember(text) { parseTextToBlocks(text) }
+    val activeMessage = emptyActiveMessage ?: stringResource(R.string.session_timeline_empty_active_message)
+    val idleMessage = emptyIdleMessage ?: stringResource(R.string.session_timeline_empty_idle_message)
 
     Column(
         modifier = modifier,
@@ -59,7 +63,7 @@ fun RichBlockList(
         if (blocks.isEmpty()) {
             Text(
                 text = androidx.compose.ui.text.buildAnnotatedString {
-                    append(if (active) emptyActiveMessage else emptyIdleMessage)
+                    append(if (active) activeMessage else idleMessage)
                     if (showCursor) {
                         withStyle(
                             SpanStyle(
@@ -179,6 +183,10 @@ internal fun RichCodeBlock(
     cursorAlpha: Float,
 ) {
     val clipboardManager = LocalClipboardManager.current
+    val codeLanguageLabel = stringResource(R.string.session_timeline_code_language_text)
+    val copiedLabel = stringResource(R.string.session_timeline_code_copied)
+    val copyLabel = stringResource(R.string.session_timeline_message_copy)
+    val outputContinuesLabel = stringResource(R.string.session_timeline_output_continues)
     var copied by remember(block.id) { mutableStateOf(false) }
 
     LaunchedEffect(copied) {
@@ -212,7 +220,7 @@ internal fun RichCodeBlock(
                     onClick = {},
                     label = {
                         Text(
-                            text = block.language?.takeIf { it.isNotBlank() } ?: "text",
+                            text = block.language?.takeIf { it.isNotBlank() } ?: codeLanguageLabel,
                             style = MaterialTheme.typography.labelSmall,
                         )
                     },
@@ -232,7 +240,7 @@ internal fun RichCodeBlock(
                     contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
                 ) {
                     Text(
-                        text = if (copied) "已复制" else "复制",
+                        text = if (copied) copiedLabel else copyLabel,
                         style = MaterialTheme.typography.labelMedium,
                     )
                 }
@@ -271,7 +279,7 @@ internal fun RichCodeBlock(
 
             if (block.isOpenEnded) {
                 Text(
-                    text = "输出仍在继续…",
+                    text = outputContinuesLabel,
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )

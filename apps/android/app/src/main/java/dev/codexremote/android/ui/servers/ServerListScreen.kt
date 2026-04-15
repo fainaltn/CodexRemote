@@ -39,11 +39,13 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.compose.viewModel
+import dev.codexremote.android.R
 import dev.codexremote.android.data.model.Server
 import dev.codexremote.android.data.network.ApiClient
 import dev.codexremote.android.data.repository.ServerRepository
@@ -63,7 +65,7 @@ data class ServerConnectionUiState(
     val checking: Boolean = false,
     val reachable: Boolean = false,
     val degraded: Boolean = false,
-    val summary: String = "尚未检查连接",
+    val summary: String = "",
 )
 
 class ServerListViewModel(application: Application) : AndroidViewModel(application) {
@@ -77,7 +79,10 @@ class ServerListViewModel(application: Application) : AndroidViewModel(applicati
         viewModelScope.launch {
             repo.servers.collectLatest { servers ->
                 _connectionStates.value = servers.associate { server ->
-                    server.id to ServerConnectionUiState(checking = true, summary = "检查连接中…")
+                    server.id to ServerConnectionUiState(
+                        checking = true,
+                        summary = application.getString(R.string.server_connection_checking),
+                    )
                 }
                 servers.forEach { server ->
                     refreshServer(server)
@@ -88,7 +93,12 @@ class ServerListViewModel(application: Application) : AndroidViewModel(applicati
 
     fun refreshServer(server: Server) {
         _connectionStates.update { states ->
-            states + (server.id to ServerConnectionUiState(checking = true, summary = "检查连接中…"))
+            states + (
+                server.id to ServerConnectionUiState(
+                    checking = true,
+                    summary = getApplication<Application>().getString(R.string.server_connection_checking),
+                )
+            )
         }
 
         viewModelScope.launch(Dispatchers.IO) {
@@ -135,7 +145,7 @@ fun ServerListScreen(
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("CodexRemote") },
+                title = { Text(stringResource(R.string.app_name)) },
                 actions = {
                     ThemeToggleAction(
                         themePreference = themePreference,
@@ -146,7 +156,10 @@ fun ServerListScreen(
         },
         floatingActionButton = {
             FloatingActionButton(onClick = onAddServer) {
-                Icon(Icons.Filled.Add, contentDescription = "添加服务器")
+                Icon(
+                    Icons.Filled.Add,
+                    contentDescription = stringResource(R.string.server_add_action),
+                )
             }
         }
     ) { padding ->
@@ -159,14 +172,14 @@ fun ServerListScreen(
             ) {
                 TimelineNoticeCard(
                     modifier = Modifier.padding(horizontal = 24.dp),
-                    title = "还没有配置服务器",
-                    message = "添加一个 CodexRemote 主机后，这里会显示它的连接状态和登录入口。",
-                    footer = "右下角的 + 会带你进入添加流程。",
+                    title = stringResource(R.string.server_empty_title),
+                    message = stringResource(R.string.server_empty_message),
+                    footer = stringResource(R.string.server_empty_footer),
                     tone = TimelineNoticeTone.Neutral,
-                    stateLabel = "空状态",
+                    stateLabel = stringResource(R.string.server_empty_state_label),
                     content = {
                         Button(onClick = onAddServer) {
-                            Text("添加服务器")
+                            Text(stringResource(R.string.server_add_button))
                         }
                     },
                 )
@@ -238,7 +251,11 @@ private fun ServerCard(
                     overflow = TextOverflow.Ellipsis,
                 )
                 Text(
-                    text = connectionState?.summary ?: "尚未检查连接",
+                    text = when {
+                        connectionState?.summary.isNullOrBlank() ->
+                            stringResource(R.string.server_connection_checking)
+                        else -> connectionState.summary
+                    },
                     style = MaterialTheme.typography.bodySmall,
                     color = when {
                         connectionState?.checking == true -> MaterialTheme.colorScheme.primary
@@ -255,7 +272,7 @@ private fun ServerCard(
                 IconButton(onClick = onRefresh) {
                     Icon(
                         imageVector = Icons.Filled.Sync,
-                        contentDescription = "重新检查连接",
+                        contentDescription = stringResource(R.string.server_refresh_action),
                     )
                 }
                 if (server.token != null) {
@@ -265,7 +282,11 @@ private fun ServerCard(
                         } else {
                             Icons.Filled.CheckCircle
                         },
-                        contentDescription = if (connectionState?.reachable == false) "连接异常" else "已登录",
+                        contentDescription = if (connectionState?.reachable == false) {
+                            stringResource(R.string.server_status_connection_error)
+                        } else {
+                            stringResource(R.string.server_status_logged_in)
+                        },
                         tint = if (connectionState?.reachable == false) {
                             MaterialTheme.colorScheme.error
                         } else {
@@ -277,7 +298,7 @@ private fun ServerCard(
                     IconButton(onClick = onLogin) {
                         Icon(
                             imageVector = Icons.AutoMirrored.Filled.Login,
-                            contentDescription = "登录",
+                            contentDescription = stringResource(R.string.server_login_action),
                         )
                     }
                 }

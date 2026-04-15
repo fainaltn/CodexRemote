@@ -31,11 +31,13 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.compose.viewModel
+import dev.codexremote.android.R
 import dev.codexremote.android.data.model.Server
 import dev.codexremote.android.data.network.ApiClient
 import dev.codexremote.android.data.repository.ServerRepository
@@ -74,7 +76,9 @@ class ServerSettingsViewModel(application: Application) : AndroidViewModel(appli
             try {
                 val servers = repo.servers.first()
                 val server = servers.find { it.id == serverId }
-                    ?: throw IllegalStateException("服务器不存在")
+                    ?: throw IllegalStateException(
+                        getApplication<Application>().getString(R.string.server_settings_error_server_missing)
+                    )
                 _uiState.value = ServerSettingsUiState(
                     loading = false,
                     server = server,
@@ -82,7 +86,10 @@ class ServerSettingsViewModel(application: Application) : AndroidViewModel(appli
             } catch (error: Exception) {
                 _uiState.value = ServerSettingsUiState(
                     loading = false,
-                    error = userFacingMessage(error, "加载设置失败"),
+                    error = userFacingMessage(
+                        error,
+                        getApplication<Application>().getString(R.string.server_settings_error_load_failed),
+                    ),
                 )
             }
         }
@@ -98,11 +105,11 @@ class ServerSettingsViewModel(application: Application) : AndroidViewModel(appli
         viewModelScope.launch {
             val snapshot = _uiState.value
             val server = snapshot.server ?: run {
-                onError("服务器不存在")
+                onError(getApplication<Application>().getString(R.string.server_settings_error_server_missing))
                 return@launch
             }
             val token = server.token ?: run {
-                onError("当前登录已失效，请重新登录")
+                onError(getApplication<Application>().getString(R.string.server_settings_error_not_logged_in))
                 return@launch
             }
 
@@ -156,7 +163,11 @@ class ServerSettingsViewModel(application: Application) : AndroidViewModel(appli
                         appPassword = newPassword,
                     )
                     load(serverId)
-                    onSuccess("密码已更新并重新连接")
+                    onSuccess(
+                        getApplication<Application>().getString(
+                            R.string.server_settings_password_updated_reconnected
+                        )
+                    )
                 } else {
                     repo.updateCredentials(
                         serverId = serverId,
@@ -166,13 +177,22 @@ class ServerSettingsViewModel(application: Application) : AndroidViewModel(appli
                     load(serverId)
                     onSuccess(
                         userFacingMessage(
-                            reloginError ?: IllegalStateException("服务正在重启"),
-                            "密码已更新，服务正在重启，请稍后再试",
+                            reloginError ?: IllegalStateException(
+                                getApplication<Application>().getString(
+                                    R.string.server_settings_password_updated_restarting,
+                                )
+                            ),
+                            getApplication<Application>().getString(
+                                R.string.server_settings_password_updated_restarting,
+                            ),
                         )
                     )
                 }
             } catch (error: Exception) {
-                val message = userFacingMessage(error, "更新密码失败")
+                val message = userFacingMessage(
+                    error,
+                    getApplication<Application>().getString(R.string.server_settings_error_update_failed),
+                )
                 _uiState.value = snapshot.copy(
                     loading = false,
                     saving = false,
@@ -212,13 +232,34 @@ fun ServerSettingsScreen(
         }
     }
 
+    val screenTitle = stringResource(R.string.server_settings_title)
+    val backDescription = stringResource(R.string.content_desc_back)
+    val loadingTitle = stringResource(R.string.server_settings_loading_title)
+    val loadingMessage = stringResource(R.string.server_settings_loading_message)
+    val loadingFooter = stringResource(R.string.server_settings_loading_footer)
+    val loadingStateLabel = stringResource(R.string.server_settings_loading_state_label)
+    val errorTitle = stringResource(R.string.server_settings_error_title)
+    val errorFooter = stringResource(R.string.server_settings_error_footer)
+    val errorStateLabel = stringResource(R.string.server_settings_error_state_label)
+    val retryButtonLabel = stringResource(R.string.server_settings_retry_button)
+    val description = stringResource(R.string.server_settings_description)
+    val currentPasswordLabel = stringResource(R.string.server_settings_current_password_label)
+    val newPasswordLabel = stringResource(R.string.server_settings_new_password_label)
+    val confirmPasswordLabel = stringResource(R.string.server_settings_confirm_password_label)
+    val validationCurrentPasswordRequired = stringResource(R.string.server_settings_validation_current_password_required)
+    val validationNewPasswordRequired = stringResource(R.string.server_settings_validation_new_password_required)
+    val validationConfirmPasswordRequired = stringResource(R.string.server_settings_validation_confirm_password_required)
+    val validationPasswordMismatch = stringResource(R.string.server_settings_validation_password_mismatch)
+    val validationSamePassword = stringResource(R.string.server_settings_validation_same_password)
+    val saveButtonLabel = stringResource(R.string.server_settings_save_button)
+
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("设置") },
+                title = { Text(screenTitle) },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "返回")
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = backDescription)
                     }
                 }
             )
@@ -237,11 +278,11 @@ fun ServerSettingsScreen(
             when {
                 uiState.loading -> {
                     TimelineNoticeCard(
-                        title = "正在读取设置",
-                        message = "正在校验当前服务器并整理它的连接配置。",
-                        footer = "这通常只需要几秒钟。",
+                        title = loadingTitle,
+                        message = loadingMessage,
+                        footer = loadingFooter,
                         tone = TimelineNoticeTone.Neutral,
-                        stateLabel = "加载中",
+                        stateLabel = loadingStateLabel,
                         content = {
                             ShimmerBlock(lines = 2)
                         },
@@ -250,16 +291,16 @@ fun ServerSettingsScreen(
 
                 uiState.server == null -> {
                     TimelineNoticeCard(
-                        title = "设置加载失败",
-                        message = uiState.error ?: "当前服务器不可用",
-                        footer = "检查网络或主机状态后再试。",
+                        title = errorTitle,
+                        message = uiState.error ?: stringResource(R.string.server_settings_current_server_unavailable),
+                        footer = errorFooter,
                         tone = TimelineNoticeTone.Error,
-                        stateLabel = "错误",
+                        stateLabel = errorStateLabel,
                         content = {
                             Button(
                                 onClick = { viewModel.load(serverId) },
                             ) {
-                                Text("重试加载")
+                                Text(retryButtonLabel)
                             }
                         },
                     )
@@ -281,7 +322,7 @@ fun ServerSettingsScreen(
                     )
                     Spacer(modifier = Modifier.height(20.dp))
                     Text(
-                        text = "修改服务端密码。保存后会自动让当前 app 用新密码重新连接。",
+                        text = description,
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
@@ -293,7 +334,7 @@ fun ServerSettingsScreen(
                             currentPassword = it
                             localError = null
                         },
-                        label = { Text("原密码") },
+                        label = { Text(currentPasswordLabel) },
                         singleLine = true,
                         visualTransformation = PasswordVisualTransformation(),
                         modifier = Modifier.fillMaxWidth(),
@@ -305,7 +346,7 @@ fun ServerSettingsScreen(
                             newPassword = it
                             localError = null
                         },
-                        label = { Text("新密码") },
+                        label = { Text(newPasswordLabel) },
                         singleLine = true,
                         visualTransformation = PasswordVisualTransformation(),
                         modifier = Modifier.fillMaxWidth(),
@@ -317,7 +358,7 @@ fun ServerSettingsScreen(
                             confirmPassword = it
                             localError = null
                         },
-                        label = { Text("重复新密码") },
+                        label = { Text(confirmPasswordLabel) },
                         singleLine = true,
                         visualTransformation = PasswordVisualTransformation(),
                         modifier = Modifier.fillMaxWidth(),
@@ -327,11 +368,11 @@ fun ServerSettingsScreen(
                     Button(
                         onClick = {
                             val validation = when {
-                                currentPassword.isBlank() -> "请输入原密码"
-                                newPassword.isBlank() -> "请输入新密码"
-                                confirmPassword.isBlank() -> "请再次输入新密码"
-                                newPassword != confirmPassword -> "两次输入的新密码不一致"
-                                currentPassword == newPassword -> "新密码不能和原密码相同"
+                                currentPassword.isBlank() -> validationCurrentPasswordRequired
+                                newPassword.isBlank() -> validationNewPasswordRequired
+                                confirmPassword.isBlank() -> validationConfirmPasswordRequired
+                                newPassword != confirmPassword -> validationPasswordMismatch
+                                currentPassword == newPassword -> validationSamePassword
                                 else -> null
                             }
 
@@ -369,7 +410,7 @@ fun ServerSettingsScreen(
                                 strokeWidth = 2.dp,
                             )
                         } else {
-                            Text("保存并应用新密码")
+                            Text(saveButtonLabel)
                         }
                     }
 

@@ -1,0 +1,53 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="session_timeline_history_title">History</string>
+    <string name="session_timeline_history_subtitle_with_rounds">Past rounds are folded into expandable history cards over time</string>
+    <string name="session_timeline_history_subtitle_empty">This session has not formed any history rounds yet</string>
+    <plurals name="session_timeline_history_round_count">
+        <item quantity="one">%1$d round</item>
+        <item quantity="other">%1$d rounds</item>
+    </plurals>
+    <string name="session_timeline_history_empty_title">No history yet</string>
+    <string name="session_timeline_history_empty_message">This session has no past rounds yet. Once new messages move things forward, history will settle here automatically.</string>
+    <string name="session_timeline_history_empty_footer">You can watch the current run first and come back here to expand finished rounds.</string>
+    <string name="session_timeline_history_empty_state_label">Empty history</string>
+    <string name="session_timeline_stream_degraded_title">Live stream degraded</string>
+    <string name="session_timeline_stream_degraded_footer">The session is still running, and the UI will refresh automatically to catch up.</string>
+    <string name="session_timeline_history_round_expand">Expand</string>
+    <string name="session_timeline_history_round_collapse">Collapse</string>
+    <string name="session_timeline_history_round_preview_empty">No preview content yet</string>
+    <string name="session_timeline_folded_messages_expand">Show %1$d intermediate steps</string>
+    <string name="session_timeline_folded_messages_collapse">Hide %1$d intermediate steps</string>
+    <string name="session_timeline_folded_messages_section_title">Intermediate steps</string>
+    <string name="session_timeline_reasoning_label">💭 Thinking process</string>
+    <string name="session_timeline_message_copy">Copy</string>
+    <string name="session_timeline_message_edit_and_resend">Edit and resend</string>
+    <string name="session_timeline_empty_active_message">Codex is still organizing thoughts, and content will flow in here shortly…</string>
+    <string name="session_timeline_empty_idle_message">This run has no visible text output</string>
+    <string name="session_timeline_code_language_text">text</string>
+    <string name="session_timeline_code_copied">Copied</string>
+    <string name="session_timeline_output_continues">Output is still streaming…</string>
+    <string name="session_timeline_reply_settled_title">This run has settled</string>
+    <string name="session_timeline_reply_settled_message_with_output">The streamed output has settled into the final result, and you can keep browsing, copying, or retrying it.</string>
+    <string name="session_timeline_reply_settled_message_empty">This run has finished, and there is no extra text output.</string>
+    <string name="session_timeline_reply_settled_state_label">Synced</string>
+    <string name="session_timeline_reply_error_title">This run has an issue</string>
+    <string name="session_timeline_reply_error_footer">You can still retry this run or refill the prompt.</string>
+    <string name="session_timeline_reply_error_state_label">Error</string>
+    <string name="session_timeline_reply_reuse_prompt">Refill prompt</string>
+    <string name="session_timeline_reply_retry">Retry</string>
+    <string name="session_timeline_reply_copy_reply">Copy reply</string>
+    <string name="session_timeline_reply_retry_run">Retry run</string>
+    <string name="session_timeline_reply_no_visible_output_title">No visible output</string>
+    <string name="session_timeline_reply_no_visible_output_message">This run did not return text content, but it will still stay in the current round.</string>
+    <string name="session_timeline_reply_no_visible_output_footer">You can still retry this run or refill the prompt.</string>
+    <string name="session_timeline_reply_no_visible_output_state_label">Empty output</string>
+    <string name="session_timeline_reply_waiting_draft_title">Waiting for the first message</string>
+    <string name="session_timeline_reply_waiting_draft_message">After the first message is sent, this area will start showing the current session run.</string>
+    <string name="session_timeline_reply_waiting_draft_footer">The first message creates the session and immediately enters processing.</string>
+    <string name="session_timeline_reply_waiting_draft_state_label">Queued</string>
+    <string name="session_timeline_reply_waiting_title">Waiting for a new reply</string>
+    <string name="session_timeline_reply_waiting_message">After you send a message, the reply and run status will unfold here.</string>
+    <string name="session_timeline_reply_waiting_footer">When nothing is active, this area stays calm without feeling empty.</string>
+    <string name="session_timeline_reply_waiting_state_label">Idle</string>
+</resources>

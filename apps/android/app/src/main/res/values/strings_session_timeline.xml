@@ -1,0 +1,53 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="session_timeline_history_title">历史记录</string>
+    <string name="session_timeline_history_subtitle_with_rounds">过去的回合会按时间沉淀成可展开的历史卡片</string>
+    <string name="session_timeline_history_subtitle_empty">当前会话还没有形成历史回合</string>
+    <plurals name="session_timeline_history_round_count">
+        <item quantity="one">%1$d 个回合</item>
+        <item quantity="other">%1$d 个回合</item>
+    </plurals>
+    <string name="session_timeline_history_empty_title">暂无历史记录</string>
+    <string name="session_timeline_history_empty_message">当前会话还没有过去的回合。等到新的消息往前推进后，历史会在这里自动沉淀。</string>
+    <string name="session_timeline_history_empty_footer">你可以先看当前运行，再回到这里展开已经完成的回合。</string>
+    <string name="session_timeline_history_empty_state_label">历史为空</string>
+    <string name="session_timeline_stream_degraded_title">实时流已降级</string>
+    <string name="session_timeline_stream_degraded_footer">会话仍在继续，界面会自动刷新补齐内容。</string>
+    <string name="session_timeline_history_round_expand">展开</string>
+    <string name="session_timeline_history_round_collapse">收起</string>
+    <string name="session_timeline_history_round_preview_empty">暂无可预览内容</string>
+    <string name="session_timeline_folded_messages_expand">查看 %1$d 条中间步骤</string>
+    <string name="session_timeline_folded_messages_collapse">收起 %1$d 条中间步骤</string>
+    <string name="session_timeline_folded_messages_section_title">中间步骤</string>
+    <string name="session_timeline_reasoning_label">💭 思考过程</string>
+    <string name="session_timeline_message_copy">复制</string>
+    <string name="session_timeline_message_edit_and_resend">编辑并重发</string>
+    <string name="session_timeline_empty_active_message">Codex 正在整理思路，内容会陆续流入这里…</string>
+    <string name="session_timeline_empty_idle_message">这次运行没有可显示的文本输出</string>
+    <string name="session_timeline_code_language_text">text</string>
+    <string name="session_timeline_code_copied">已复制</string>
+    <string name="session_timeline_output_continues">输出仍在继续…</string>
+    <string name="session_timeline_reply_settled_title">本轮已收束</string>
+    <string name="session_timeline_reply_settled_message_with_output">流式输出已经沉淀为最终结果，当前内容可继续浏览、复制或直接重试。</string>
+    <string name="session_timeline_reply_settled_message_empty">本轮已经结束，当前没有额外的文本输出。</string>
+    <string name="session_timeline_reply_settled_state_label">已同步</string>
+    <string name="session_timeline_reply_error_title">本轮运行有问题</string>
+    <string name="session_timeline_reply_error_footer">你仍然可以重试本轮或回填提示词。</string>
+    <string name="session_timeline_reply_error_state_label">错误</string>
+    <string name="session_timeline_reply_reuse_prompt">回填提示词</string>
+    <string name="session_timeline_reply_retry">重试</string>
+    <string name="session_timeline_reply_copy_reply">复制回复</string>
+    <string name="session_timeline_reply_retry_run">重试本轮</string>
+    <string name="session_timeline_reply_no_visible_output_title">没有可见输出</string>
+    <string name="session_timeline_reply_no_visible_output_message">这次运行没有返回文本内容，但它仍然会保留在当前回合中。</string>
+    <string name="session_timeline_reply_no_visible_output_footer">你仍然可以重试本轮或回填提示词。</string>
+    <string name="session_timeline_reply_no_visible_output_state_label">空输出</string>
+    <string name="session_timeline_reply_waiting_draft_title">等待首条消息</string>
+    <string name="session_timeline_reply_waiting_draft_message">输入首条消息后，这里会开始显示当前会话的运行过程。</string>
+    <string name="session_timeline_reply_waiting_draft_footer">首条消息会创建会话并立即进入处理流程。</string>
+    <string name="session_timeline_reply_waiting_draft_state_label">待发送</string>
+    <string name="session_timeline_reply_waiting_title">等待新的回复</string>
+    <string name="session_timeline_reply_waiting_message">发送一条消息后，回复和运行状态会在这里展开。</string>
+    <string name="session_timeline_reply_waiting_footer">当前没有活跃运行时，这里会保持安静而不突兀。</string>
+    <string name="session_timeline_reply_waiting_state_label">空闲</string>
+</resources>

@@ -80,3 +80,17 @@ data class RepoActionResponse(
     val summary: String,
     val repoStatus: RepoStatus,
 )
+
+@Serializable
+data class RepoLogEntry(
+    val hash: String,
+    val shortHash: String,
+    val subject: String,
+    val author: String,
+    val authoredAt: String,
+)
+
+@Serializable
+data class RepoLogResponse(
+    val entries: List<RepoLogEntry>,
+)

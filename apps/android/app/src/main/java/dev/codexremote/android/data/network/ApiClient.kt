@@ -15,6 +15,7 @@ import dev.codexremote.android.data.model.CreateSessionRequest
 import dev.codexremote.android.data.model.CreateSessionResponse
 import dev.codexremote.android.data.model.RepoActionRequest
 import dev.codexremote.android.data.model.RepoActionResponse
+import dev.codexremote.android.data.model.RepoLogResponse
 import dev.codexremote.android.data.model.RepoStatusResponse
 import dev.codexremote.android.data.model.StartLiveRunRequest
 import dev.codexremote.android.data.model.StartLiveRunResponse
@@ -282,6 +283,17 @@ class ApiClient(baseUrl: String) {
             bearerAuth(token)
             contentType(ContentType.Application.Json)
             setBody(action)
+        }
+        return decodeResponse(response)
+    }
+
+    suspend fun getRepoLog(
+        token: String,
+        hostId: String,
+        sessionId: String,
+    ): RepoLogResponse {
+        val response = http.get("$baseUrl/api/hosts/$hostId/sessions/${encode(sessionId)}/repo-log") {
+            bearerAuth(token)
         }
         return decodeResponse(response)
     }

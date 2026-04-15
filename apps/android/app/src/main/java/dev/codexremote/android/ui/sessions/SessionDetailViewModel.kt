@@ -5,9 +5,11 @@ import android.net.Uri
 import android.provider.OpenableColumns
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import dev.codexremote.android.R
 import dev.codexremote.android.data.model.Artifact
 import dev.codexremote.android.data.model.RepoActionRequest
 import dev.codexremote.android.data.model.RepoActionResponse
+import dev.codexremote.android.data.model.RepoLogEntry
 import dev.codexremote.android.data.model.Run
 import dev.codexremote.android.data.model.RepoStatus
 import dev.codexremote.android.data.model.Session
@@ -16,6 +18,8 @@ import dev.codexremote.android.data.model.SessionMessage
 import dev.codexremote.android.data.network.ApiClient
 import dev.codexremote.android.data.network.LiveRunStreamEvent
 import dev.codexremote.android.data.repository.ServerRepository
+import dev.codexremote.android.notifications.RunCompletedNotificationHelper
+import dev.codexremote.android.notifications.RunCompletedNotificationPayload
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -29,6 +33,7 @@ import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
@@ -58,10 +63,17 @@ data class SessionDetailUiState(
     val stopping: Boolean = false,
     val repoActionBusy: Boolean = false,
     val repoActionSummary: String? = null,
+    val repoLogEntries: List<RepoLogEntry> = emptyList(),
+    val repoLogLoading: Boolean = false,
     val error: String? = null,
     val createdSessionId: String? = null,
+    val currentTurnPromptOverride: String? = null,
+    val retainedLiveOutput: String? = null,
+    val retainedLiveRunId: String? = null,
     val liveStreamConnected: Boolean = false,
     val liveStreamStatus: String? = null,
+    val appInBackground: Boolean = false,
+    val recoveryNotice: String? = null,
 )
 
 data class PendingLocalAttachment(
@@ -90,16 +102,23 @@ private data class ServerHandle(
     val token: String,
 )
 
+private data class SessionRef(
+    val serverId: String,
+    val sessionId: String,
+)
+
 private fun buildAttachmentPrompt(prompt: String, artifacts: List<Artifact>): String {
     if (artifacts.isEmpty()) return prompt.trim()
     return buildString {
         appendLine("You have access to these uploaded session artifacts on the local filesystem.")
-        appendLine("Inspect them directly if relevant before answering.")
+        appendLine("Use the exact absolute file paths below directly before answering.")
+        appendLine("Do not search the workspace for alternate copies unless a listed path is missing.")
         appendLine()
         artifacts.forEachIndexed { index, artifact ->
             appendLine(
-                "[Attachment ${index + 1}] ${artifact.originalName} (${artifact.mimeType}) at path: ${artifact.storedPath}",
+                "[Attachment ${index + 1}] id=${artifact.id} ${artifact.originalName} (${artifact.mimeType})",
             )
+            appendLine("Absolute path: ${artifact.storedPath}")
         }
         appendLine()
         append("User request: ${prompt.trim()}")
@@ -145,9 +164,15 @@ class SessionDetailViewModel(application: Application) : AndroidViewModel(applic
         .map { it.liveRun?.lastOutput to it.liveRun?.prompt }.distinctUntilChanged()
         .map { (output, prompt) -> cleanLiveOutput(output, prompt) }
     private var liveStreamJob: Job? = null
+    private var backgroundMonitorJob: Job? = null
     private var queuedDispatchJob: Job? = null
     private var liveStreamKey: Pair<String, String>? = null
     private var liveStreamLastEventId: Long? = null
+    private var activeSessionRef: SessionRef? = null
+    private var lastNotifiedTerminalRunId: String? = null
+
+    private fun string(resId: Int, vararg args: Any): String =
+        getApplication<Application>().getString(resId, *args)
 
     private fun userFacingMessage(error: Throwable, fallback: String): String {
         val resolved = ApiClient.describeNetworkFailure(error)
@@ -164,8 +189,8 @@ class SessionDetailViewModel(application: Application) : AndroidViewModel(applic
     private suspend fun resolveServer(serverId: String): ServerHandle {
         val servers = repo.servers.first()
         val server = servers.find { it.id == serverId }
-            ?: throw IllegalStateException("服务器不存在")
-        val token = server.token ?: throw IllegalStateException("尚未登录")
+            ?: throw IllegalStateException(string(R.string.session_detail_error_missing_server))
+        val token = server.token ?: throw IllegalStateException(string(R.string.session_detail_error_not_logged_in))
         return ServerHandle(ApiClient(server.baseUrl), token)
     }
 
@@ -182,6 +207,7 @@ class SessionDetailViewModel(application: Application) : AndroidViewModel(applic
     }
 
     fun load(serverId: String, sessionId: String) {
+        rememberActiveSession(serverId, sessionId)
         viewModelScope.launch {
             _uiState.update { it.copy(loading = true, error = null) }
             try {
@@ -193,7 +219,7 @@ class SessionDetailViewModel(application: Application) : AndroidViewModel(applic
                 } else {
                     _uiState.update {
                         it.copy(
-                            error = userFacingMessage(e, "加载会话失败"),
+                            error = userFacingMessage(e, string(R.string.session_detail_error_load)),
                             session = it.session,
                             messages = it.messages,
                         )
@@ -207,6 +233,9 @@ class SessionDetailViewModel(application: Application) : AndroidViewModel(applic
 
     fun prepareDraft() {
         stopLiveRunStream()
+        backgroundMonitorJob?.cancel()
+        backgroundMonitorJob = null
+        activeSessionRef = null
         val snapshot = _uiState.value
         _uiState.value = SessionDetailUiState(
             loading = false,
@@ -217,6 +246,7 @@ class SessionDetailViewModel(application: Application) : AndroidViewModel(applic
     }
 
     fun refresh(serverId: String, sessionId: String) {
+        rememberActiveSession(serverId, sessionId)
         viewModelScope.launch {
             _uiState.update { it.copy(refreshing = true, error = null) }
             try {
@@ -231,7 +261,9 @@ class SessionDetailViewModel(application: Application) : AndroidViewModel(applic
                     s.session != null || s.messages.isNotEmpty() || !s.liveRun?.lastOutput.isNullOrBlank()
                 }
                 if (!isActivelyStreaming && !(hasVisibleContent && isTransientTimeout(e))) {
-                    _uiState.update { it.copy(error = userFacingMessage(e, "刷新会话失败")) }
+                    _uiState.update {
+                        it.copy(error = userFacingMessage(e, string(R.string.session_detail_error_refresh)))
+                    }
                 }
             } finally {
                 _uiState.update { it.copy(refreshing = false) }
@@ -254,13 +286,19 @@ class SessionDetailViewModel(application: Application) : AndroidViewModel(applic
     }
 
     fun refreshLiveRun(serverId: String, sessionId: String) {
+        rememberActiveSession(serverId, sessionId)
         viewModelScope.launch {
             try {
-                val liveRun = withServerClient(serverId) { handle ->
-                    handle.client.getLiveRun(handle.token, SESSION_HOST_ID, sessionId)
+                val liveRun = fetchLiveRun(serverId, sessionId)
+                _uiState.update { state ->
+                    applyConversationContinuity(
+                        state = state.copy(liveRun = liveRun),
+                        liveRun = liveRun,
+                    )
                 }
-                _uiState.update { it.copy(liveRun = liveRun) }
                 seedRuntimeControlsFromRun(liveRun)
+                maybeNotifyRunCompleted(serverId, sessionId, liveRun)
+                startBackgroundMonitorIfNeeded()
             } catch (_: Exception) {
                 // Keep the last visible live state when polling blips.
             }
@@ -268,6 +306,7 @@ class SessionDetailViewModel(application: Application) : AndroidViewModel(applic
     }
 
     fun startLiveRunStream(serverId: String, sessionId: String) {
+        rememberActiveSession(serverId, sessionId)
         val nextKey = serverId to sessionId
         if (liveStreamKey == nextKey && liveStreamJob?.isActive == true) return
 
@@ -276,7 +315,7 @@ class SessionDetailViewModel(application: Application) : AndroidViewModel(applic
         _uiState.update {
             it.copy(
                 liveStreamConnected = false,
-                liveStreamStatus = "正在连接原生实时流…",
+                liveStreamStatus = string(R.string.session_detail_stream_connecting),
             )
         }
 
@@ -296,9 +335,9 @@ class SessionDetailViewModel(application: Application) : AndroidViewModel(applic
                                     it.copy(
                                         liveStreamConnected = true,
                                         liveStreamStatus = if (event.resumedFromEventId != null) {
-                                            "原生实时流已恢复"
+                                            string(R.string.session_detail_stream_resumed)
                                         } else {
-                                            "原生实时流已连接"
+                                            string(R.string.session_detail_stream_connected)
                                         },
                                     )
                                 }
@@ -306,17 +345,21 @@ class SessionDetailViewModel(application: Application) : AndroidViewModel(applic
                             is LiveRunStreamEvent.RunSnapshot -> {
                                 liveStreamLastEventId = event.eventId ?: liveStreamLastEventId
                                 val isTerminal = event.run?.status in terminalRunStatuses
-                                _uiState.update {
-                                    it.copy(
+                                _uiState.update { state ->
+                                    applyConversationContinuity(
+                                        state = state.copy(
+                                            liveRun = event.run,
+                                            liveStreamConnected = true,
+                                            liveStreamStatus = when (event.run?.status) {
+                                                "running", "pending" -> string(R.string.session_detail_stream_live)
+                                                else -> string(R.string.session_detail_stream_connected)
+                                            },
+                                        ),
                                         liveRun = event.run,
-                                        liveStreamConnected = true,
-                                        liveStreamStatus = when (event.run?.status) {
-                                            "running", "pending" -> "原生实时流推送中"
-                                            else -> "原生实时流已连接"
-                                        },
                                     )
                                 }
                                 seedRuntimeControlsFromRun(event.run)
+                                maybeNotifyRunCompleted(serverId, sessionId, event.run)
                                 // Auto-refresh full session when run reaches terminal state
                                 if (isTerminal) {
                                     silentRefreshSessionAndLive(serverId, sessionId)
@@ -327,7 +370,7 @@ class SessionDetailViewModel(application: Application) : AndroidViewModel(applic
                                 _uiState.update {
                                     it.copy(
                                         liveStreamConnected = true,
-                                        liveStreamStatus = "已补齐中断后的实时流",
+                                        liveStreamStatus = string(R.string.session_detail_stream_caught_up),
                                     )
                                 }
                             }
@@ -336,8 +379,8 @@ class SessionDetailViewModel(application: Application) : AndroidViewModel(applic
                                     it.copy(
                                         liveStreamConnected = true,
                                         liveStreamStatus = when (event.reason) {
-                                            "no-run" -> "已连接，等待下一次运行"
-                                            else -> "本轮已结束，保持实时连接"
+                                            "no-run" -> string(R.string.session_detail_stream_waiting_next)
+                                            else -> string(R.string.session_detail_stream_finished_keep_alive)
                                         },
                                     )
                                 }
@@ -349,7 +392,7 @@ class SessionDetailViewModel(application: Application) : AndroidViewModel(applic
                                 _uiState.update {
                                     it.copy(
                                         liveStreamConnected = false,
-                                        liveStreamStatus = "实时流空闲超时，正在恢复…",
+                                        liveStreamStatus = string(R.string.session_detail_stream_idle_recovering),
                                     )
                                 }
                             }
@@ -371,16 +414,23 @@ class SessionDetailViewModel(application: Application) : AndroidViewModel(applic
                 _uiState.update {
                     it.copy(
                         liveStreamConnected = false,
-                        liveStreamStatus = "实时流暂不可用，已切换为自动刷新",
+                        liveStreamStatus = string(R.string.session_detail_stream_fallback_polling),
                     )
                 }
             }
         }
     }
 
+    fun restartLiveRunStream(serverId: String, sessionId: String) {
+        stopLiveRunStream(resetState = false)
+        startLiveRunStream(serverId, sessionId)
+    }
+
     fun stopLiveRunStream(resetState: Boolean = true) {
         liveStreamJob?.cancel()
         liveStreamJob = null
+        backgroundMonitorJob?.cancel()
+        backgroundMonitorJob = null
         liveStreamKey = null
         liveStreamLastEventId = null
         if (resetState) {
@@ -395,6 +445,19 @@ class SessionDetailViewModel(application: Application) : AndroidViewModel(applic
 
     fun setPrompt(prompt: String) {
         _uiState.update { it.copy(prompt = prompt) }
+    }
+
+    fun appendPrompt(promptFragment: String) {
+        val trimmed = promptFragment.trim()
+        if (trimmed.isBlank()) return
+        _uiState.update { state ->
+            val nextPrompt = if (state.prompt.isBlank()) {
+                trimmed
+            } else {
+                "${state.prompt.trimEnd()}\n$trimmed"
+            }
+            state.copy(prompt = nextPrompt)
+        }
     }
 
     fun setSelectedModel(model: String?) {
@@ -449,11 +512,11 @@ class SessionDetailViewModel(application: Application) : AndroidViewModel(applic
             }
         }
         if (sessionId.isNullOrBlank()) {
-            _uiState.update { it.copy(error = "请先创建会话后再使用待发送队列") }
+            _uiState.update { it.copy(error = string(R.string.session_detail_queue_requires_session)) }
             return
         }
         if (snapshot.liveRun?.status !in activeRunStatuses) {
-            _uiState.update { it.copy(error = "当前没有运行中的任务，无需排队") }
+            _uiState.update { it.copy(error = string(R.string.session_detail_queue_no_active_run)) }
             return
         }
 
@@ -505,12 +568,44 @@ class SessionDetailViewModel(application: Application) : AndroidViewModel(applic
         _uiState.update { it.copy(error = null) }
     }
 
+    fun clearRecoveryNotice() {
+        _uiState.update { it.copy(recoveryNotice = null) }
+    }
+
     fun dismissRepoActionSummary() {
         _uiState.update { it.copy(repoActionSummary = null) }
     }
 
     fun showError(message: String) {
         _uiState.update { it.copy(error = message) }
+    }
+
+    fun onAppBackgrounded() {
+        _uiState.update { state ->
+            state.copy(
+                appInBackground = true,
+                error = null,
+            )
+        }
+        startBackgroundMonitorIfNeeded()
+    }
+
+    fun onAppForegrounded(serverId: String, sessionId: String?) {
+        backgroundMonitorJob?.cancel()
+        backgroundMonitorJob = null
+        _uiState.update {
+            it.copy(
+                appInBackground = false,
+                recoveryNotice = if (sessionId.isNullOrBlank()) null else string(R.string.session_detail_recovery_synced),
+                error = null,
+            )
+        }
+        if (!sessionId.isNullOrBlank()) {
+            rememberActiveSession(serverId, sessionId)
+            restartLiveRunStream(serverId, sessionId)
+            refreshLiveRun(serverId, sessionId)
+            refresh(serverId, sessionId)
+        }
     }
 
     fun createBranch(serverId: String, sessionId: String?, branch: String) {
@@ -556,6 +651,47 @@ class SessionDetailViewModel(application: Application) : AndroidViewModel(applic
             sessionId = sessionId,
             action = RepoActionRequest(action = "push"),
         )
+    }
+
+    fun pullRepo(serverId: String, sessionId: String?) {
+        if (sessionId.isNullOrBlank()) return
+        performRepoAction(
+            serverId = serverId,
+            sessionId = sessionId,
+            action = RepoActionRequest(action = "pull"),
+        )
+    }
+
+    fun stashRepo(serverId: String, sessionId: String?, message: String? = null) {
+        if (sessionId.isNullOrBlank()) return
+        performRepoAction(
+            serverId = serverId,
+            sessionId = sessionId,
+            action = RepoActionRequest(
+                action = "stash",
+                message = message?.trim()?.takeIf { it.isNotBlank() },
+            ),
+        )
+    }
+
+    fun loadRepoLog(serverId: String, sessionId: String?) {
+        if (sessionId.isNullOrBlank()) return
+        viewModelScope.launch {
+            _uiState.update { it.copy(repoLogLoading = true, error = null) }
+            try {
+                val entries = withServerClient(serverId) { handle ->
+                    handle.client.getRepoLog(handle.token, SESSION_HOST_ID, sessionId).entries
+                }
+                _uiState.update { it.copy(repoLogEntries = entries, repoLogLoading = false) }
+            } catch (e: Exception) {
+                _uiState.update {
+                    it.copy(
+                        repoLogLoading = false,
+                        error = userFacingMessage(e, string(R.string.session_detail_error_repo_action)),
+                    )
+                }
+            }
+        }
     }
 
     fun consumeArchived() {
@@ -672,12 +808,17 @@ class SessionDetailViewModel(application: Application) : AndroidViewModel(applic
                 afterComposer.copy(
                     lastSubmittedPrompt = rawPrompt.trim(),
                     lastSubmittedPromptWithAttachments = composedPrompt.trim(),
+                    currentTurnPromptOverride = rawPrompt.trim(),
+                    retainedLiveOutput = null,
+                    retainedLiveRunId = null,
                 )
             }
             refreshLiveRun(serverId, sessionId)
             return true
         } catch (e: Exception) {
-            _uiState.update { it.copy(error = userFacingMessage(e, "启动运行失败")) }
+            _uiState.update {
+                it.copy(error = userFacingMessage(e, string(R.string.session_detail_error_start_run)))
+            }
             return false
         } finally {
             _uiState.update { it.copy(sending = false) }
@@ -713,7 +854,12 @@ class SessionDetailViewModel(application: Application) : AndroidViewModel(applic
                 }
                 _uiState.update { it.copy(archiving = false, archived = true) }
             } catch (e: Exception) {
-                _uiState.update { it.copy(archiving = false, error = userFacingMessage(e, "归档失败")) }
+                _uiState.update {
+                    it.copy(
+                        archiving = false,
+                        error = userFacingMessage(e, string(R.string.session_detail_error_archive)),
+                    )
+                }
             }
         }
     }
@@ -733,7 +879,7 @@ class SessionDetailViewModel(application: Application) : AndroidViewModel(applic
                 val fileName = queryDisplayName(resolver, uri) ?: defaultFileName(uri)
                 val bytes = withContext(Dispatchers.IO) {
                     resolver.openInputStream(uri)?.use { it.readBytes() }
-                        ?: throw IllegalStateException("无法读取文件")
+                        ?: throw IllegalStateException(string(R.string.session_detail_error_file_read))
                 }
 
                 val artifact = withServerClient(serverId) { handle ->
@@ -755,7 +901,9 @@ class SessionDetailViewModel(application: Application) : AndroidViewModel(applic
                 }
                 onUploaded?.invoke(artifact)
             } catch (e: Exception) {
-                _uiState.update { it.copy(error = userFacingMessage(e, "上传失败")) }
+                _uiState.update {
+                    it.copy(error = userFacingMessage(e, string(R.string.session_detail_error_upload)))
+                }
             } finally {
                 _uiState.update { it.copy(uploading = false) }
             }
@@ -772,7 +920,7 @@ class SessionDetailViewModel(application: Application) : AndroidViewModel(applic
                 val fileName = queryDisplayName(resolver, uri) ?: defaultFileName(uri)
                 val bytes = withContext(Dispatchers.IO) {
                     resolver.openInputStream(uri)?.use { it.readBytes() }
-                        ?: throw IllegalStateException("无法读取文件")
+                        ?: throw IllegalStateException(string(R.string.session_detail_error_file_read))
                 }
                 _uiState.update { state ->
                     state.copy(
@@ -786,7 +934,11 @@ class SessionDetailViewModel(application: Application) : AndroidViewModel(applic
                     )
                 }
             } catch (e: Exception) {
-                _uiState.update { it.copy(error = userFacingMessage(e, "添加附件失败")) }
+                _uiState.update {
+                    it.copy(
+                        error = userFacingMessage(e, string(R.string.session_detail_error_add_attachment)),
+                    )
+                }
             } finally {
                 _uiState.update { it.copy(uploading = false) }
             }
@@ -822,7 +974,7 @@ class SessionDetailViewModel(application: Application) : AndroidViewModel(applic
             }
 
             val resolvedSessionId = sessionId ?: if (draftCwd.isNullOrBlank()) {
-                _uiState.update { it.copy(error = "缺少项目目录，无法创建会话") }
+                _uiState.update { it.copy(error = string(R.string.session_detail_error_missing_cwd)) }
                 return@launch
             } else {
                 if (snapshot.pendingLocalAttachments.isNotEmpty()) {
@@ -918,14 +1070,20 @@ class SessionDetailViewModel(application: Application) : AndroidViewModel(applic
                 val liveRun = liveDeferred.await()
                 val repoStatus = repoDeferred.await()
                 _uiState.update { state ->
-                    state.copy(
-                        session = session.session,
-                        repoStatus = repoStatus,
+                    applyConversationContinuity(
+                        state = state.copy(
+                            session = session.session,
+                            repoStatus = repoStatus,
+                            messages = session.messages,
+                            liveRun = liveRun,
+                        ),
                         messages = session.messages,
                         liveRun = liveRun,
                     )
                 }
                 seedRuntimeControlsFromRun(liveRun)
+                maybeNotifyRunCompleted(serverId, sessionId, liveRun)
+                startBackgroundMonitorIfNeeded()
                 session
             }
             if (_uiState.value.liveRun?.status !in activeRunStatuses) {
@@ -967,7 +1125,9 @@ class SessionDetailViewModel(application: Application) : AndroidViewModel(applic
                 applyRepoActionResponse(response)
             } catch (e: Exception) {
                 _uiState.update {
-                    it.copy(error = userFacingMessage(e, "仓库操作失败"))
+                    it.copy(
+                        error = userFacingMessage(e, string(R.string.session_detail_error_repo_action)),
+                    )
                 }
             } finally {
                 _uiState.update { it.copy(repoActionBusy = false) }
@@ -1075,6 +1235,9 @@ class SessionDetailViewModel(application: Application) : AndroidViewModel(applic
                     createdSessionId = createdSessionId,
                     lastSubmittedPrompt = prompt.trim(),
                     lastSubmittedPromptWithAttachments = composedPrompt.trim(),
+                    currentTurnPromptOverride = prompt.trim(),
+                    retainedLiveOutput = null,
+                    retainedLiveRunId = null,
                     prompt = "",
                     pendingArtifacts = emptyList(),
                 )
@@ -1084,7 +1247,7 @@ class SessionDetailViewModel(application: Application) : AndroidViewModel(applic
             _uiState.update {
                 it.copy(
                     sending = false,
-                    error = userFacingMessage(e, "创建会话失败"),
+                    error = userFacingMessage(e, string(R.string.session_detail_error_create_session)),
                 )
             }
             null
@@ -1142,6 +1305,9 @@ class SessionDetailViewModel(application: Application) : AndroidViewModel(applic
                     createdSessionId = createdSessionId,
                     lastSubmittedPrompt = rawPrompt.trim(),
                     lastSubmittedPromptWithAttachments = composedPrompt.trim(),
+                    currentTurnPromptOverride = rawPrompt.trim(),
+                    retainedLiveOutput = null,
+                    retainedLiveRunId = null,
                     prompt = "",
                     pendingArtifacts = emptyList(),
                     pendingLocalAttachments = emptyList(),
@@ -1151,7 +1317,7 @@ class SessionDetailViewModel(application: Application) : AndroidViewModel(applic
         } catch (e: Exception) {
             _uiState.update {
                 it.copy(
-                    error = userFacingMessage(e, "创建会话失败"),
+                    error = userFacingMessage(e, string(R.string.session_detail_error_create_session)),
                 )
             }
             null
@@ -1219,5 +1385,122 @@ class SessionDetailViewModel(application: Application) : AndroidViewModel(applic
                 )
             }
         }
+    }
+
+    private fun applyConversationContinuity(
+        state: SessionDetailUiState,
+        messages: List<SessionMessage> = state.messages,
+        liveRun: Run? = state.liveRun,
+    ): SessionDetailUiState {
+        var next = state
+        val livePrompt = sanitizePromptDisplay(liveRun?.prompt)
+        val liveOutput = cleanLiveOutput(liveRun?.lastOutput, liveRun?.prompt)
+
+        if (!livePrompt.isNullOrBlank()) {
+            next = next.copy(currentTurnPromptOverride = livePrompt)
+        }
+
+        if (liveRun != null) {
+            next = when {
+                !liveOutput.isNullOrBlank() -> next.copy(
+                    retainedLiveOutput = liveOutput,
+                    retainedLiveRunId = liveRun.id,
+                )
+                next.retainedLiveRunId != liveRun.id -> next.copy(
+                    retainedLiveOutput = null,
+                    retainedLiveRunId = liveRun.id,
+                )
+                else -> next
+            }
+        }
+
+        if (hasSettledCurrentTurn(messages, next.currentTurnPromptOverride)) {
+            next = next.copy(
+                currentTurnPromptOverride = null,
+                retainedLiveOutput = null,
+                retainedLiveRunId = null,
+            )
+        }
+
+        return next
+    }
+
+    private fun hasSettledCurrentTurn(
+        messages: List<SessionMessage>,
+        currentTurnPromptOverride: String?,
+    ): Boolean {
+        val pendingPrompt = currentTurnPromptOverride?.trim().orEmpty()
+        if (pendingPrompt.isBlank()) return false
+        val latestPrompt = sanitizePromptDisplay(latestCanonicalPrompt(messages))
+        if (latestPrompt.isNullOrBlank() || latestPrompt != pendingPrompt) return false
+        return !latestCanonicalAssistantReply(messages).isNullOrBlank()
+    }
+
+    private fun rememberActiveSession(serverId: String, sessionId: String) {
+        if (serverId.isBlank() || sessionId.isBlank()) return
+        activeSessionRef = SessionRef(serverId = serverId, sessionId = sessionId)
+    }
+
+    private fun startBackgroundMonitorIfNeeded() {
+        activeSessionRef ?: return
+        if (!_uiState.value.appInBackground) return
+        if (_uiState.value.liveRun?.status !in activeRunStatuses) return
+        if (backgroundMonitorJob?.isActive == true) return
+
+        backgroundMonitorJob = viewModelScope.launch {
+            while (isActive && _uiState.value.appInBackground) {
+                val currentRef = activeSessionRef ?: break
+                try {
+                    val liveRun = fetchLiveRun(currentRef.serverId, currentRef.sessionId)
+                    _uiState.update { state ->
+                        applyConversationContinuity(
+                            state = state.copy(liveRun = liveRun),
+                            liveRun = liveRun,
+                        )
+                    }
+                    seedRuntimeControlsFromRun(liveRun)
+                    maybeNotifyRunCompleted(currentRef.serverId, currentRef.sessionId, liveRun)
+                    if (liveRun?.status in terminalRunStatuses) {
+                        silentRefreshSessionAndLive(currentRef.serverId, currentRef.sessionId)
+                        maybeDispatchQueuedPrompt(currentRef.serverId, currentRef.sessionId)
+                        break
+                    }
+                } catch (_: Exception) {
+                    // Best effort. Background polling should stay silent.
+                }
+                kotlinx.coroutines.delay(20_000L)
+            }
+        }
+    }
+
+    private suspend fun fetchLiveRun(serverId: String, sessionId: String): Run? =
+        withServerClient(serverId) { handle ->
+            handle.client.getLiveRun(handle.token, SESSION_HOST_ID, sessionId)
+        }
+
+    private fun maybeNotifyRunCompleted(
+        serverId: String,
+        sessionId: String,
+        liveRun: Run?,
+    ) {
+        val run = liveRun ?: return
+        if (run.status !in terminalRunStatuses) return
+        if (!_uiState.value.appInBackground) return
+        val notificationKey = run.id?.takeIf { it.isNotBlank() }
+            ?: "$serverId|$sessionId|${run.status}"
+        if (notificationKey == lastNotifiedTerminalRunId) return
+
+        lastNotifiedTerminalRunId = notificationKey
+        RunCompletedNotificationHelper(getApplication()).postRunCompleted(
+            payload = RunCompletedNotificationPayload(
+                serverId = serverId,
+                hostId = SESSION_HOST_ID,
+                sessionId = sessionId,
+                runId = run.id,
+                sessionLabel = _uiState.value.session?.title?.takeIf { it.isNotBlank() },
+                terminalStatus = run.status,
+            ),
+            appInBackground = true,
+        )
     }
 }

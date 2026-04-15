@@ -69,11 +69,16 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.res.pluralStringResource
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.compose.viewModel
+import dev.codexremote.android.R
 import dev.codexremote.android.data.model.Session
 import dev.codexremote.android.data.network.ApiClient
 import dev.codexremote.android.data.network.UnauthorizedException
@@ -85,6 +90,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
+import android.content.res.Resources
 import java.time.Duration
 import java.time.Instant
 import java.io.File
@@ -107,8 +113,8 @@ data class DraftProject(
     val addedAt: String,
 )
 
-private fun projectLabel(path: String?): String = when {
-    path.isNullOrBlank() -> "未归类"
+private fun projectLabel(resources: Resources, path: String?): String = when {
+    path.isNullOrBlank() -> resources.getString(R.string.session_list_project_label_ungrouped)
     else -> File(path).name.ifBlank { path }
 }
 
@@ -117,6 +123,7 @@ private fun parseInstantOrNull(value: String): Instant? = runCatching { Instant.
 private data class SessionRecency(
     val label: String,
     val emphasis: SessionEmphasis,
+    val isRecent: Boolean,
 )
 
 private enum class SessionEmphasis {
@@ -125,14 +132,35 @@ private enum class SessionEmphasis {
     Neutral,
 }
 
-private fun sessionRecency(session: Session): SessionRecency {
-    val updatedAt = parseInstantOrNull(session.updatedAt) ?: return SessionRecency("历史", SessionEmphasis.Neutral)
+private fun sessionRecency(session: Session, resources: Resources): SessionRecency {
+    val updatedAt = parseInstantOrNull(session.updatedAt)
+        ?: return SessionRecency(
+            label = resources.getString(R.string.session_list_recency_history),
+            emphasis = SessionEmphasis.Neutral,
+            isRecent = false,
+        )
     val age = Duration.between(updatedAt, Instant.now()).coerceAtLeast(Duration.ZERO)
     return when {
-        age.toMinutes() < 5 -> SessionRecency("刚刚活跃", SessionEmphasis.Primary)
-        age.toMinutes() < 60 -> SessionRecency("近 1 小时", SessionEmphasis.Primary)
-        age.toHours() < 24 -> SessionRecency("今日更新", SessionEmphasis.Secondary)
-        else -> SessionRecency("历史", SessionEmphasis.Neutral)
+        age.toMinutes() < 5 -> SessionRecency(
+            label = resources.getString(R.string.session_list_recency_just_active),
+            emphasis = SessionEmphasis.Primary,
+            isRecent = true,
+        )
+        age.toMinutes() < 60 -> SessionRecency(
+            label = resources.getString(R.string.session_list_recency_recent_hour),
+            emphasis = SessionEmphasis.Primary,
+            isRecent = true,
+        )
+        age.toHours() < 24 -> SessionRecency(
+            label = resources.getString(R.string.session_list_recency_today),
+            emphasis = SessionEmphasis.Secondary,
+            isRecent = true,
+        )
+        else -> SessionRecency(
+            label = resources.getString(R.string.session_list_recency_history),
+            emphasis = SessionEmphasis.Neutral,
+            isRecent = false,
+        )
     }
 }
 
@@ -158,6 +186,7 @@ private fun buildProjectFolders(
     sortOrder: SessionFolderSortOrder,
     hiddenFolderKeys: Set<String>,
     customOrder: List<String>,
+    resources: Resources,
 ): List<ProjectFolder> {
     val groups = linkedMapOf<String, MutableList<Session>>()
     for (session in sessions) {
@@ -170,7 +199,7 @@ private fun buildProjectFolders(
         ProjectFolder(
             key = key,
             persistenceKey = sortedSessions.firstOrNull()?.cwd ?: key,
-            label = projectLabel(sortedSessions.firstOrNull()?.cwd),
+            label = projectLabel(resources, sortedSessions.firstOrNull()?.cwd),
             path = sortedSessions.firstOrNull()?.cwd,
             sessions = sortedSessions,
             updatedAt = sortedSessions.firstOrNull()?.updatedAt.orEmpty(),
@@ -185,7 +214,7 @@ private fun buildProjectFolders(
             ProjectFolder(
                 key = "draft-${draft.path}",
                 persistenceKey = draft.path,
-                label = projectLabel(draft.path),
+                label = projectLabel(resources, draft.path),
                 path = draft.path,
                 sessions = emptyList(),
                 updatedAt = draft.addedAt,
@@ -226,17 +255,11 @@ private fun SessionFolderSortOrder.next(): SessionFolderSortOrder = when (this) 
     SessionFolderSortOrder.CUSTOM -> SessionFolderSortOrder.RECENT
 }
 
-private fun SessionFolderSortOrder.label(): String = when (this) {
-    SessionFolderSortOrder.RECENT -> "最近更新"
-    SessionFolderSortOrder.NAME_ASC -> "名称 A-Z"
-    SessionFolderSortOrder.NAME_DESC -> "名称 Z-A"
-    SessionFolderSortOrder.CUSTOM -> "自定义排序"
-}
-
-private fun ThemePreference.menuLabel(): String = when (this) {
-    ThemePreference.AUTO -> "主题：自动"
-    ThemePreference.LIGHT -> "主题：日间"
-    ThemePreference.DARK -> "主题：夜间"
+private fun SessionFolderSortOrder.label(resources: Resources): String = when (this) {
+    SessionFolderSortOrder.RECENT -> resources.getString(R.string.session_list_sort_recent)
+    SessionFolderSortOrder.NAME_ASC -> resources.getString(R.string.session_list_sort_name_asc)
+    SessionFolderSortOrder.NAME_DESC -> resources.getString(R.string.session_list_sort_name_desc)
+    SessionFolderSortOrder.CUSTOM -> resources.getString(R.string.session_list_sort_custom)
 }
 
 private fun <T> MutableList<T>.move(fromIndex: Int, toIndex: Int) {
@@ -285,8 +308,8 @@ class SessionListViewModel(application: Application) : AndroidViewModel(applicat
     ): T {
         val servers = repo.servers.first()
         val server = servers.find { it.id == serverId }
-            ?: throw IllegalStateException("服务器不存在")
-        val token = server.token ?: throw IllegalStateException("尚未登录")
+            ?: throw IllegalStateException(getApplication<Application>().getString(R.string.session_list_error_server_missing))
+        val token = server.token ?: throw IllegalStateException(getApplication<Application>().getString(R.string.session_list_error_not_logged_in))
         val client = ApiClient(server.baseUrl)
         return try {
             block(client, token)
@@ -376,9 +399,12 @@ class SessionListViewModel(application: Application) : AndroidViewModel(applicat
         } catch (e: UnauthorizedException) {
             repo.updateToken(serverId, null)
             _authExpired.value = true
-            _error.value = e.message ?: "登录已失效，请重新登录"
+            _error.value = e.message ?: getApplication<Application>().getString(R.string.session_list_error_auth_expired)
         } catch (e: Exception) {
-            _error.value = userFacingMessage(e, "加载会话失败")
+            _error.value = userFacingMessage(
+                e,
+                getApplication<Application>().getString(R.string.session_list_error_load_failed),
+            )
         } finally {
             _loading.value = false
         }
@@ -394,7 +420,10 @@ class SessionListViewModel(application: Application) : AndroidViewModel(applicat
                 }
                 refreshSessions(serverId)
             } catch (e: Exception) {
-                _error.value = userFacingMessage(e, "重命名会话失败")
+                _error.value = userFacingMessage(
+                    e,
+                    getApplication<Application>().getString(R.string.session_list_error_rename_failed),
+                )
             } finally {
                 _loading.value = false
             }
@@ -411,7 +440,10 @@ class SessionListViewModel(application: Application) : AndroidViewModel(applicat
                 }
                 refreshSessions(serverId)
             } catch (e: Exception) {
-                _error.value = userFacingMessage(e, "归档会话失败")
+                _error.value = userFacingMessage(
+                    e,
+                    getApplication<Application>().getString(R.string.session_list_error_archive_failed),
+                )
             } finally {
                 _loading.value = false
             }
@@ -443,6 +475,9 @@ fun SessionListScreen(
     onBack: () -> Unit,
     viewModel: SessionListViewModel = viewModel(),
 ) {
+    val configuration = LocalConfiguration.current
+    val resources = LocalContext.current.resources
+    val localeKey = configuration.locales.toLanguageTags()
     val sessions by viewModel.sessions.collectAsState()
     val draftProjects by viewModel.draftProjects.collectAsState()
     val loading by viewModel.loading.collectAsState()
@@ -452,13 +487,14 @@ fun SessionListScreen(
     val hiddenFolderKeys by viewModel.hiddenFolderKeys.collectAsState()
     val folderSortOrder by viewModel.folderSortOrder.collectAsState()
     val customFolderOrder by viewModel.customFolderOrder.collectAsState()
-    val folders = remember(sessions, draftProjects, folderSortOrder, hiddenFolderKeys, customFolderOrder) {
+    val folders = remember(sessions, draftProjects, folderSortOrder, hiddenFolderKeys, customFolderOrder, localeKey) {
         buildProjectFolders(
             sessions = sessions,
             draftProjects = draftProjects,
             sortOrder = folderSortOrder,
             hiddenFolderKeys = hiddenFolderKeys,
             customOrder = customFolderOrder,
+            resources = resources,
         )
     }
     val projectPaths = remember(folders) {
@@ -468,8 +504,8 @@ fun SessionListScreen(
         val currentPath = selectedProjectCwd?.trim().orEmpty().takeIf { it.isNotBlank() }
         folders.firstOrNull { it.path == currentPath }
     }
-    val recentSessionCount = remember(sessions) {
-        sessions.count { sessionRecency(it).label != "历史" }
+    val recentSessionCount = remember(sessions, localeKey) {
+        sessions.count { sessionRecency(it, resources).isRecent }
     }
     var renameTarget by remember { mutableStateOf<Session?>(null) }
     var hideTarget by remember { mutableStateOf<ProjectFolder?>(null) }
@@ -520,17 +556,31 @@ fun SessionListScreen(
         topBar = {
             TopAppBar(
                 title = {
+                    val projectCountText = pluralStringResource(
+                        R.plurals.session_list_navigation_project_count,
+                        folders.size,
+                        folders.size,
+                    )
+                    val sessionCountText = pluralStringResource(
+                        R.plurals.session_list_navigation_session_count,
+                        sessions.size,
+                        sessions.size,
+                    )
                     Column {
                         Text(
-                            text = if (selectionMode) "已选择 ${selectedSessionIds.size} 个会话" else "项目文件夹",
+                            text = if (selectionMode) {
+                                stringResource(R.string.session_list_title_selected_sessions, selectedSessionIds.size)
+                            } else {
+                                stringResource(R.string.session_list_title_project_folders)
+                            },
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis,
                         )
                         Text(
                             text = when {
-                                selectionMode -> "可批量重命名或归档"
-                                loading -> "${folders.size} 个项目 · 正在刷新"
-                                else -> "${folders.size} 个项目 · ${sessions.size} 条会话"
+                                selectionMode -> stringResource(R.string.session_list_subtitle_selected_sessions)
+                                loading -> stringResource(R.string.session_list_subtitle_refreshing, projectCountText)
+                                else -> stringResource(R.string.session_list_subtitle_overview, projectCountText, sessionCountText)
                             },
                             style = MaterialTheme.typography.labelMedium,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -549,7 +599,11 @@ fun SessionListScreen(
                     }) {
                         Icon(
                             if (selectionMode) Icons.Filled.Close else Icons.AutoMirrored.Filled.ArrowBack,
-                            contentDescription = if (selectionMode) "取消选择" else "返回",
+                            contentDescription = if (selectionMode) {
+                                stringResource(R.string.session_list_content_desc_cancel_selection)
+                            } else {
+                                stringResource(R.string.content_desc_back)
+                            },
                         )
                     }
                 },
@@ -565,7 +619,7 @@ fun SessionListScreen(
                                     }
                                 }
                             ) {
-                                Icon(Icons.Filled.Edit, contentDescription = "重命名")
+                                Icon(Icons.Filled.Edit, contentDescription = stringResource(R.string.session_list_content_desc_rename))
                             }
                         }
                         IconButton(
@@ -574,7 +628,7 @@ fun SessionListScreen(
                                 selectedSessionIds = emptySet()
                             }
                         ) {
-                            Icon(Icons.Filled.Archive, contentDescription = "归档")
+                            Icon(Icons.Filled.Archive, contentDescription = stringResource(R.string.session_list_content_desc_archive))
                         }
                     } else {
                         ThemeToggleAction(
@@ -587,7 +641,7 @@ fun SessionListScreen(
                         ) {
                             Icon(
                                 Icons.Filled.Add,
-                                contentDescription = "新项目",
+                                contentDescription = stringResource(R.string.session_list_content_desc_new_project),
                                 modifier = Modifier.size(24.dp),
                             )
                         }
@@ -598,7 +652,7 @@ fun SessionListScreen(
                             ) {
                                 Icon(
                                     Icons.Filled.Menu,
-                                    contentDescription = "菜单",
+                                    contentDescription = stringResource(R.string.session_list_content_desc_menu),
                                     modifier = Modifier.size(24.dp),
                                 )
                             }
@@ -608,7 +662,7 @@ fun SessionListScreen(
                                 modifier = Modifier.widthIn(min = 220.dp),
                             ) {
                                 DropdownMenuItem(
-                                    text = { Text("收件箱") },
+                                    text = { Text(stringResource(R.string.session_list_menu_inbox)) },
                                     leadingIcon = {
                                         Icon(Icons.Filled.Inbox, contentDescription = null)
                                     },
@@ -618,7 +672,7 @@ fun SessionListScreen(
                                     },
                                 )
                                 DropdownMenuItem(
-                                    text = { Text("刷新") },
+                                    text = { Text(stringResource(R.string.session_list_menu_refresh)) },
                                     leadingIcon = {
                                         Icon(Icons.Filled.Refresh, contentDescription = null)
                                     },
@@ -628,7 +682,7 @@ fun SessionListScreen(
                                     },
                                 )
                                 DropdownMenuItem(
-                                    text = { Text("设置") },
+                                    text = { Text(stringResource(R.string.session_list_menu_settings)) },
                                     leadingIcon = {
                                         Icon(Icons.Filled.Settings, contentDescription = null)
                                     },
@@ -665,19 +719,19 @@ fun SessionListScreen(
                 ) {
                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
                         Text(
-                            text = error ?: "未知错误",
+                            text = error ?: stringResource(R.string.session_list_error_unknown),
                             style = MaterialTheme.typography.bodyLarge,
                             color = MaterialTheme.colorScheme.error,
                         )
                         Spacer(modifier = Modifier.height(8.dp))
                         Text(
-                            text = "请刷新重试，或检查网络连接。",
+                            text = stringResource(R.string.session_list_error_hint),
                             style = MaterialTheme.typography.bodyMedium,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
                         Spacer(modifier = Modifier.height(12.dp))
                         TextButton(onClick = { viewModel.loadSessions(serverId) }) {
-                            Text("重新连接")
+                            Text(stringResource(R.string.session_list_error_retry))
                         }
                     }
                 }
@@ -699,7 +753,7 @@ fun SessionListScreen(
                         )
                         Spacer(modifier = Modifier.height(12.dp))
                         Text(
-                            text = "还没有项目文件夹",
+                            text = stringResource(R.string.session_list_empty_projects_title),
                             style = MaterialTheme.typography.bodyLarge,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
@@ -804,13 +858,13 @@ fun SessionListScreen(
         if (renameTarget != null) {
             AlertDialog(
                 onDismissRequest = { renameTarget = null },
-                title = { Text("重命名会话") },
+                title = { Text(stringResource(R.string.session_list_dialog_rename_title)) },
                 text = {
                     OutlinedTextField(
                         value = renameText,
                         onValueChange = { renameText = it },
                         singleLine = true,
-                        label = { Text("主题名称") },
+                        label = { Text(stringResource(R.string.session_list_dialog_rename_label)) },
                     )
                 },
                 confirmButton = {
@@ -824,12 +878,12 @@ fun SessionListScreen(
                             renameTarget = null
                         }
                     ) {
-                        Text("保存")
+                        Text(stringResource(R.string.session_list_dialog_save))
                     }
                 },
                 dismissButton = {
                     TextButton(onClick = { renameTarget = null }) {
-                        Text("取消")
+                        Text(stringResource(R.string.session_list_dialog_cancel))
                     }
                 },
             )
@@ -838,13 +892,13 @@ fun SessionListScreen(
         if (duplicateProjectPath != null) {
             AlertDialog(
                 onDismissRequest = { duplicateProjectPath = null },
-                title = { Text("项目已存在") },
+                title = { Text(stringResource(R.string.session_list_dialog_project_exists_title)) },
                 text = {
-                    Text("会话列表里已经有这个项目目录了，不会重复创建项目区块。")
+                    Text(stringResource(R.string.session_list_dialog_project_exists_body))
                 },
                 confirmButton = {
                     TextButton(onClick = { duplicateProjectPath = null }) {
-                        Text("知道了")
+                        Text(stringResource(R.string.session_list_dialog_acknowledge))
                     }
                 },
             )
@@ -853,10 +907,13 @@ fun SessionListScreen(
         if (hideTarget != null) {
             AlertDialog(
                 onDismissRequest = { hideTarget = null },
-                title = { Text("隐藏项目文件夹") },
+                title = { Text(stringResource(R.string.session_list_dialog_hide_title)) },
                 text = {
                     Text(
-                        "这不会删除项目目录或已有会话，只是先把“${hideTarget?.label.orEmpty()}”从会话列表里隐藏。之后如果再次从“新项目”里选择同一路径，它会重新显示。"
+                        stringResource(
+                            R.string.session_list_dialog_hide_body,
+                            hideTarget?.label.orEmpty(),
+                        )
                     )
                 },
                 confirmButton = {
@@ -867,12 +924,12 @@ fun SessionListScreen(
                             hideTarget = null
                         }
                     ) {
-                        Text("隐藏")
+                        Text(stringResource(R.string.session_list_dialog_hide_confirm))
                     }
                 },
                 dismissButton = {
                     TextButton(onClick = { hideTarget = null }) {
-                        Text("取消")
+                        Text(stringResource(R.string.session_list_dialog_cancel))
                     }
                 },
             )
@@ -902,6 +959,26 @@ private fun SessionNavigationSummary(
     selectionMode: Boolean,
     selectedCount: Int,
 ) {
+    val projectCountText = pluralStringResource(
+        R.plurals.session_list_navigation_project_count,
+        folderCount,
+        folderCount,
+    )
+    val selectedSessionsText = pluralStringResource(
+        R.plurals.session_list_navigation_session_count,
+        selectedCount,
+        selectedCount,
+    )
+    val sessionCountText = pluralStringResource(
+        R.plurals.session_list_navigation_session_count,
+        sessionCount,
+        sessionCount,
+    )
+    val recentCountText = pluralStringResource(
+        R.plurals.session_list_navigation_recent_count,
+        recentSessionCount,
+        recentSessionCount,
+    )
     Card(
         modifier = Modifier
             .fillMaxWidth()
@@ -916,14 +993,18 @@ private fun SessionNavigationSummary(
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             Text(
-                text = if (selectionMode) "正在多选" else "项目导航",
+                text = if (selectionMode) {
+                    stringResource(R.string.session_list_navigation_title_selected)
+                } else {
+                    stringResource(R.string.session_list_navigation_title_default)
+                },
                 style = MaterialTheme.typography.titleSmall,
             )
             Text(
                 text = when {
-                    selectionMode -> "已选择 $selectedCount 个会话，继续点按可追加选择。"
-                    currentProjectFolder != null -> "当前聚焦 ${currentProjectFolder.label}，会话与项目层级更容易扫读。"
-                    else -> "项目按更新时间分组，最近活动会自动更显眼。"
+                    selectionMode -> stringResource(R.string.session_list_navigation_subtitle_selected, selectedSessionsText)
+                    currentProjectFolder != null -> stringResource(R.string.session_list_navigation_subtitle_current_project, currentProjectFolder.label)
+                    else -> stringResource(R.string.session_list_navigation_subtitle_default)
                 },
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -933,20 +1014,20 @@ private fun SessionNavigationSummary(
                 verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
                 StatusChip(
-                    text = "$folderCount 个项目",
+                    text = projectCountText,
                     emphasis = SessionEmphasis.Secondary,
                 )
                 StatusChip(
-                    text = "$sessionCount 条会话",
+                    text = sessionCountText,
                     emphasis = SessionEmphasis.Neutral,
                 )
                 StatusChip(
-                    text = "$recentSessionCount 个近活跃",
+                    text = recentCountText,
                     emphasis = if (recentSessionCount > 0) SessionEmphasis.Primary else SessionEmphasis.Neutral,
                 )
                 if (currentProjectFolder != null) {
                     StatusChip(
-                        text = "当前项目 · ${currentProjectFolder.label}",
+                        text = stringResource(R.string.session_list_navigation_current_project_label, currentProjectFolder.label),
                         emphasis = SessionEmphasis.Primary,
                     )
                 }
@@ -983,6 +1064,7 @@ private fun SessionFolderControls(
     sortOrder: SessionFolderSortOrder,
     onCycleSort: () -> Unit,
 ) {
+    val resources = LocalContext.current.resources
     Card(
         modifier = Modifier
             .fillMaxWidth()
@@ -1001,11 +1083,14 @@ private fun SessionFolderControls(
         ) {
             Column(modifier = Modifier.weight(1f)) {
                 Text(
-                    text = "浏览方式",
+                    text = stringResource(R.string.session_list_browse_title),
                     style = MaterialTheme.typography.labelLarge,
                 )
                 Text(
-                    text = "长按可隐藏，右侧把手可拖动排序。当前：${sortOrder.label()}",
+                    text = stringResource(
+                        R.string.session_list_browse_help,
+                        sortOrder.label(resources),
+                    ),
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -1013,7 +1098,10 @@ private fun SessionFolderControls(
             IconButton(onClick = onCycleSort) {
                 Icon(
                     imageVector = Icons.Filled.SwapVert,
-                    contentDescription = "切换文件夹排序，当前为 ${sortOrder.label()}",
+                    contentDescription = stringResource(
+                        R.string.session_list_browse_sort_toggle_description,
+                        sortOrder.label(resources),
+                    ),
                 )
             }
         }
@@ -1075,7 +1163,11 @@ private fun FolderRow(
             ) {
                 Icon(
                     imageVector = leadingIcon,
-                    contentDescription = if (collapsed) "展开文件夹" else "折叠文件夹",
+                    contentDescription = if (collapsed) {
+                        stringResource(R.string.session_list_folder_expand)
+                    } else {
+                        stringResource(R.string.session_list_folder_collapse)
+                    },
                     tint = if (isCurrentProject) {
                         MaterialTheme.colorScheme.onPrimaryContainer
                     } else {
@@ -1113,21 +1205,40 @@ private fun FolderRow(
                         )
                         if (isCurrentProject) {
                             StatusChip(
-                                text = "当前项目",
+                                text = stringResource(R.string.session_list_folder_current_project_chip),
                                 emphasis = SessionEmphasis.Primary,
                             )
                         } else if (folder.draftOnly) {
                             StatusChip(
-                                text = "草稿",
+                                text = stringResource(R.string.session_list_folder_draft_chip),
                                 emphasis = SessionEmphasis.Secondary,
                             )
                         }
                     }
                     Text(
                         text = when {
-                            folder.draftOnly -> "等待第一条会话"
-                            summary.recentSessions > 0 -> "${summary.totalSessions} 条会话 · ${summary.recentSessions} 条近活跃"
-                            else -> "${summary.totalSessions} 条会话"
+                            folder.draftOnly -> stringResource(R.string.session_list_folder_waiting_first_session)
+                            summary.recentSessions > 0 -> stringResource(
+                                R.string.session_list_folder_summary_with_recent,
+                                pluralStringResource(
+                                    R.plurals.session_list_navigation_session_count,
+                                    summary.totalSessions,
+                                    summary.totalSessions,
+                                ),
+                                pluralStringResource(
+                                    R.plurals.session_list_navigation_recent_count,
+                                    summary.recentSessions,
+                                    summary.recentSessions,
+                                ),
+                            )
+                            else -> stringResource(
+                                R.string.session_list_folder_summary_total,
+                                pluralStringResource(
+                                    R.plurals.session_list_navigation_session_count,
+                                    summary.totalSessions,
+                                    summary.totalSessions,
+                                ),
+                            )
                         },
                         style = MaterialTheme.typography.labelSmall,
                         color = if (isCurrentProject) {
@@ -1148,7 +1259,7 @@ private fun FolderRow(
             ) {
                 Icon(
                     imageVector = Icons.Filled.Add,
-                    contentDescription = "在该项目中新建会话",
+                    contentDescription = stringResource(R.string.session_list_folder_new_session_desc),
                     modifier = Modifier.size(20.dp),
                 )
             }
@@ -1161,7 +1272,7 @@ private fun FolderRow(
                 ) {
                     Icon(
                         imageVector = Icons.Filled.DragIndicator,
-                        contentDescription = "按住拖拽排序",
+                        contentDescription = stringResource(R.string.session_list_folder_drag_sort_desc),
                         tint = MaterialTheme.colorScheme.onSurfaceVariant,
                         modifier = Modifier.size(24.dp),
                     )
@@ -1180,7 +1291,9 @@ private fun SessionCard(
     onTap: () -> Unit,
     onRename: () -> Unit,
 ) {
-    val recency = remember(session.updatedAt) { sessionRecency(session) }
+    val resources = LocalContext.current.resources
+    val localeKey = LocalConfiguration.current.locales.toLanguageTags()
+    val recency = remember(session.updatedAt, localeKey) { sessionRecency(session, resources) }
     Card(
         modifier = Modifier
             .fillMaxWidth()
@@ -1218,7 +1331,7 @@ private fun SessionCard(
                     )
                     if (selected) {
                         StatusChip(
-                            text = "已选中",
+                            text = stringResource(R.string.session_list_session_selected_chip),
                             emphasis = SessionEmphasis.Primary,
                         )
                     } else if (recency.emphasis == SessionEmphasis.Primary) {
@@ -1247,7 +1360,7 @@ private fun SessionCard(
                     )
                     if (selectionMode && !selected) {
                         StatusChip(
-                            text = "长按多选",
+                            text = stringResource(R.string.session_list_session_long_press_multi_select_chip),
                             emphasis = SessionEmphasis.Neutral,
                         )
                     }
@@ -1275,11 +1388,11 @@ private fun DraftProjectCard(path: String?) {
             verticalArrangement = Arrangement.spacedBy(6.dp),
         ) {
             Text(
-                text = "这个项目还没有会话",
+                text = stringResource(R.string.session_list_draft_title),
                 style = MaterialTheme.typography.titleSmall,
             )
             Text(
-                text = "点击右侧 + 创建第一条会话。",
+                text = stringResource(R.string.session_list_draft_message),
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -1293,7 +1406,7 @@ private fun DraftProjectCard(path: String?) {
                 )
             }
             StatusChip(
-                text = "草稿项目",
+                text = stringResource(R.string.session_list_draft_chip),
                 emphasis = SessionEmphasis.Secondary,
             )
         }

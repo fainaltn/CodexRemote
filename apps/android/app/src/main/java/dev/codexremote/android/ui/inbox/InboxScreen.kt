@@ -49,11 +49,14 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.res.stringResource
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.compose.viewModel
+import dev.codexremote.android.R
 import dev.codexremote.android.data.model.InboxItem
 import dev.codexremote.android.data.network.ApiClient
 import dev.codexremote.android.data.repository.ServerRepository
@@ -87,37 +90,49 @@ private fun parseSharedLinkInput(raw: String): ParsedSharedLink? {
     )
 }
 
-private fun inboxKindLabel(kind: String): String = when (kind.lowercase()) {
-    "link" -> "链接"
-    "file" -> "文件"
+private fun inboxKindLabel(kind: String, linkLabel: String, fileLabel: String): String = when (kind.lowercase()) {
+    "link" -> linkLabel
+    "file" -> fileLabel
     else -> kind
 }
 
-private fun inboxMetaLabel(item: InboxItem): String = buildString {
-    append("状态：${item.status}")
-    if (!item.source.isNullOrBlank()) append(" · 来源：${item.source}")
-    if (item.sizeBytes != null) append(" · ${item.sizeBytes} 字节")
+private fun inboxMetaLabel(
+    item: InboxItem,
+    statusPrefix: String,
+    sourcePrefix: String,
+    sizeSuffix: String,
+): String = buildString {
+    append(statusPrefix)
+    append(item.status)
+    if (!item.source.isNullOrBlank()) append("$sourcePrefix${item.source}")
+    if (item.sizeBytes != null) append(" · ${item.sizeBytes}$sizeSuffix")
 }
 
-private fun inboxContractLabel(item: InboxItem): String? {
+private fun inboxContractLabel(
+    item: InboxItem,
+    reviewBundleLabel: String,
+    skillRunbookLabel: String,
+): String? {
     if (item.contract.isNullOrBlank() && !item.hasReviewBundle && !item.hasSkillRunbook) {
         return null
     }
     return buildString {
         append(item.submissionId ?: item.id)
         if (!item.contract.isNullOrBlank()) append(" · ${item.contract}")
-        if (item.hasReviewBundle) append(" · review bundle")
-        if (item.hasSkillRunbook) append(" · skill-runbook")
+        if (item.hasReviewBundle) append(" · $reviewBundleLabel")
+        if (item.hasSkillRunbook) append(" · $skillRunbookLabel")
     }
 }
 
-private fun inboxRetryLabel(item: InboxItem): String? {
+private fun inboxRetryLabel(item: InboxItem, retryPrefix: String, retryTimesSuffix: String): String? {
     val attemptCount = item.retryPolicy?.get("attempt_count")?.toString()
         ?: item.retryAttempts.takeIf { it.isNotEmpty() }?.size?.toString()
     val finalStatus = item.retryPolicy?.get("final_status")?.toString()
     if (attemptCount == null && finalStatus == null) return null
     return buildString {
-        append("重试：${attemptCount ?: "0"} 次")
+        append(retryPrefix)
+        append(attemptCount ?: "0")
+        append(retryTimesSuffix)
         if (!finalStatus.isNullOrBlank()) append(" · $finalStatus")
     }
 }
@@ -145,8 +160,12 @@ class InboxViewModel(application: Application) : AndroidViewModel(application) {
     private suspend fun buildClient(serverId: String): Pair<ApiClient, String> {
         val servers = repo.servers.first()
         val server = servers.find { it.id == serverId }
-            ?: throw IllegalStateException("服务器不存在")
-        val token = server.token ?: throw IllegalStateException("尚未登录")
+            ?: throw IllegalStateException(
+                getApplication<Application>().getString(R.string.inbox_error_server_missing)
+            )
+        val token = server.token ?: throw IllegalStateException(
+            getApplication<Application>().getString(R.string.inbox_error_not_logged_in)
+        )
         return ApiClient(server.baseUrl) to token
     }
 
@@ -163,7 +182,10 @@ class InboxViewModel(application: Application) : AndroidViewModel(application) {
                 }
                 _items.value = response.items
             } catch (e: Exception) {
-                _error.value = userFacingMessage(e, "加载收件箱失败")
+                _error.value = userFacingMessage(
+                    e,
+                    getApplication<Application>().getString(R.string.inbox_error_load_failed),
+                )
             } finally {
                 _loading.value = false
             }
@@ -197,7 +219,12 @@ class InboxViewModel(application: Application) : AndroidViewModel(application) {
                 _items.value = listOf(item) + _items.value
                 onSuccess()
             } catch (e: Exception) {
-                onError(userFacingMessage(e, "提交链接失败"))
+                onError(
+                    userFacingMessage(
+                        e,
+                        getApplication<Application>().getString(R.string.inbox_error_submit_failed),
+                    )
+                )
             } finally {
                 _submitting.value = false
             }
@@ -217,9 +244,12 @@ class InboxViewModel(application: Application) : AndroidViewModel(application) {
                 val contentResolver = getApplication<Application>().contentResolver
                 val files = uris.map { uri ->
                     val mimeType = contentResolver.getType(uri) ?: "application/octet-stream"
-                    val fileName = queryDisplayName(uri) ?: "收件箱上传"
+                    val fileName = queryDisplayName(uri)
+                        ?: getApplication<Application>().getString(R.string.inbox_upload_fallback_name)
                     val bytes = contentResolver.openInputStream(uri)?.use { it.readBytes() }
-                        ?: throw IllegalStateException("无法读取文件")
+                        ?: throw IllegalStateException(
+                            getApplication<Application>().getString(R.string.inbox_error_file_read_failed)
+                        )
                     Triple(fileName, mimeType, bytes)
                 }
 
@@ -238,7 +268,12 @@ class InboxViewModel(application: Application) : AndroidViewModel(application) {
                 _items.value = listOf(item) + _items.value
                 onSuccess(files.size)
             } catch (e: Exception) {
-                onError(userFacingMessage(e, "上传文件失败"))
+                onError(
+                    userFacingMessage(
+                        e,
+                        getApplication<Application>().getString(R.string.inbox_error_upload_failed),
+                    )
+                )
             } finally {
                 _submitting.value = false
             }
@@ -265,6 +300,7 @@ fun InboxScreen(
     onBack: () -> Unit,
     viewModel: InboxViewModel = viewModel(),
 ) {
+    val context = LocalContext.current
     val items by viewModel.items.collectAsState()
     val loading by viewModel.loading.collectAsState()
     val submitting by viewModel.submitting.collectAsState()
@@ -276,6 +312,44 @@ fun InboxScreen(
     var linkTitle by remember { mutableStateOf("") }
     var linkNote by remember { mutableStateOf("") }
     var fileNote by remember { mutableStateOf("") }
+
+    val screenTitle = stringResource(R.string.inbox_screen_title)
+    val backDescription = stringResource(R.string.content_desc_back)
+    val refreshDescription = stringResource(R.string.content_desc_refresh)
+    val inboxLinkLabel = stringResource(R.string.inbox_kind_link)
+    val inboxFileLabel = stringResource(R.string.inbox_kind_file)
+    val statusPrefix = stringResource(R.string.inbox_meta_status_prefix)
+    val sourcePrefix = stringResource(R.string.inbox_meta_source_prefix)
+    val sizeSuffix = stringResource(R.string.inbox_meta_size_suffix)
+    val reviewBundleLabel = stringResource(R.string.inbox_contract_review_bundle)
+    val skillRunbookLabel = stringResource(R.string.inbox_contract_skill_runbook)
+    val retryPrefix = stringResource(R.string.inbox_retry_prefix)
+    val retryTimesSuffix = stringResource(R.string.inbox_retry_times_suffix)
+    val loadingTitle = stringResource(R.string.inbox_loading_title)
+    val loadingMessage = stringResource(R.string.inbox_loading_message)
+    val loadingFooter = stringResource(R.string.inbox_loading_footer)
+    val loadingStateLabel = stringResource(R.string.inbox_loading_state_label)
+    val errorTitle = stringResource(R.string.inbox_error_title)
+    val errorFooter = stringResource(R.string.inbox_error_footer)
+    val errorStateLabel = stringResource(R.string.inbox_error_state_label)
+    val retryButtonLabel = stringResource(R.string.inbox_error_retry_button)
+    val introText = stringResource(R.string.inbox_intro_text)
+    val submitLinkTitle = stringResource(R.string.inbox_submit_link_title)
+    val urlLabel = stringResource(R.string.inbox_url_label)
+    val linkHintText = stringResource(R.string.inbox_link_hint_text)
+    val titleOptionalLabel = stringResource(R.string.inbox_title_optional_label)
+    val noteOptionalLabel = stringResource(R.string.inbox_note_optional_label)
+    val sendLinkButton = stringResource(R.string.inbox_send_link_button)
+    val uploadTitle = stringResource(R.string.inbox_upload_title)
+    val uploadNoteLabel = stringResource(R.string.inbox_note_optional_label)
+    val pickFilesButton = stringResource(R.string.inbox_pick_files_button)
+    val recentDeliveriesTitle = stringResource(R.string.inbox_recent_deliveries_title)
+    val emptyTitle = stringResource(R.string.inbox_empty_title)
+    val emptyMessage = stringResource(R.string.inbox_empty_message)
+    val emptyFooter = stringResource(R.string.inbox_empty_footer)
+    val emptyStateLabel = stringResource(R.string.inbox_empty_state_label)
+    val linkSuccessMessage = stringResource(R.string.inbox_link_success_message)
+    val invalidLinkMessage = stringResource(R.string.inbox_invalid_link_message)
 
     val filePicker = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.OpenMultipleDocuments()
@@ -289,7 +363,11 @@ fun InboxScreen(
                     fileNote = ""
                     scope.launch {
                         snackbarHostState.showSnackbar(
-                            if (count == 1) "文件已投递到收件箱" else "已投递 $count 个文件到收件箱"
+                            context.resources.getQuantityString(
+                                R.plurals.inbox_upload_success_message,
+                                count,
+                                count,
+                            )
                         )
                     }
                 },
@@ -306,15 +384,15 @@ fun InboxScreen(
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("收件箱") },
+                title = { Text(screenTitle) },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "返回")
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = backDescription)
                     }
                 },
                 actions = {
                     IconButton(onClick = { viewModel.loadInbox(serverId) }) {
-                        Icon(Icons.Filled.Refresh, contentDescription = "刷新")
+                        Icon(Icons.Filled.Refresh, contentDescription = refreshDescription)
                     }
                 }
             )
@@ -333,23 +411,23 @@ fun InboxScreen(
                 Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                     if (error != null) {
                         TimelineNoticeCard(
-                            title = "收件箱加载失败",
+                            title = errorTitle,
                             message = error ?: "",
-                            footer = "你可以稍后刷新再试，或先继续投递新内容。",
+                            footer = errorFooter,
                             tone = TimelineNoticeTone.Error,
-                            stateLabel = "错误",
+                            stateLabel = errorStateLabel,
                             content = {
                                 Button(
                                     onClick = { viewModel.loadInbox(serverId) },
                                 ) {
-                                    Text("重试")
+                                    Text(retryButtonLabel)
                                 }
                             },
                         )
                     }
 
                     Text(
-                        text = "把链接或文件投递到主机的收件箱。这里是后续知识系统整理前的轻量待收集区。",
+                        text = introText,
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
@@ -362,30 +440,30 @@ fun InboxScreen(
                         modifier = Modifier.padding(16.dp),
                         verticalArrangement = Arrangement.spacedBy(12.dp),
                     ) {
-                        Text("提交链接", style = MaterialTheme.typography.titleMedium)
+                        Text(submitLinkTitle, style = MaterialTheme.typography.titleMedium)
                         OutlinedTextField(
                             value = linkUrl,
                             onValueChange = { linkUrl = it },
-                            label = { Text("URL") },
+                            label = { Text(urlLabel) },
                             singleLine = true,
                             modifier = Modifier.fillMaxWidth(),
                         )
                         Text(
-                            text = "可直接粘贴包含标题或短语的分享文本，应用会自动提取其中的链接。",
+                            text = linkHintText,
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
                         OutlinedTextField(
                             value = linkTitle,
                             onValueChange = { linkTitle = it },
-                            label = { Text("标题（可选）") },
+                            label = { Text(titleOptionalLabel) },
                             singleLine = true,
                             modifier = Modifier.fillMaxWidth(),
                         )
                         OutlinedTextField(
                             value = linkNote,
                             onValueChange = { linkNote = it },
-                            label = { Text("备注（可选）") },
+                            label = { Text(noteOptionalLabel) },
                             modifier = Modifier.fillMaxWidth(),
                         )
                         Button(
@@ -393,7 +471,7 @@ fun InboxScreen(
                                 val parsed = parseSharedLinkInput(linkUrl)
                                 if (parsed == null) {
                                     scope.launch {
-                                        snackbarHostState.showSnackbar("未识别到有效链接，请粘贴 URL 或包含 URL 的分享文本")
+                                        snackbarHostState.showSnackbar(invalidLinkMessage)
                                     }
                                     return@Button
                                 }
@@ -411,7 +489,7 @@ fun InboxScreen(
                                         linkUrl = ""
                                         linkTitle = ""
                                         linkNote = ""
-                                        scope.launch { snackbarHostState.showSnackbar("链接已投递到收件箱") }
+                                        scope.launch { snackbarHostState.showSnackbar(linkSuccessMessage) }
                                     },
                                     onError = { msg ->
                                         scope.launch { snackbarHostState.showSnackbar(msg) }
@@ -427,7 +505,7 @@ fun InboxScreen(
                                     strokeWidth = 2.dp,
                                 )
                             } else {
-                                Text("发送链接")
+                                Text(sendLinkButton)
                             }
                         }
                     }
@@ -440,11 +518,11 @@ fun InboxScreen(
                         modifier = Modifier.padding(16.dp),
                         verticalArrangement = Arrangement.spacedBy(12.dp),
                     ) {
-                        Text("上传文件", style = MaterialTheme.typography.titleMedium)
+                        Text(uploadTitle, style = MaterialTheme.typography.titleMedium)
                         OutlinedTextField(
                             value = fileNote,
                             onValueChange = { fileNote = it },
-                            label = { Text("备注（可选）") },
+                            label = { Text(uploadNoteLabel) },
                             modifier = Modifier.fillMaxWidth(),
                         )
                         Button(
@@ -454,24 +532,24 @@ fun InboxScreen(
                         ) {
                             Icon(Icons.Filled.AttachFile, contentDescription = null)
                             Spacer(modifier = Modifier.width(8.dp))
-                            Text("选择文件（可多选）")
+                            Text(pickFilesButton)
                         }
                     }
                 }
             }
 
             item {
-                Text("最近投递", style = MaterialTheme.typography.titleMedium)
+                Text(recentDeliveriesTitle, style = MaterialTheme.typography.titleMedium)
             }
 
             if (loading) {
                 item {
                     TimelineNoticeCard(
-                        title = "正在加载收件箱",
-                        message = "正在拉取最近投递、链接和文件记录。",
-                        footer = "新内容会在这里按时间倒序出现。",
+                        title = loadingTitle,
+                        message = loadingMessage,
+                        footer = loadingFooter,
                         tone = TimelineNoticeTone.Neutral,
-                        stateLabel = "加载中",
+                        stateLabel = loadingStateLabel,
                         content = {
                             ShimmerBlock(lines = 2)
                         },
@@ -480,16 +558,16 @@ fun InboxScreen(
             } else if (items.isEmpty()) {
                 item {
                     TimelineNoticeCard(
-                        title = "收件箱还是空的",
-                        message = "这里会收集你从链接、文件和分享面板投递的内容。",
-                        footer = "投递第一条内容后，列表会自动沉淀出最近记录。",
+                        title = emptyTitle,
+                        message = emptyMessage,
+                        footer = emptyFooter,
                         tone = TimelineNoticeTone.Neutral,
-                        stateLabel = "空状态",
+                        stateLabel = emptyStateLabel,
                         content = {
                             Button(
                                 onClick = { viewModel.loadInbox(serverId) },
                             ) {
-                                Text("刷新")
+                                Text(refreshDescription)
                             }
                         },
                     )
@@ -509,7 +587,7 @@ fun InboxScreen(
                                 horizontalArrangement = Arrangement.SpaceBetween,
                             ) {
                                 Text(
-                                    text = inboxKindLabel(item.kind),
+                                    text = inboxKindLabel(item.kind, inboxLinkLabel, inboxFileLabel),
                                     style = MaterialTheme.typography.labelMedium,
                                     color = MaterialTheme.colorScheme.primary,
                                 )
@@ -538,7 +616,7 @@ fun InboxScreen(
                                     style = MaterialTheme.typography.bodyMedium,
                                 )
                             }
-                            inboxContractLabel(item)?.let {
+                            inboxContractLabel(item, reviewBundleLabel, skillRunbookLabel)?.let {
                                 Text(
                                     text = it,
                                     style = MaterialTheme.typography.bodySmall,
@@ -547,12 +625,16 @@ fun InboxScreen(
                             }
                             if (item.captureSessions.isNotEmpty()) {
                                 Text(
-                                    text = "capture sessions: ${item.captureSessions.size}",
+                                    text = context.resources.getQuantityString(
+                                        R.plurals.inbox_capture_sessions_message,
+                                        item.captureSessions.size,
+                                        item.captureSessions.size,
+                                    ),
                                     style = MaterialTheme.typography.bodySmall,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 )
                             }
-                            inboxRetryLabel(item)?.let {
+                            inboxRetryLabel(item, retryPrefix, retryTimesSuffix)?.let {
                                 Text(
                                     text = it,
                                     style = MaterialTheme.typography.bodySmall,
@@ -560,7 +642,7 @@ fun InboxScreen(
                                 )
                             }
                             Text(
-                                text = inboxMetaLabel(item),
+                                text = inboxMetaLabel(item, statusPrefix, sourcePrefix, sizeSuffix),
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                             )

@@ -16,8 +16,10 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import dev.codexremote.android.data.model.RepoStatus
+import dev.codexremote.android.R
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
@@ -30,6 +32,9 @@ internal fun RepoStatusSurface(
     onCheckoutBranch: () -> Unit,
     onCommit: () -> Unit,
     onPush: () -> Unit,
+    onPull: () -> Unit,
+    onStash: () -> Unit,
+    onShowLog: () -> Unit,
     onDismissSummary: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -73,15 +78,15 @@ internal fun RepoStatusSurface(
                 horizontalArrangement = Arrangement.SpaceBetween,
             ) {
                 Text(
-                    text = "仓库状态",
+                    text = stringResource(R.string.session_controls_repo_status_title),
                     style = MaterialTheme.typography.titleSmall,
                     color = contentColor,
                 )
                 RepoStateBadge(
                     text = when {
-                        isClean -> "干净"
-                        !dirtyLabel.isNullOrBlank() -> "有变更"
-                        else -> "已连接"
+                        isClean -> stringResource(R.string.session_controls_repo_status_clean)
+                        !dirtyLabel.isNullOrBlank() -> stringResource(R.string.session_controls_repo_status_dirty)
+                        else -> stringResource(R.string.session_controls_repo_status_connected)
                     },
                     containerColor = accentColor.copy(alpha = 0.14f),
                     contentColor = contentColor,
@@ -94,49 +99,70 @@ internal fun RepoStatusSurface(
             ) {
                 repoBranchLabel(repoStatus)?.let { branch ->
                     RepoStateBadge(
-                        text = "分支 · $branch",
+                        text = stringResource(
+                            R.string.session_controls_repo_branch_format,
+                            branch,
+                        ),
                         containerColor = contentColor.copy(alpha = 0.08f),
                         contentColor = contentColor,
                     )
                 }
                 repoRootLabel(repoStatus)?.let { root ->
                     RepoStateBadge(
-                        text = "根目录 · $root",
+                        text = stringResource(
+                            R.string.session_controls_repo_root_format,
+                            root,
+                        ),
                         containerColor = contentColor.copy(alpha = 0.08f),
                         contentColor = contentColor,
                     )
                 }
                 repoStatus?.aheadBy?.takeIf { it > 0 }?.let { aheadBy ->
                     RepoStateBadge(
-                        text = "领先 $aheadBy",
+                        text = stringResource(
+                            R.string.session_controls_repo_ahead_format,
+                            aheadBy,
+                        ),
                         containerColor = accentColor.copy(alpha = 0.14f),
                         contentColor = contentColor,
                     )
                 }
                 repoStatus?.behindBy?.takeIf { it > 0 }?.let { behindBy ->
                     RepoStateBadge(
-                        text = "落后 $behindBy",
+                        text = stringResource(
+                            R.string.session_controls_repo_behind_format,
+                            behindBy,
+                        ),
                         containerColor = accentColor.copy(alpha = 0.14f),
                         contentColor = contentColor,
                     )
                 }
                 repoStatus?.stagedCount?.takeIf { it > 0 }?.let { stagedCount ->
                     RepoStateBadge(
-                        text = "已暂存 $stagedCount",
+                        text = stringResource(
+                            R.string.session_controls_repo_staged_format,
+                            stagedCount,
+                        ),
                         containerColor = accentColor.copy(alpha = 0.14f),
                         contentColor = contentColor,
                     )
                 }
                 repoStatus?.unstagedCount?.takeIf { it > 0 }?.let { unstagedCount ->
                     RepoStateBadge(
-                        text = "未暂存 $unstagedCount",
+                        text = stringResource(
+                            R.string.session_controls_repo_unstaged_format,
+                            unstagedCount,
+                        ),
                         containerColor = accentColor.copy(alpha = 0.14f),
                         contentColor = contentColor,
                     )
                 }
                 repoStatus?.untrackedCount?.takeIf { it > 0 }?.let { untrackedCount ->
                     RepoStateBadge(
-                        text = "未跟踪 $untrackedCount",
+                        text = stringResource(
+                            R.string.session_controls_repo_untracked_format,
+                            untrackedCount,
+                        ),
                         containerColor = accentColor.copy(alpha = 0.14f),
                         contentColor = contentColor,
                     )
@@ -157,27 +183,45 @@ internal fun RepoStatusSurface(
                 verticalArrangement = Arrangement.spacedBy(6.dp),
             ) {
                 RepoActionChip(
-                    label = "新分支",
+                    label = stringResource(R.string.session_controls_repo_action_new_branch),
                     enabled = actionsEnabled && !actionBusy,
                     onClick = onCreateBranch,
                 )
                 RepoActionChip(
-                    label = "切换分支",
+                    label = stringResource(R.string.session_controls_repo_action_checkout_branch),
                     enabled = actionsEnabled && !actionBusy,
                     onClick = onCheckoutBranch,
                 )
                 RepoActionChip(
-                    label = "提交",
+                    label = stringResource(R.string.session_controls_repo_action_commit),
                     enabled = actionsEnabled && !actionBusy && !isClean,
                     onClick = onCommit,
                 )
                 RepoActionChip(
-                    label = "推送",
+                    label = stringResource(R.string.session_controls_repo_action_push),
                     enabled = actionsEnabled &&
                         !actionBusy &&
                         !repoBranchLabel(repoStatus).isNullOrBlank() &&
                         repoStatus?.detached != true,
                     onClick = onPush,
+                )
+                RepoActionChip(
+                    label = stringResource(R.string.session_controls_repo_action_pull),
+                    enabled = actionsEnabled &&
+                        !actionBusy &&
+                        !repoBranchLabel(repoStatus).isNullOrBlank() &&
+                        repoStatus?.detached != true,
+                    onClick = onPull,
+                )
+                RepoActionChip(
+                    label = stringResource(R.string.session_controls_repo_action_stash),
+                    enabled = actionsEnabled && !actionBusy && !isClean,
+                    onClick = onStash,
+                )
+                RepoActionChip(
+                    label = stringResource(R.string.session_controls_repo_action_log),
+                    enabled = !actionBusy,
+                    onClick = onShowLog,
                 )
             }
 
@@ -190,7 +234,7 @@ internal fun RepoStatusSurface(
                         strokeWidth = 2.dp,
                     )
                     Text(
-                        text = "正在执行仓库操作…",
+                        text = stringResource(R.string.session_controls_repo_action_busy),
                         style = MaterialTheme.typography.bodySmall,
                         color = contentColor.copy(alpha = 0.84f),
                     )

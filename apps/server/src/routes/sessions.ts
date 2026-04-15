@@ -11,9 +11,11 @@ import {
   SessionDetailResponse,
   RepoActionRequest,
   RepoActionResponse,
+  RepoLogResponse,
   RepoStatusResponse,
   type RepoStatus,
   type RepoActionRequest as RepoActionRequestBody,
+  type RepoLogEntry,
   type ListSessionsResponse,
   type CreateSessionResponse,
   type UpdateSessionTitleResponse,
@@ -159,6 +161,38 @@ export function sessionRoutes(adapter: CodexAdapter, runManager?: RunManager) {
         const repoStatus = await getRepoStatusForCwd(detail.cwd);
         const body = RepoStatusResponse.parse({ repoStatus });
         return reply.send(body);
+      },
+    );
+
+    app.get(
+      "/api/hosts/:hostId/sessions/:sessionId/repo-log",
+      async (request: FastifyRequest, reply: FastifyReply) => {
+        const parsed = SessionParams.safeParse(request.params);
+        if (!parsed.success) {
+          return reply.status(400).send({ error: "Invalid route params" });
+        }
+
+        if (parsed.data.hostId !== LOCAL_HOST_ID) {
+          return reply
+            .status(404)
+            .send({ error: `Host '${parsed.data.hostId}' not found` });
+        }
+
+        const detail = await adapter.getSessionDetail(parsed.data.sessionId);
+        if (!detail) {
+          return reply.status(404).send({
+            error: `Session '${parsed.data.sessionId}' not found`,
+          });
+        }
+
+        try {
+          const entries = await getRepoLogForCwd(detail.cwd);
+          return reply.send(RepoLogResponse.parse({ entries }));
+        } catch (error) {
+          const message =
+            error instanceof Error ? error.message : "Repo log failed";
+          return reply.status(409).send({ error: message });
+        }
       },
     );
 
@@ -585,6 +619,27 @@ async function performRepoAction(
       await runGitCommandStrict(safeCwd, ["push", "-u", "origin", currentStatus.branch]);
       break;
     }
+    case "pull": {
+      if (currentStatus.detached || !currentStatus.branch) {
+        throw new Error("Detached HEAD 状态下不能直接拉取");
+      }
+      await runGitCommandStrict(safeCwd, ["pull", "--ff-only"]);
+      break;
+    }
+    case "stash": {
+      if ((currentStatus.dirtyCount ?? 0) === 0 && (currentStatus.untrackedCount ?? 0) === 0) {
+        throw new Error("当前没有可暂存的改动");
+      }
+      const stashMessage = action.message?.trim() || `CodexRemote stash ${new Date().toISOString()}`;
+      await runGitCommandStrict(safeCwd, [
+        "stash",
+        "push",
+        "--include-untracked",
+        "-m",
+        stashMessage,
+      ]);
+      break;
+    }
   }
 
   const repoStatus = await getRepoStatusForCwd(safeCwd);
@@ -628,6 +683,46 @@ function repoActionSummary(action: RepoActionRequestBody): string {
       return "已提交当前改动";
     case "push":
       return "已推送当前分支";
+    case "pull":
+      return "已拉取远端最新提交";
+    case "stash":
+      return "已暂存当前改动";
   }
   return "已执行仓库操作";
+}
+
+async function getRepoLogForCwd(cwd: string | null): Promise<RepoLogEntry[]> {
+  const safeCwd = cwd?.trim();
+  if (!safeCwd) {
+    throw new Error("会话没有可用的项目目录");
+  }
+
+  const currentStatus = await getRepoStatusForCwd(safeCwd);
+  if (!currentStatus.isRepo) {
+    throw new Error("当前会话目录不是 Git 仓库");
+  }
+
+  const output = await runGitCommandStrict(safeCwd, [
+    "log",
+    "--max-count=20",
+    "--date=iso-strict",
+    "--pretty=format:%H%x09%h%x09%an%x09%aI%x09%s",
+  ]);
+
+  if (!output) return [];
+
+  return output
+    .split("\n")
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0)
+    .map((line) => {
+      const [hash, shortHash, author, authoredAt, ...subjectParts] = line.split("\t");
+      return {
+        hash,
+        shortHash,
+        author,
+        authoredAt,
+        subject: subjectParts.join("\t"),
+      } satisfies RepoLogEntry;
+    });
 }

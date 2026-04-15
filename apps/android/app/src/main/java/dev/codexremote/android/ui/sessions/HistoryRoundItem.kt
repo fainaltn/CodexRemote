@@ -29,9 +29,11 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import dev.codexremote.android.data.model.SessionMessage
+import dev.codexremote.android.R
 
 /**
  * A single history round in the conversation timeline.
@@ -150,7 +152,11 @@ private fun HistoryRoundSummary(
 
                 Icon(
                     imageVector = if (expanded) Icons.Filled.ExpandLess else Icons.Filled.ExpandMore,
-                    contentDescription = if (expanded) "收起" else "展开",
+                    contentDescription = if (expanded) {
+                        stringResource(R.string.session_timeline_history_round_collapse)
+                    } else {
+                        stringResource(R.string.session_timeline_history_round_expand)
+                    },
                     modifier = Modifier.size(18.dp),
                     tint = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -212,7 +218,9 @@ private fun HistoryRoundExpandedHeader(round: HistoryRound) {
             }
 
             Text(
-                text = round.previewLabel(84).ifBlank { "暂无可预览内容" },
+                text = round.previewLabel(84).ifBlank {
+                    stringResource(R.string.session_timeline_history_round_preview_empty)
+                },
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 maxLines = 2,
@@ -335,9 +343,15 @@ private fun FoldedMessagesSection(
         ) {
             Text(
                 text = if (showFolded) {
-                    "收起 ${foldedMessages.size} 条中间步骤"
+                    stringResource(
+                        R.string.session_timeline_folded_messages_collapse,
+                        foldedMessages.size,
+                    )
                 } else {
-                    "查看 ${foldedMessages.size} 条中间步骤"
+                    stringResource(
+                        R.string.session_timeline_folded_messages_expand,
+                        foldedMessages.size,
+                    )
                 },
                 modifier = Modifier.weight(1f),
                 style = MaterialTheme.typography.labelSmall,
@@ -362,7 +376,7 @@ private fun FoldedMessagesSection(
             verticalArrangement = Arrangement.spacedBy(6.dp),
         ) {
             Text(
-                text = "中间步骤",
+                text = stringResource(R.string.session_timeline_folded_messages_section_title),
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -418,7 +432,7 @@ private fun ReasoningBubble(
             verticalArrangement = Arrangement.spacedBy(4.dp),
         ) {
             Text(
-                text = "💭 思考过程",
+                text = stringResource(R.string.session_timeline_reasoning_label),
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )

@@ -54,10 +54,12 @@ import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.compose.viewModel
+import dev.codexremote.android.R
 import dev.codexremote.android.data.model.Server
 import dev.codexremote.android.data.network.ApiClient
 import dev.codexremote.android.data.repository.ServerRepository
@@ -72,8 +74,9 @@ data class LoginTargetUiState(
     val baseUrl: String,
 )
 
-class LoginViewModel(application: Application) : AndroidViewModel(application) {
-    private val repo = ServerRepository(application)
+class LoginViewModel(app: Application) : AndroidViewModel(app) {
+    private val repo = ServerRepository(app)
+    private val appContext = app
 
     private val _loading = MutableStateFlow(false)
     val loading = _loading.asStateFlow()
@@ -104,7 +107,10 @@ class LoginViewModel(application: Application) : AndroidViewModel(application) {
             try {
                 val servers = repo.servers.first()
                 val server = servers.find { it.id == serverId }
-                    ?: throw IllegalStateException("服务器不存在")
+                if (server == null) {
+                    onError(appContext.getString(R.string.error_server_not_found))
+                    return@launch
+                }
 
                 val client = ApiClient(server.baseUrl)
                 try {
@@ -130,6 +136,8 @@ class LoginViewModel(application: Application) : AndroidViewModel(application) {
                 } finally {
                     client.close()
                 }
+            } catch (e: IllegalStateException) {
+                onError(e.message ?: ApiClient.describeNetworkFailure(e))
             } catch (e: Exception) {
                 onError(ApiClient.describeNetworkFailure(e))
             } finally {
@@ -179,8 +187,8 @@ fun LoginScreen(
         }
     }
 
-    val title = target?.label ?: "当前主机"
-    val baseUrl = target?.baseUrl ?: "正在准备登录环境"
+    val title = target?.label ?: stringResource(R.string.login_current_host)
+    val baseUrl = target?.baseUrl ?: stringResource(R.string.login_preparing_environment)
 
     Scaffold(
         topBar = {
@@ -188,7 +196,7 @@ fun LoginScreen(
                 title = {
                     Column {
                         Text(
-                            text = "解锁主机",
+                            text = stringResource(R.string.login_screen_title),
                             style = MaterialTheme.typography.titleLarge,
                         )
                         Text(
@@ -200,7 +208,10 @@ fun LoginScreen(
                 },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "返回")
+                        Icon(
+                            Icons.AutoMirrored.Filled.ArrowBack,
+                            contentDescription = stringResource(R.string.common_back),
+                        )
                     }
                 },
             )
@@ -227,8 +238,8 @@ fun LoginScreen(
             Spacer(modifier = Modifier.height(8.dp))
 
             BrandHero(
-                title = "Precision Console",
-                subtitle = "先验证连接，再输入应用密码，安全解锁当前主机。",
+                title = stringResource(R.string.login_brand_title),
+                subtitle = stringResource(R.string.login_brand_subtitle),
                 targetLabel = title,
                 targetUrl = baseUrl,
             )
@@ -246,21 +257,21 @@ fun LoginScreen(
                 ) {
                     RowHint(
                         icon = Icons.Filled.Dns,
-                        title = "主机已选中",
+                        title = stringResource(R.string.login_selected_host_title),
                         body = title,
                     )
                     RowHint(
                         icon = Icons.Filled.Lock,
-                        title = "解锁方式",
-                        body = "使用 CodexRemote 应用密码，而不是系统账户密码。",
+                        title = stringResource(R.string.login_unlock_method_title),
+                        body = stringResource(R.string.login_unlock_method_body),
                     )
 
                     OutlinedTextField(
                         value = password,
                         onValueChange = { password = it },
-                        label = { Text("应用密码") },
+                        label = { Text(stringResource(R.string.login_password_label)) },
                         supportingText = {
-                            Text("会先验证主机可达性，再提交解锁请求。")
+                            Text(stringResource(R.string.login_password_hint))
                         },
                         singleLine = true,
                         visualTransformation = PasswordVisualTransformation(),
@@ -286,9 +297,9 @@ fun LoginScreen(
                             )
                             Text(
                                 text = if (!savedPassword.isNullOrBlank()) {
-                                    "已检测到本机保存的密码"
+                                    stringResource(R.string.login_saved_password_detected)
                                 } else {
-                                    "仅保存在本机"
+                                    stringResource(R.string.login_saved_password_local_only)
                                 },
                                 style = MaterialTheme.typography.bodyMedium,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -310,14 +321,14 @@ fun LoginScreen(
                                 color = MaterialTheme.colorScheme.onPrimary,
                             )
                             Spacer(modifier = Modifier.width(12.dp))
-                            Text("正在解锁")
+                            Text(stringResource(R.string.login_unlocking))
                         } else {
-                            Text("解锁主机")
+                            Text(stringResource(R.string.login_unlock_button))
                         }
                     }
 
                     Text(
-                        text = "输入后会先检查 ${title} 的连通性，然后保存密码并进入工作区。",
+                        text = stringResource(R.string.login_footer, title),
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
@@ -366,7 +377,7 @@ private fun BrandHero(
                     fontWeight = FontWeight.SemiBold,
                 )
                 Text(
-                    text = "解锁 $targetLabel",
+                    text = stringResource(R.string.login_brand_unlock_target, targetLabel),
                     style = MaterialTheme.typography.headlineMedium,
                     color = MaterialTheme.colorScheme.onPrimaryContainer,
                 )

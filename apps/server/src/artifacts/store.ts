@@ -19,6 +19,7 @@
  */
 
 import crypto from "node:crypto";
+import fsSync from "node:fs";
 import fs from "node:fs/promises";
 import path from "node:path";
 import type { Artifact } from "@codexremote/shared";
@@ -90,6 +91,63 @@ function sanitiseName(raw: string): string {
 /** Build the on-disk directory for a session's artifacts. */
 function sessionDir(hostId: string, sessionId: string): string {
   return path.join(ARTIFACTS_DIR, hostId, sessionId);
+}
+
+function pathIfExists(candidate: string): string | null {
+  try {
+    if (!fsSync.existsSync(candidate)) return null;
+    return fsSync.realpathSync.native(candidate);
+  } catch {
+    return null;
+  }
+}
+
+function locateArtifactFile(row: ArtifactRow): string {
+  const directCandidates = [
+    row.stored_path,
+    path.isAbsolute(row.stored_path) ? row.stored_path : path.resolve(row.stored_path),
+  ];
+
+  for (const candidate of directCandidates) {
+    const resolved = pathIfExists(candidate);
+    if (resolved) return resolved;
+  }
+
+  const localSessionDir = sessionDir("local", row.session_id);
+  try {
+    if (fsSync.existsSync(localSessionDir)) {
+      const directMatch = fsSync
+        .readdirSync(localSessionDir)
+        .find((entry) => entry === `${row.id}-${sanitiseName(row.original_name)}` || entry.startsWith(`${row.id}-`));
+      if (directMatch) {
+        const resolved = pathIfExists(path.join(localSessionDir, directMatch));
+        if (resolved) return resolved;
+      }
+    }
+  } catch {
+    // Fall through to the generic search below.
+  }
+
+  try {
+    if (fsSync.existsSync(ARTIFACTS_DIR)) {
+      for (const hostEntry of fsSync.readdirSync(ARTIFACTS_DIR)) {
+        const candidateDir = path.join(ARTIFACTS_DIR, hostEntry, row.session_id);
+        if (!fsSync.existsSync(candidateDir)) continue;
+        const found = fsSync
+          .readdirSync(candidateDir)
+          .find((entry) => entry === `${row.id}-${sanitiseName(row.original_name)}` || entry.startsWith(`${row.id}-`));
+        if (!found) continue;
+        const resolved = pathIfExists(path.join(candidateDir, found));
+        if (resolved) return resolved;
+      }
+    }
+  } catch {
+    // Keep the best-effort fallback below.
+  }
+
+  return path.isAbsolute(row.stored_path)
+    ? row.stored_path
+    : path.resolve(row.stored_path);
 }
 
 // ── Disk space safety ─────────────────────────────────────────────
@@ -165,13 +223,14 @@ async function assertDiskSpace(payloadBytes: number): Promise<void> {
 
 /** Map a SQLite row to the shared Artifact type. */
 function rowToArtifact(row: ArtifactRow): Artifact {
+  const resolvedStoredPath = locateArtifactFile(row);
   return {
     id: row.id,
     sessionId: row.session_id,
     runId: row.run_id,
     kind: row.kind as "image" | "file",
     originalName: row.original_name,
-    storedPath: row.stored_path,
+    storedPath: resolvedStoredPath,
     mimeType: row.mime_type,
     sizeBytes: row.size_bytes,
     createdAt: row.created_at,
@@ -217,7 +276,7 @@ export async function createArtifact(
   const safeName = sanitiseName(opts.originalName);
   const dir = sessionDir(opts.hostId, opts.sessionId);
   const fileName = `${id}-${safeName}`;
-  const storedPath = path.join(dir, fileName);
+  const storedPath = path.resolve(path.join(dir, fileName));
 
   // ── Step 0: pre-flight disk space check ───────────────────────
   // Reject early with a clear error before touching disk or DB.

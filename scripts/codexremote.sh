@@ -76,6 +76,12 @@ expected_web_api_url() {
   esac
 }
 
+local_api_url() {
+  local candidate
+  candidate="$(expected_web_api_url)"
+  printf '%s\n' "$candidate"
+}
+
 web_build_matches_runtime() {
   [[ -f "$WEB_ROUTES_MANIFEST" ]] || return 1
 
@@ -132,9 +138,12 @@ ensure_builds() {
 }
 
 wait_for_server() {
-  local port="${PORT:-31807}"
-  local url="http://127.0.0.1:${port}/api/health"
+  local base_url
+  local url
   local attempts=0
+
+  base_url="$(local_api_url)"
+  url="${base_url}/api/health"
 
   while [[ "$attempts" -lt 30 ]]; do
     if curl -fsS "$url" >/dev/null 2>&1; then
@@ -148,9 +157,12 @@ wait_for_server() {
 }
 
 print_pairing_code() {
-  local port="${PORT:-31807}"
-  local url="http://127.0.0.1:${port}/api/pairing/code"
+  local base_url
+  local url
   local response
+
+  base_url="$(local_api_url)"
+  url="${base_url}/api/pairing/code"
 
   if ! wait_for_server; then
     fail "The local server did not become ready in time. Run ./scripts/codexremote.sh status or logs to inspect it."

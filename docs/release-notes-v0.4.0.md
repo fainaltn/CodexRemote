@@ -30,6 +30,11 @@
 - `cd apps/android && ./gradlew :app:testDebugUnitTest --tests dev.codexremote.android.ui.sessions.ComposerSuggestionsTest`
 - `cd apps/android && ./gradlew :app:assembleDebug`
 
+## Known Follow-up
+
+- Voice input on some devices, including the Samsung Z Fold7 / Android 16 test path, still needs a compatibility follow-up.
+- The mic button remains in the UI, but the device-specific speech-service integration should be treated as a `v0.4.x` follow-up instead of a `v0.4.0` release blocker.
+
 ## Delivery Artifact
 
 - Dated APK output: `YYYY-MM-DD_CodexRemote_v0.4.0.apk`

@@ -362,6 +362,51 @@ export function listArtifactsBySession(sessionId: string): Artifact[] {
   return rows.map(rowToArtifact);
 }
 
+export interface ResolvedArtifactFile {
+  artifact: Artifact;
+  filePath: string;
+}
+
+/**
+ * Resolve an artifact to a safe on-disk file path for download.
+ *
+ * The caller supplies the session scope; this function verifies that the
+ * stored artifact belongs to that session, the canonical path follows the
+ * expected `artifacts/<hostId>/<sessionId>/<artifactId>-...` layout, and
+ * the resolved target is a regular file.
+ */
+export async function resolveArtifactFileForDownload(opts: {
+  hostId: string;
+  sessionId: string;
+  artifactId: string;
+}): Promise<ResolvedArtifactFile | null> {
+  const artifact = getArtifact(opts.artifactId);
+  if (!artifact || artifact.sessionId !== opts.sessionId) return null;
+
+  const canonical = await fs.realpath(artifact.storedPath).catch(() => null);
+  if (!canonical) return null;
+
+  const info = await fs.stat(canonical).catch(() => null);
+  if (!info || !info.isFile()) return null;
+
+  const fileName = path.basename(canonical);
+  const sessionDir = path.dirname(canonical);
+  const hostDir = path.dirname(sessionDir);
+  const artifactsDir = path.dirname(hostDir);
+
+  if (path.basename(sessionDir) !== opts.sessionId) return null;
+  if (path.basename(hostDir) !== opts.hostId) return null;
+  if (path.basename(artifactsDir) !== "artifacts") return null;
+  if (path.basename(canonical) !== path.basename(artifact.storedPath)) {
+    return null;
+  }
+  if (!fileName.startsWith(`${opts.artifactId}-`)) {
+    return null;
+  }
+
+  return { artifact, filePath: canonical };
+}
+
 /**
  * Attach (or re-attach) an artifact to a session, optionally linking a run.
  * Returns the updated artifact or null if it doesn't exist.

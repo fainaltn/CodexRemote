@@ -22,7 +22,12 @@
 
 import { EventEmitter } from "node:events";
 import crypto from "node:crypto";
-import type { CodexAdapter, RunHandle } from "../codex/index.js";
+import type {
+  CodexAdapter,
+  RunHandle,
+  CodexApprovalDecision,
+  CodexApprovalRequest,
+} from "../codex/index.js";
 import type { Run } from "@codexremote/shared";
 import { getDb } from "../db.js";
 import { ensureSessionRow } from "../sessions/ensure.js";
@@ -47,6 +52,7 @@ interface ManagedRun {
   handle: RunHandle;
   pollTimer: NodeJS.Timeout | null;
   watchdog: NodeJS.Timeout | null;
+  approvalUnsubscribe?: (() => void) | null;
   /**
    * True while `terminateStaleRun` is in-flight.  Blocks `startRun`
    * so a new process cannot be spawned until the old one has actually
@@ -102,6 +108,7 @@ function updateRunRow(run: Run): void {
 export class RunManager {
   private adapter: CodexAdapter;
   private runs = new Map<string, ManagedRun>();
+  private approvals = new Map<string, Map<string, CodexApprovalRequest>>();
   private emitter = new EventEmitter();
   /** Per-session monotonic sequence counter for SSE event IDs. */
   private seqs = new Map<string, number>();
@@ -134,7 +141,12 @@ export class RunManager {
 
   async startRun(
     sessionId: string,
-    opts: { prompt: string; model?: string; reasoningEffort?: string },
+    opts: {
+      prompt: string;
+      model?: string;
+      reasoningEffort?: string;
+      permissionMode?: "on-request" | "full-access";
+    },
   ): Promise<Run> {
     const existing = this.runs.get(sessionId);
     if (existing) {
@@ -152,12 +164,18 @@ export class RunManager {
 
   async startNewSessionRun(
     cwd: string,
-    opts: { prompt: string; model?: string; reasoningEffort?: string },
+    opts: {
+      prompt: string;
+      model?: string;
+      reasoningEffort?: string;
+      permissionMode?: "on-request" | "full-access";
+    },
   ): Promise<Run> {
     const started = await this.adapter.startNewRun(cwd, {
       prompt: EMPTY_SESSION_BOOTSTRAP_PROMPT,
       model: opts.model,
       reasoningEffort: opts.reasoningEffort,
+      permissionMode: opts.permissionMode,
       startupMode: "create-only",
     });
     const handle = await this.adapter.startRun(started.sessionId, opts);
@@ -167,7 +185,12 @@ export class RunManager {
   private async registerStartedRun(
     sessionId: string,
     handle: RunHandle,
-    opts: { prompt: string; model?: string; reasoningEffort?: string },
+    opts: {
+      prompt: string;
+      model?: string;
+      reasoningEffort?: string;
+      permissionMode?: "on-request" | "full-access";
+    },
   ): Promise<Run> {
     const runId = crypto.randomUUID();
     const now = new Date().toISOString();
@@ -190,6 +213,7 @@ export class RunManager {
       handle,
       pollTimer: null,
       watchdog: null,
+      approvalUnsubscribe: null,
       stopping: false,
       lastTotalBytes: 0,
     };
@@ -227,6 +251,12 @@ export class RunManager {
       void this.terminateStaleRun(sessionId, managed);
     }, RUN_TIMEOUT_MS);
 
+    if (handle.onApprovalRequest) {
+      managed.approvalUnsubscribe = handle.onApprovalRequest((approval) => {
+        this.recordApproval(sessionId, approval);
+      });
+    }
+
     handle.onExit((code) => {
       if (TERMINAL_STATUSES.has(managed.run.status)) return;
 
@@ -241,6 +271,7 @@ export class RunManager {
         managed.run.error = `Process exited with code ${code}`;
       }
 
+      this.clearPendingApprovals(sessionId, "cancelled");
       this.safeUpdateRunRow("onExit", managed.run);
       this.emit(sessionId, managed.run);
     });
@@ -280,6 +311,7 @@ export class RunManager {
     await managed.handle.stop();
 
     managed.run.lastOutput = managed.handle.readOutput();
+    this.clearPendingApprovals(sessionId, "cancelled");
 
     // Persist terminal state to SQLite.
     this.safeUpdateRunRow("stopRun", managed.run);
@@ -353,6 +385,48 @@ export class RunManager {
     };
   }
 
+  getPendingApprovals(sessionId: string): CodexApprovalRequest[] {
+    return Array.from(this.approvals.get(sessionId)?.values() ?? []).map(
+      (approval) => ({ ...approval }),
+    );
+  }
+
+  subscribeApprovals(
+    sessionId: string,
+    cb: (approval: CodexApprovalRequest, seq: number) => void,
+  ): () => void {
+    const key = `approval:${sessionId}`;
+    const handler = (payload: { approval: CodexApprovalRequest; seq: number }) =>
+      cb(payload.approval, payload.seq);
+    this.emitter.on(key, handler);
+    return () => {
+      this.emitter.off(key, handler);
+    };
+  }
+
+  async decideApproval(
+    sessionId: string,
+    approvalId: string,
+    decision: CodexApprovalDecision,
+  ): Promise<void> {
+    const managed = this.runs.get(sessionId);
+    const approval = this.approvals.get(sessionId)?.get(approvalId);
+    if (!managed || !approval || !managed.handle.respondToApproval) {
+      throw new Error(`Approval '${approvalId}' not found`);
+    }
+
+    await managed.handle.respondToApproval(approvalId, decision);
+
+    const status = decision.kind === "permissions"
+      ? "approved"
+      : decision.decision === "decline"
+        ? "declined"
+        : decision.decision === "cancel"
+          ? "cancelled"
+          : "approved";
+    this.resolveApproval(sessionId, approvalId, status);
+  }
+
   // ── Internals ─────────────────────────────────────────────────────
 
   /**
@@ -381,7 +455,55 @@ export class RunManager {
     this.emitter.emit(`run:${sessionId}`, { run: { ...run }, seq });
   }
 
+  private emitApproval(sessionId: string, approval: CodexApprovalRequest): void {
+    const seq = (this.seqs.get(sessionId) ?? 0) + 1;
+    this.seqs.set(sessionId, seq);
+    this.emitter.emit(`approval:${sessionId}`, {
+      approval: { ...approval },
+      seq,
+    });
+  }
+
+  private recordApproval(sessionId: string, approval: CodexApprovalRequest): void {
+    const sessionApprovals = this.approvals.get(sessionId) ?? new Map<string, CodexApprovalRequest>();
+    sessionApprovals.set(approval.id, { ...approval });
+    this.approvals.set(sessionId, sessionApprovals);
+    this.emitApproval(sessionId, approval);
+  }
+
+  private resolveApproval(
+    sessionId: string,
+    approvalId: string,
+    status: CodexApprovalRequest["status"],
+  ): void {
+    const sessionApprovals = this.approvals.get(sessionId);
+    const approval = sessionApprovals?.get(approvalId);
+    if (!sessionApprovals || !approval) return;
+
+    const resolvedApproval = { ...approval, status };
+    sessionApprovals.delete(approvalId);
+    if (sessionApprovals.size === 0) {
+      this.approvals.delete(sessionId);
+    }
+    this.emitApproval(sessionId, resolvedApproval);
+  }
+
+  private clearPendingApprovals(
+    sessionId: string,
+    status: Extract<CodexApprovalRequest["status"], "cancelled" | "failed">,
+  ): void {
+    const sessionApprovals = this.approvals.get(sessionId);
+    if (!sessionApprovals) return;
+    for (const approvalId of sessionApprovals.keys()) {
+      this.resolveApproval(sessionId, approvalId, status);
+    }
+  }
+
   private clearTimers(managed: ManagedRun): void {
+    if (managed.approvalUnsubscribe) {
+      managed.approvalUnsubscribe();
+      managed.approvalUnsubscribe = null;
+    }
     if (managed.pollTimer) {
       clearInterval(managed.pollTimer);
       managed.pollTimer = null;
@@ -422,6 +544,7 @@ export class RunManager {
     managed.run.status = "failed";
     managed.run.error = `Run exceeded timeout (${Math.round(RUN_TIMEOUT_MS / 1000)}s) and was force-terminated`;
 
+    this.clearPendingApprovals(sessionId, "failed");
     this.safeUpdateRunRow("terminateStaleRun", managed.run);
     this.emit(sessionId, managed.run);
     managed.stopping = false;

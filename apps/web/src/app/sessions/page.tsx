@@ -5,12 +5,18 @@ import { useRouter } from "next/navigation";
 import { useAuth } from "@/lib/auth";
 import {
   archiveSessions,
+  clearRememberedActiveSession,
   createSession,
+  getRememberedActiveSession,
   listDraftProjects,
   listSessions,
+  markSessionTransition,
   notifyShellDataChanged,
+  prefetchSessionBootstrap,
+  rememberActiveSession,
   removeDraftProject,
   renameSession,
+  type ActiveSessionMarker,
   type DraftProject,
   type Session,
 } from "@/lib/api";
@@ -42,6 +48,9 @@ type Signal = {
   tone: "primary" | "accent" | "muted";
 };
 
+type ProjectSectionKey = "current" | "draft" | "recent" | "history";
+type SessionSectionKey = "current" | "recent" | "history";
+
 interface SessionGroup {
   key: string;
   label: string;
@@ -61,9 +70,17 @@ function getGroupSignal(
   group: SessionGroup,
   projectParam: string | null,
   activeGroupKey: string | null,
+  activeSessionId: string | null,
 ): Signal {
   const routeProject = group.path ?? "__ungrouped__";
-  if (projectParam === routeProject || activeGroupKey === group.key) {
+  const containsActiveSession =
+    activeSessionId !== null &&
+    group.sessions.some((session) => session.id === activeSessionId);
+  if (
+    containsActiveSession ||
+    projectParam === routeProject ||
+    activeGroupKey === group.key
+  ) {
     return { label: "当前项目", tone: "primary" };
   }
   if (group.draftOnly && group.sessions.length === 0) {
@@ -75,7 +92,14 @@ function getGroupSignal(
   return { label: "历史", tone: "muted" };
 }
 
-function getSessionSignal(session: Session, index: number): Signal {
+function getSessionSignal(
+  session: Session,
+  index: number,
+  activeSessionId: string | null,
+): Signal {
+  if (session.id === activeSessionId) {
+    return { label: "当前会话", tone: "primary" };
+  }
   if (session.archivedAt) {
     return { label: "已归档", tone: "muted" };
   }
@@ -83,7 +107,7 @@ function getSessionSignal(session: Session, index: number): Signal {
     return { label: "最新", tone: "primary" };
   }
   if (isFreshActivity(session.updatedAt, 60)) {
-    return { label: "活跃", tone: "accent" };
+    return { label: "最近活跃", tone: "accent" };
   }
   return { label: "历史", tone: "muted" };
 }
@@ -92,6 +116,7 @@ function rankGroups(
   groups: SessionGroup[],
   projectParam: string | null,
   activeGroupKey: string | null,
+  activeSessionId: string | null,
 ): SessionGroup[] {
   const weight = (signal: Signal) => {
     if (signal.label === "当前项目") return 0;
@@ -101,14 +126,39 @@ function rankGroups(
   };
 
   return [...groups].sort((a, b) => {
-    const aSignal = getGroupSignal(a, projectParam, activeGroupKey);
-    const bSignal = getGroupSignal(b, projectParam, activeGroupKey);
+    const aSignal = getGroupSignal(a, projectParam, activeGroupKey, activeSessionId);
+    const bSignal = getGroupSignal(b, projectParam, activeGroupKey, activeSessionId);
     return (
       weight(aSignal) - weight(bSignal) ||
       b.updatedAt.localeCompare(a.updatedAt) ||
       a.label.localeCompare(b.label)
     );
   });
+}
+
+function groupSectionKey(signal: Signal): ProjectSectionKey {
+  switch (signal.label) {
+    case "当前项目":
+      return "current";
+    case "草稿":
+      return "draft";
+    case "最近活跃":
+      return "recent";
+    default:
+      return "history";
+  }
+}
+
+function sessionSectionKey(signal: Signal): SessionSectionKey {
+  switch (signal.label) {
+    case "当前会话":
+      return "current";
+    case "最新":
+    case "最近活跃":
+      return "recent";
+    default:
+      return "history";
+  }
 }
 
 function groupSessionsByProject(sessions: Session[]): SessionGroup[] {
@@ -186,6 +236,24 @@ export default function SessionsPage() {
   const [renaming, setRenaming] = useState(false);
   const [activeGroupKey, setActiveGroupKey] = useState<string | null>(null);
   const [projectParam, setProjectParam] = useState<string | null>(null);
+  const [activeSessionMarker, setActiveSessionMarker] =
+    useState<ActiveSessionMarker | null>(() => getRememberedActiveSession());
+
+  const warmSession = useCallback((sessionId: string) => {
+    void prefetchSessionBootstrap(sessionId).catch(() => {
+      // Best-effort warm path only.
+    });
+  }, []);
+
+  const enterSession = useCallback((session: Session) => {
+    const marker = rememberActiveSession(session);
+    setActiveSessionMarker(marker);
+    markSessionTransition(session);
+    void prefetchSessionBootstrap(session.id).catch(() => {
+      // Best-effort warm path only.
+    });
+    router.push(`/sessions/${session.id}`);
+  }, [router]);
 
   const fetchSessions = useCallback(async () => {
     try {
@@ -195,6 +263,13 @@ export default function SessionsPage() {
       const nextDraftProjects = listDraftProjects();
       setSessions(data.sessions);
       setDraftProjects(nextDraftProjects);
+      const remembered = getRememberedActiveSession();
+      if (remembered && !data.sessions.some((session) => session.id === remembered.sessionId)) {
+        clearRememberedActiveSession(remembered.sessionId);
+        setActiveSessionMarker(null);
+      } else {
+        setActiveSessionMarker(remembered);
+      }
       notifyShellDataChanged();
     } catch (err) {
       setError(err instanceof Error ? err.message : "加载会话失败");
@@ -236,6 +311,10 @@ export default function SessionsPage() {
       setArchivingId(sessionId);
       setError("");
       await archiveSessions([sessionId]);
+      clearRememberedActiveSession(sessionId);
+      setActiveSessionMarker((previous) =>
+        previous?.sessionId === sessionId ? null : previous,
+      );
       await fetchSessions();
     } catch (err) {
       setError(err instanceof Error ? err.message : "归档线程失败");
@@ -250,6 +329,11 @@ export default function SessionsPage() {
       setArchivingId("batch");
       setError("");
       await archiveSessions(selectedSessionIds);
+      const activeSessionId = activeSessionMarker?.sessionId ?? null;
+      if (activeSessionId && selectedSessionIds.includes(activeSessionId)) {
+        clearRememberedActiveSession(activeSessionId);
+        setActiveSessionMarker(null);
+      }
       setSelectedSessionIds([]);
       setBatchMode(false);
       await fetchSessions();
@@ -304,9 +388,10 @@ export default function SessionsPage() {
     () => mergeDraftProjects(sessions, draftProjects),
     [sessions, draftProjects],
   );
+  const activeSessionId = activeSessionMarker?.sessionId ?? null;
   const orderedGroups = useMemo(
-    () => rankGroups(groups, projectParam, activeGroupKey),
-    [groups, projectParam, activeGroupKey],
+    () => rankGroups(groups, projectParam, activeGroupKey, activeSessionId),
+    [groups, projectParam, activeGroupKey, activeSessionId],
   );
   const selectionActive = batchMode || selectedSessionIds.length > 0;
   const selectedCount = selectedSessionIds.length;
@@ -318,8 +403,16 @@ export default function SessionsPage() {
       if (projectParam) {
         return group.path === projectParam;
       }
+      if (activeSessionId) {
+        return group.sessions.some((session) => session.id === activeSessionId);
+      }
       return group.key === activeGroupKey;
     }) ??
+    (activeSessionId
+      ? orderedGroups.find((group) =>
+          group.sessions.some((session) => session.id === activeSessionId),
+        )
+      : null) ??
     orderedGroups.find((group) => group.key === activeGroupKey) ??
     orderedGroups[0] ??
     null;
@@ -330,13 +423,98 @@ export default function SessionsPage() {
     isFreshActivity(session.updatedAt, 180),
   ).length;
   const currentGroupSignal = activeGroup
-    ? getGroupSignal(activeGroup, projectParam, activeGroupKey)
+    ? getGroupSignal(activeGroup, projectParam, activeGroupKey, activeSessionId)
     : null;
+  const projectSections = useMemo(() => {
+    const sections: Array<{
+      key: ProjectSectionKey;
+      label: string;
+      description: string;
+      groups: SessionGroup[];
+    }> = [
+      {
+        key: "current",
+        label: "当前项目",
+        description: "持续保留当前会话所在项目",
+        groups: [],
+      },
+      {
+        key: "draft",
+        label: "当前项目草稿",
+        description: "已加入但尚未开线程的目录",
+        groups: [],
+      },
+      {
+        key: "recent",
+        label: "最近活跃",
+        description: "最近 2 小时内仍在流转的项目",
+        groups: [],
+      },
+      {
+        key: "history",
+        label: "历史项目",
+        description: "其余可回溯的会话目录",
+        groups: [],
+      },
+    ];
+
+    for (const group of orderedGroups) {
+      const signal = getGroupSignal(
+        group,
+        projectParam,
+        activeGroupKey,
+        activeSessionId,
+      );
+      sections.find((section) => section.key === groupSectionKey(signal))?.groups.push(group);
+    }
+
+    return sections.filter((section) => section.groups.length > 0);
+  }, [orderedGroups, projectParam, activeGroupKey, activeSessionId]);
+  const activeSession = activeGroup?.sessions.find(
+    (session) => session.id === activeSessionId,
+  ) ?? null;
+  const sessionSections = useMemo(() => {
+    if (!activeGroup || activeGroup.draftOnly) return [];
+
+    const sections: Array<{
+      key: SessionSectionKey;
+      label: string;
+      description: string;
+      sessions: Session[];
+    }> = [
+      {
+        key: "current",
+        label: "当前会话",
+        description: "保持可持续识别，优先留在最前面",
+        sessions: [],
+      },
+      {
+        key: "recent",
+        label: "最近活跃",
+        description: "最近在这个项目里有动作的线程",
+        sessions: [],
+      },
+      {
+        key: "history",
+        label: "历史会话",
+        description: "较早但仍可继续进入的线程",
+        sessions: [],
+      },
+    ];
+
+    activeGroup.sessions.forEach((session, index) => {
+      const signal = getSessionSignal(session, index, activeSessionId);
+      sections.find((section) => section.key === sessionSectionKey(signal))?.sessions.push(session);
+    });
+
+    return sections.filter((section) => section.sessions.length > 0);
+  }, [activeGroup, activeSessionId]);
 
   useEffect(() => {
     function syncProjectFromLocation() {
       const params = new URLSearchParams(window.location.search);
       setProjectParam(params.get("project"));
+      setActiveSessionMarker(getRememberedActiveSession());
     }
 
     function handleProjectSelected(event: Event) {
@@ -344,14 +522,20 @@ export default function SessionsPage() {
       setProjectParam(detail);
     }
 
+    function handleWindowFocus() {
+      setActiveSessionMarker(getRememberedActiveSession());
+    }
+
     syncProjectFromLocation();
     window.addEventListener("popstate", syncProjectFromLocation);
+    window.addEventListener("focus", handleWindowFocus);
     window.addEventListener(
       "codexremote-project-selected",
       handleProjectSelected as EventListener,
     );
     return () => {
       window.removeEventListener("popstate", syncProjectFromLocation);
+      window.removeEventListener("focus", handleWindowFocus);
       window.removeEventListener(
         "codexremote-project-selected",
         handleProjectSelected as EventListener,
@@ -377,13 +561,23 @@ export default function SessionsPage() {
       }
     }
 
+    if (activeSessionId) {
+      const currentSessionGroup = groups.find((group) =>
+        group.sessions.some((session) => session.id === activeSessionId),
+      );
+      if (currentSessionGroup) {
+        setActiveGroupKey(currentSessionGroup.key);
+        return;
+      }
+    }
+
     if (
       !activeGroupKey ||
       !groups.some((group) => group.key === activeGroupKey)
     ) {
       setActiveGroupKey(groups[0].key);
     }
-  }, [groups, activeGroupKey, projectParam]);
+  }, [groups, activeGroupKey, projectParam, activeSessionId]);
 
   if (authLoading) {
     return (
@@ -467,69 +661,102 @@ export default function SessionsPage() {
                 <strong>{activeGroup ? timeAgo(activeGroup.updatedAt) : "—"}</strong>
               </div>
               <div className="sessions-project-rail-stat">
-                <span>模式</span>
-                <strong>{batchMode ? "批量" : "浏览"}</strong>
+                <span>当前会话</span>
+                <strong>{activeSession?.title || activeSessionMarker?.title || "未锁定"}</strong>
               </div>
             </div>
             <div className="sessions-project-list">
               {orderedGroups.length === 0 ? (
                 <div className="sessions-project-empty">还没有发现项目。</div>
               ) : (
-                orderedGroups.map((group) => {
-                  const isActive = activeGroup?.key === group.key;
-                  const groupSignal = getGroupSignal(
-                    group,
-                    projectParam,
-                    activeGroupKey,
-                  );
-
-                  return (
-                    <button
-                      key={group.key}
-                      type="button"
-                      className={`sessions-project-card ${
-                        isActive ? "sessions-project-card-active" : ""
-                      } ${group.draftOnly ? "sessions-project-card-draft" : ""}`}
-                      onClick={() => {
-                        setActiveGroupKey(group.key);
-                        const value = group.path ?? "__ungrouped__";
-                        setProjectParam(value);
-                        window.dispatchEvent(
-                          new CustomEvent("codexremote-project-selected", {
-                            detail: value,
-                          }),
+                projectSections.map((section) => (
+                  <section
+                    key={section.key}
+                    className="sessions-project-section"
+                    aria-label={section.label}
+                  >
+                    <div className="sessions-project-section-header">
+                      <div>
+                        <div className="sessions-project-section-title">
+                          {section.label}
+                        </div>
+                        <div className="sessions-project-section-copy">
+                          {section.description}
+                        </div>
+                      </div>
+                      <span className="sessions-project-section-count">
+                        {section.groups.length}
+                      </span>
+                    </div>
+                    <div className="sessions-project-section-list">
+                      {section.groups.map((group) => {
+                        const isActive = activeGroup?.key === group.key;
+                        const groupSignal = getGroupSignal(
+                          group,
+                          projectParam,
+                          activeGroupKey,
+                          activeSessionId,
                         );
-                        if (group.path) {
-                          router.replace(`/sessions?project=${encodeURIComponent(value)}`);
-                        } else {
-                          router.replace("/sessions?project=__ungrouped__");
-                        }
-                      }}
-                    >
-                      <div className="sessions-project-card-top">
-                        <span className="sessions-project-card-title">
-                          {group.label}
-                        </span>
-                        <span
-                          className={`sessions-project-card-state sessions-project-card-state-${groupSignal.tone}`}
-                        >
-                          {groupSignal.label}
-                        </span>
-                      </div>
-                      <div className="sessions-project-card-path">
-                        {shortenPath(group.path)}
-                      </div>
-                      <div className="sessions-project-card-meta">
-                        <span>
-                          {group.draftOnly
-                            ? "草稿目录"
-                            : `${group.sessions.length} 个线程`}
-                        </span>
-                        <span>{timeAgo(group.updatedAt)}</span>
-                      </div>
-                    </button>
-                  );
-                })
+                        const containsCurrentSession =
+                          activeSessionId !== null &&
+                          group.sessions.some((session) => session.id === activeSessionId);
+
+                        return (
+                          <button
+                            key={group.key}
+                            type="button"
+                            className={`sessions-project-card ${
+                              isActive ? "sessions-project-card-active" : ""
+                            } ${group.draftOnly ? "sessions-project-card-draft" : ""} ${
+                              containsCurrentSession
+                                ? "sessions-project-card-current-session"
+                                : ""
+                            }`}
+                            onClick={() => {
+                              setActiveGroupKey(group.key);
+                              const value = group.path ?? "__ungrouped__";
+                              setProjectParam(value);
+                              window.dispatchEvent(
+                                new CustomEvent("codexremote-project-selected", {
+                                  detail: value,
+                                }),
+                              );
+                              if (group.path) {
+                                router.replace(`/sessions?project=${encodeURIComponent(value)}`);
+                              } else {
+                                router.replace("/sessions?project=__ungrouped__");
+                              }
+                            }}
+                          >
+                            <div className="sessions-project-card-top">
+                              <span className="sessions-project-card-title">
+                                {group.label}
+                              </span>
+                              <span
+                                className={`sessions-project-card-state sessions-project-card-state-${groupSignal.tone}`}
+                              >
+                                {groupSignal.label}
+                              </span>
+                            </div>
+                            <div className="sessions-project-card-path">
+                              {shortenPath(group.path)}
+                            </div>
+                            <div className="sessions-project-card-meta">
+                              <span>
+                                {group.draftOnly
+                                  ? "草稿目录"
+                                  : containsCurrentSession
+                                    ? "含当前会话"
+                                    : `${group.sessions.length} 个线程`}
+                              </span>
+                              <span>{timeAgo(group.updatedAt)}</span>
+                            </div>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </section>
+                ))
               )}
             </div>
           </aside>
@@ -625,7 +852,9 @@ export default function SessionsPage() {
                     <div className="sessions-workbench-note">
                       {activeGroup.draftOnly
                         ? "这个项目还只是草稿目录。点击创建首个线程后，会进入真正的会话工作区。"
-                        : `${activeGroup.sessions.length} 个会话 · 最近更新 ${timeAgo(activeGroup.updatedAt)}`}
+                        : activeSession
+                          ? `${activeGroup.sessions.length} 个会话 · 当前会话保持高亮 · 最近更新 ${timeAgo(activeGroup.updatedAt)}`
+                          : `${activeGroup.sessions.length} 个会话 · 最近更新 ${timeAgo(activeGroup.updatedAt)}`}
                     </div>
                   </div>
 
@@ -693,113 +922,146 @@ export default function SessionsPage() {
                     这个项目还只是草稿目录。点击上方“创建首个线程”后，会进入真正的会话工作区。
                   </div>
                 ) : (
-                  <div className="session-list session-list-desktop">
-                    {activeGroup.sessions.map((session, index) => {
-                      const sessionSignal = getSessionSignal(session, index);
-
-                      return (
-                        <div
-                          key={session.id}
-                          className={`session-card ${
-                            selectionActive && selectedSessionIds.includes(session.id)
-                              ? "session-card-selected"
-                              : ""
-                          }`}
-                          role="button"
-                          tabIndex={0}
-                          aria-pressed={
-                            selectionActive && selectedSessionIds.includes(session.id)
-                          }
-                          onClick={() => {
-                            if (selectionActive) {
-                              toggleSelected(session.id);
-                              return;
-                            }
-                            router.push(`/sessions/${session.id}`);
-                          }}
-                          onKeyDown={(e) => {
-                            if (e.key === "Enter" || e.key === " ") {
-                              e.preventDefault();
-                              if (selectionActive) {
-                                toggleSelected(session.id);
-                                return;
-                              }
-                              router.push(`/sessions/${session.id}`);
-                            }
-                          }}
-                        >
-                          <div className="session-card-header">
-                            <div className="session-card-header-left">
-                              {selectionActive && (
-                                <button
-                                  type="button"
-                                  className="session-card-select-btn"
-                                  aria-label={
-                                    selectedSessionIds.includes(session.id)
-                                      ? "取消选择"
-                                      : "选择会话"
-                                  }
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    toggleSelected(session.id);
-                                  }}
-                                >
-                                  {selectedSessionIds.includes(session.id)
-                                    ? "☑"
-                                    : "☐"}
-                                </button>
-                              )}
-                              <span className="session-card-title">
-                                {session.title || session.id}
-                              </span>
+                  <div className="session-list-stack">
+                    {sessionSections.map((section) => (
+                      <section
+                        key={section.key}
+                        className="session-list-section"
+                        aria-label={section.label}
+                      >
+                        <div className="session-list-section-header">
+                          <div>
+                            <div className="session-list-section-title">
+                              {section.label}
                             </div>
-                            <div className="session-card-header-actions">
-                              <span
-                                className={`session-card-state session-card-state-${sessionSignal.tone}`}
-                              >
-                                {sessionSignal.label}
-                              </span>
-                              <span className="session-card-time">
-                                {timeAgo(session.updatedAt)}
-                              </span>
-                              {!selectionActive && (
-                                <button
-                                  className="session-card-action-btn"
-                                  type="button"
-                                  title="重命名"
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    startRename(session);
-                                  }}
-                                >
-                                  ✎
-                                </button>
-                              )}
-                              <button
-                                className="session-card-action-btn"
-                                type="button"
-                                title="归档"
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  void handleArchive(session.id);
-                                }}
-                                disabled={archivingId !== null}
-                              >
-                                {archivingId === session.id ? "…" : "⌫"}
-                              </button>
+                            <div className="session-list-section-copy">
+                              {section.description}
                             </div>
                           </div>
-                          <div className="session-card-cwd">
-                            {shortenPath(session.cwd)}
-                          </div>
-                          {session.lastPreview && (
-                            <div className="session-card-preview">
-                              {session.lastPreview}
-                            </div>
-                          )}
+                          <span className="session-list-section-count">
+                            {section.sessions.length}
+                          </span>
                         </div>
-                      );
-                    })}
+                        <div className="session-list session-list-desktop">
+                          {section.sessions.map((session) => {
+                            const sessionIndex = activeGroup.sessions.findIndex(
+                              (candidate) => candidate.id === session.id,
+                            );
+                            const sessionSignal = getSessionSignal(
+                              session,
+                              sessionIndex,
+                              activeSessionId,
+                            );
+                            const isCurrentSession = session.id === activeSessionId;
+
+                            return (
+                              <div
+                                key={session.id}
+                                className={`session-card ${
+                                  selectionActive && selectedSessionIds.includes(session.id)
+                                    ? "session-card-selected"
+                                    : ""
+                                } ${isCurrentSession ? "session-card-current" : ""}`}
+                                role="button"
+                                tabIndex={0}
+                                onMouseEnter={() => warmSession(session.id)}
+                                onFocus={() => warmSession(session.id)}
+                                aria-pressed={
+                                  selectionActive && selectedSessionIds.includes(session.id)
+                                }
+                                onClick={() => {
+                                  if (selectionActive) {
+                                    toggleSelected(session.id);
+                                    return;
+                                  }
+                                  enterSession(session);
+                                }}
+                                onKeyDown={(e) => {
+                                  if (e.key === "Enter" || e.key === " ") {
+                                    e.preventDefault();
+                                    if (selectionActive) {
+                                      toggleSelected(session.id);
+                                      return;
+                                    }
+                                    enterSession(session);
+                                  }
+                                }}
+                              >
+                                <div className="session-card-header">
+                                  <div className="session-card-header-left">
+                                    {selectionActive && (
+                                      <button
+                                        type="button"
+                                        className="session-card-select-btn"
+                                        aria-label={
+                                          selectedSessionIds.includes(session.id)
+                                            ? "取消选择"
+                                            : "选择会话"
+                                        }
+                                        onClick={(e) => {
+                                          e.stopPropagation();
+                                          toggleSelected(session.id);
+                                        }}
+                                      >
+                                        {selectedSessionIds.includes(session.id)
+                                          ? "☑"
+                                          : "☐"}
+                                      </button>
+                                    )}
+                                    <span className="session-card-title">
+                                      {session.title || session.id}
+                                    </span>
+                                  </div>
+                                  <div className="session-card-header-actions">
+                                    <span
+                                      className={`session-card-state status-chip status-chip-${sessionSignal.tone} session-card-state-${sessionSignal.tone}`}
+                                    >
+                                      {sessionSignal.label}
+                                    </span>
+                                    <span className="session-card-time">
+                                      {timeAgo(session.updatedAt)}
+                                    </span>
+                                    {!selectionActive && (
+                                      <button
+                                        className="session-card-action-btn"
+                                        type="button"
+                                        title="重命名"
+                                        onClick={(e) => {
+                                          e.stopPropagation();
+                                          startRename(session);
+                                        }}
+                                      >
+                                        ✎
+                                      </button>
+                                    )}
+                                    <button
+                                      className="session-card-action-btn"
+                                      type="button"
+                                      title="归档"
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        void handleArchive(session.id);
+                                      }}
+                                      disabled={archivingId !== null}
+                                    >
+                                      {archivingId === session.id ? "…" : "⌫"}
+                                    </button>
+                                  </div>
+                                </div>
+                                <div className="session-card-cwd">
+                                  {shortenPath(session.cwd)}
+                                </div>
+                                {session.lastPreview && (
+                                  <div className="session-card-preview">
+                                    {session.lastPreview}
+                                  </div>
+                                )}
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </section>
+                    ))}
                   </div>
                 )}
               </>

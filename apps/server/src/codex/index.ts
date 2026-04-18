@@ -3,6 +3,13 @@ export type {
   CodexSessionSummary,
   CodexSessionDetail,
   StartRunOptions,
+  PermissionMode,
+  CodexApprovalKind,
+  CodexApprovalScope,
+  CodexApprovalStatus,
+  CodexPermissionProfile,
+  CodexApprovalRequest,
+  CodexApprovalDecision,
   RunHandle,
 } from "./types.js";
 export { LocalCodexAdapter } from "./local.js";

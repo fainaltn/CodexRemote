@@ -1,3 +1,5 @@
+@file:OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
+
 package dev.codexremote.android.ui.sessions
 
 import androidx.compose.animation.AnimatedVisibility
@@ -23,6 +25,8 @@ import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -67,6 +71,39 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import dev.codexremote.android.R
+
+data class OutputFileReference(
+    val label: String,
+    val absolutePath: String,
+)
+
+private val markdownLocalFileRegex = Regex("""\[([^\]]+)\]\((/[^)\n]+)\)""")
+private val absolutePathLineRegex = Regex("""(?m)^Absolute path:\s+(.+)$""")
+
+private fun extractOutputFileReferences(output: String?): List<OutputFileReference> {
+    val text = output.orEmpty()
+    if (text.isBlank()) return emptyList()
+
+    val references = mutableListOf<OutputFileReference>()
+    markdownLocalFileRegex.findAll(text).forEach { match ->
+        val label = match.groupValues[1].trim()
+        val absolutePath = match.groupValues[2].trim()
+        if (label.isNotBlank() && absolutePath.startsWith("/")) {
+            references += OutputFileReference(label = label, absolutePath = absolutePath)
+        }
+    }
+    absolutePathLineRegex.findAll(text).forEach { match ->
+        val absolutePath = match.groupValues[1].trim()
+        if (absolutePath.startsWith("/")) {
+            references += OutputFileReference(
+                label = absolutePath.substringAfterLast('/').ifBlank { absolutePath },
+                absolutePath = absolutePath,
+            )
+        }
+    }
+
+    return references.distinctBy { it.absolutePath }
+}
 
 // ── User message bubble ───────────────────────────────────────────
 
@@ -187,6 +224,7 @@ internal fun AssistantReplyBlock(
     sending: Boolean = false,
     onRetry: (() -> Unit)? = null,
     onReusePrompt: (() -> Unit)? = null,
+    onDownloadFile: ((OutputFileReference) -> Unit)? = null,
     modifier: Modifier = Modifier,
 ) {
     val terminalStatus = status?.takeIf { it in terminalRunStatuses && it != "completed" }
@@ -207,6 +245,7 @@ internal fun AssistantReplyBlock(
     val retryLabel = stringResource(R.string.session_timeline_reply_retry)
     val copyReplyLabel = stringResource(R.string.session_timeline_reply_copy_reply)
     val retryRunLabel = stringResource(R.string.session_timeline_reply_retry_run)
+    val fileRefs = remember(output) { extractOutputFileReferences(output) }
     val accentColor = when {
         terminalStatus != null -> MaterialTheme.colorScheme.error
         hasSettled -> MaterialTheme.colorScheme.secondary
@@ -306,6 +345,7 @@ internal fun AssistantReplyBlock(
                         output = output.orEmpty(),
                         active = isActive,
                         sectionLabel = null,
+                        onDownloadFile = onDownloadFile,
                     )
                 }
 
@@ -516,7 +556,9 @@ private fun ReplySectionCard(
     output: String,
     active: Boolean,
     sectionLabel: String?,
+    onDownloadFile: ((OutputFileReference) -> Unit)? = null,
 ) {
+    val fileRefs = remember(output) { extractOutputFileReferences(output) }
     Surface(
         shape = RoundedCornerShape(18.dp),
         color = if (active) {
@@ -550,6 +592,28 @@ private fun ReplySectionCard(
                     active = false,
                     modifier = Modifier.fillMaxWidth(),
                 )
+            }
+            if (fileRefs.isNotEmpty() && onDownloadFile != null) {
+                FlowRow(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    fileRefs.forEach { ref ->
+                        Surface(
+                            shape = RoundedCornerShape(999.dp),
+                            color = MaterialTheme.colorScheme.secondaryContainer,
+                        ) {
+                            TextButton(onClick = { onDownloadFile(ref) }) {
+                                Text(
+                                    text = ref.label,
+                                    style = MaterialTheme.typography.labelMedium,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                )
+                            }
+                        }
+                    }
+                }
             }
         }
     }
@@ -684,6 +748,7 @@ private fun RenderSingleBlock(block: RichTextBlock, cursorAlpha: Float) {
         is RichTextBlock.Paragraph -> ParagraphBlock(block, cursorAlpha)
         is RichTextBlock.CodeBlock -> RichCodeBlock(block = block, cursorAlpha = cursorAlpha)
         is RichTextBlock.ListBlock -> RichListBlock(block, cursorAlpha)
+        is RichTextBlock.MemoryCitation -> MemoryCitationBlock(block)
     }
 }
 

@@ -6,6 +6,7 @@ REPO_ROOT="$(cd -- "$SCRIPT_DIR/.." && pwd)"
 ENV_FILE="${CODEXREMOTE_ENV_FILE:-$REPO_ROOT/.env.local}"
 SERVER_DIST="$REPO_ROOT/apps/server/dist/server.js"
 WEB_BUILD_ID="$REPO_ROOT/apps/web/.next/BUILD_ID"
+WEB_ROUTES_MANIFEST="$REPO_ROOT/apps/web/.next/routes-manifest.json"
 WEB_NEXT_BIN="$REPO_ROOT/node_modules/next/dist/bin/next"
 LOG_DIR="$HOME/Library/Logs/CodexRemote"
 NODE_BIN="${NODE_BIN:-$(command -v node)}"
@@ -56,6 +57,52 @@ ensure_env_loaded() {
   fi
 }
 
+expected_web_api_url() {
+  local host_value="${HOST:-0.0.0.0}"
+  local port_value="${PORT:-31807}"
+
+  if [[ -n "${CODEXREMOTE_API_URL:-}" ]]; then
+    printf '%s\n' "$CODEXREMOTE_API_URL"
+    return 0
+  fi
+
+  case "$host_value" in
+    ""|"0.0.0.0"|"::")
+      printf 'http://127.0.0.1:%s\n' "$port_value"
+      ;;
+    *)
+      printf 'http://%s:%s\n' "$host_value" "$port_value"
+      ;;
+  esac
+}
+
+web_build_matches_runtime() {
+  [[ -f "$WEB_ROUTES_MANIFEST" ]] || return 1
+
+  local expected_url
+  expected_url="$(expected_web_api_url)"
+
+  EXPECTED_WEB_API_URL="$expected_url" "$NODE_BIN" --input-type=module -e '
+    import { readFileSync } from "node:fs";
+
+    const manifestPath = process.argv[1];
+    const expectedUrl = process.env.EXPECTED_WEB_API_URL;
+    const manifest = JSON.parse(readFileSync(manifestPath, "utf8"));
+    const rewrites = [
+      ...(manifest.rewrites?.beforeFiles ?? []),
+      ...(manifest.rewrites?.afterFiles ?? []),
+      ...(manifest.rewrites?.fallback ?? []),
+    ];
+    const apiRewrite = rewrites.find((entry) => entry.source === "/api/:path*");
+
+    if (apiRewrite?.destination === `${expectedUrl}/api/:path*`) {
+      process.exit(0);
+    }
+
+    process.exit(1);
+  ' "$WEB_ROUTES_MANIFEST"
+}
+
 require_darwin() {
   [[ "$(uname -s)" == "Darwin" ]] || fail "This command currently expects macOS launchd."
 }
@@ -71,6 +118,10 @@ ensure_builds() {
 
   if [[ ! -f "$WEB_BUILD_ID" ]]; then
     warn "Missing web build artifact, running web build..."
+    (cd "$REPO_ROOT" && npm run build --workspace @codexremote/web)
+    built_any=1
+  elif ! web_build_matches_runtime; then
+    warn "Web build API target is stale, rebuilding web..."
     (cd "$REPO_ROOT" && npm run build --workspace @codexremote/web)
     built_any=1
   fi

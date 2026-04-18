@@ -1,6 +1,7 @@
 package dev.codexremote.android.ui.sessions
 
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.animateContentSize
 import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
@@ -25,9 +26,11 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.ArrowUpward
 import androidx.compose.material.icons.filled.AttachFile
 import androidx.compose.material.icons.filled.Circle
+import androidx.compose.material.icons.filled.LockOpen
 import androidx.compose.material.icons.filled.Memory
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.PhotoCamera
@@ -44,11 +47,17 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -69,6 +78,7 @@ internal data class QueuedPromptItem(
     val attachmentCount: Int,
     val model: String?,
     val reasoningEffort: String?,
+    val permissionMode: String,
 )
 
 @OptIn(ExperimentalLayoutApi::class)
@@ -83,6 +93,7 @@ internal fun ComposerBar(
     liveStreamStatus: String?,
     selectedModel: String?,
     selectedReasoningEffort: String?,
+    selectedPermissionMode: String,
     attachments: List<ComposerAttachmentItem>,
     queuedPrompts: List<QueuedPromptItem>,
     slashCommands: List<ComposerSuggestion>,
@@ -100,6 +111,7 @@ internal fun ComposerBar(
     onRestoreQueuedPrompt: (QueuedPromptItem) -> Unit,
     onModelClick: () -> Unit,
     onReasoningEffortClick: () -> Unit,
+    onPermissionModeClick: () -> Unit,
     onVoiceClick: () -> Unit,
     onSend: () -> Unit,
     onQueue: () -> Unit,
@@ -153,6 +165,17 @@ internal fun ComposerBar(
         '@' -> stringResource(R.string.composer_suggestions_file_title)
         '$' -> stringResource(R.string.composer_suggestions_skill_title)
         else -> null
+    }
+    var toolsExpanded by remember(promptText.isBlank(), sending, stopping) { mutableStateOf(false) }
+    val plusRotation by animateFloatAsState(
+        targetValue = if (toolsExpanded) 45f else 0f,
+        label = "composerToolsRotation",
+    )
+
+    LaunchedEffect(sending, stopping, uploading) {
+        if (sending || stopping || uploading) {
+            toolsExpanded = false
+        }
     }
 
     Column(
@@ -280,37 +303,90 @@ internal fun ComposerBar(
                             )
                         }
 
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .horizontalScroll(rememberScrollState()),
-                            horizontalArrangement = Arrangement.spacedBy(8.dp),
-                            verticalAlignment = Alignment.CenterVertically,
+                        Column(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalArrangement = Arrangement.spacedBy(8.dp),
                         ) {
-                            CompactIconButton(
-                                icon = Icons.Filled.AttachFile,
-                                contentDescription = stringResource(R.string.composer_upload_attachment),
-                                enabled = !uploading && !sending,
-                                onClick = onUploadClick,
-                            )
-                            CompactIconButton(
-                                icon = Icons.Filled.PhotoLibrary,
-                                contentDescription = stringResource(R.string.composer_gallery_attachment),
-                                enabled = !uploading && !sending,
-                                onClick = onGalleryClick,
-                            )
-                            CompactIconButton(
-                                icon = Icons.Filled.PhotoCamera,
-                                contentDescription = stringResource(R.string.composer_camera_attachment),
-                                enabled = !uploading && !sending,
-                                onClick = onCameraClick,
-                            )
-                            CompactIconButton(
-                                icon = Icons.Filled.Mic,
-                                contentDescription = stringResource(R.string.session_detail_voice_content_description),
-                                enabled = !sending && !stopping,
-                                onClick = onVoiceClick,
-                            )
+                            AnimatedVisibility(
+                                visible = toolsExpanded,
+                                enter = fadeIn() + expandVertically(expandFrom = Alignment.Bottom),
+                                exit = fadeOut() + shrinkVertically(shrinkTowards = Alignment.Bottom),
+                            ) {
+                                Surface(
+                                    shape = RoundedCornerShape(18.dp),
+                                    color = MaterialTheme.colorScheme.surfaceContainerHighest,
+                                    tonalElevation = 2.dp,
+                                    shadowElevation = 1.dp,
+                                ) {
+                                    FlowRow(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .padding(horizontal = 10.dp, vertical = 10.dp),
+                                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                        verticalArrangement = Arrangement.spacedBy(8.dp),
+                                    ) {
+                                        ComposerToolAction(
+                                            icon = Icons.Filled.AttachFile,
+                                            label = stringResource(R.string.composer_upload_attachment),
+                                            enabled = !uploading && !sending,
+                                            onClick = {
+                                                toolsExpanded = false
+                                                onUploadClick()
+                                            },
+                                        )
+                                        ComposerToolAction(
+                                            icon = Icons.Filled.PhotoLibrary,
+                                            label = stringResource(R.string.composer_gallery_attachment),
+                                            enabled = !uploading && !sending,
+                                            onClick = {
+                                                toolsExpanded = false
+                                                onGalleryClick()
+                                            },
+                                        )
+                                        ComposerToolAction(
+                                            icon = Icons.Filled.PhotoCamera,
+                                            label = stringResource(R.string.composer_camera_attachment),
+                                            enabled = !uploading && !sending,
+                                            onClick = {
+                                                toolsExpanded = false
+                                                onCameraClick()
+                                            },
+                                        )
+                                        ComposerToolAction(
+                                            icon = Icons.Filled.Mic,
+                                            label = stringResource(R.string.session_detail_voice_content_description),
+                                            enabled = !sending && !stopping,
+                                            onClick = {
+                                                toolsExpanded = false
+                                                onVoiceClick()
+                                            },
+                                        )
+                                    }
+                                }
+                            }
+
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .horizontalScroll(rememberScrollState()),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                CompactIconButton(
+                                    icon = Icons.Filled.Add,
+                                    contentDescription = stringResource(
+                                        if (toolsExpanded) {
+                                            R.string.composer_tools_hide_menu
+                                        } else {
+                                            R.string.composer_tools_show_menu
+                                        },
+                                    ),
+                                    enabled = !sending && !stopping,
+                                    iconModifier = Modifier.graphicsLayer {
+                                        rotationZ = plusRotation
+                                    },
+                                    onClick = { toolsExpanded = !toolsExpanded },
+                                )
                             CompactIconButton(
                                 icon = Icons.Filled.Memory,
                                 contentDescription = stringResource(
@@ -328,6 +404,15 @@ internal fun ComposerBar(
                                 ),
                                 enabled = !sending && !stopping,
                                 onClick = onReasoningEffortClick,
+                            )
+                            CompactIconButton(
+                                icon = Icons.Filled.LockOpen,
+                                contentDescription = stringResource(
+                                    R.string.composer_permission_desc,
+                                    runtimeControlLabel(RuntimeControlTarget.PermissionMode, selectedPermissionMode),
+                                ),
+                                enabled = !sending && !stopping,
+                                onClick = onPermissionModeClick,
                             )
                             if (isRunning) {
                                 CompactActionButton(
@@ -388,6 +473,7 @@ internal fun ComposerBar(
                                 }
                             }
                         }
+                        }
                     }
                 }
             }
@@ -408,6 +494,7 @@ private fun CompactIconButton(
     icon: ImageVector,
     contentDescription: String,
     enabled: Boolean,
+    iconModifier: Modifier = Modifier,
     onClick: () -> Unit,
 ) {
     Surface(
@@ -422,7 +509,7 @@ private fun CompactIconButton(
             Icon(
                 imageVector = icon,
                 contentDescription = contentDescription,
-                modifier = Modifier.size(16.dp),
+                modifier = iconModifier.size(16.dp),
                 tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = if (enabled) 1f else 0.4f),
             )
         }
@@ -452,6 +539,39 @@ private fun CompactActionButton(
                     content()
                 }
             }
+        }
+    }
+}
+
+@Composable
+private fun ComposerToolAction(
+    icon: ImageVector,
+    label: String,
+    enabled: Boolean,
+    onClick: () -> Unit,
+) {
+    Surface(
+        shape = RoundedCornerShape(16.dp),
+        color = MaterialTheme.colorScheme.surface.copy(alpha = if (enabled) 0.96f else 0.7f),
+    ) {
+        Row(
+            modifier = Modifier
+                .clickable(enabled = enabled, onClick = onClick)
+                .padding(horizontal = 10.dp, vertical = 8.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Icon(
+                imageVector = icon,
+                contentDescription = null,
+                modifier = Modifier.size(16.dp),
+                tint = MaterialTheme.colorScheme.onSurface.copy(alpha = if (enabled) 1f else 0.45f),
+            )
+            Text(
+                text = label,
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurface.copy(alpha = if (enabled) 1f else 0.45f),
+            )
         }
     }
 }

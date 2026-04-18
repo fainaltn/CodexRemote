@@ -12,7 +12,14 @@ import { access, readdir, readFile, stat } from "node:fs/promises";
 import { homedir } from "node:os";
 import { basename, join } from "node:path";
 import { MAX_OUTPUT_BYTES } from "../config.js";
-import type { RunHandle } from "./types.js";
+import { getDb } from "../db.js";
+import type {
+  CodexApprovalDecision,
+  CodexApprovalRequest,
+  CodexPermissionProfile,
+  PermissionMode,
+  RunHandle,
+} from "./types.js";
 
 export { MAX_OUTPUT_BYTES };
 
@@ -27,6 +34,8 @@ const APP_SERVER_START_TIMEOUT_MS = 10_000;
 const APP_SERVER_SHUTDOWN_GRACE_MS = 6_500;
 const APP_SERVER_PROTOCOL_VERSION = "2025-06-18";
 const DESKTOP_BUNDLED_CODEX_BIN = "/Applications/Codex.app/Contents/Resources/codex";
+const SESSION_DISCOVERY_CACHE_TTL_MS = 60_000;
+const SESSION_MESSAGES_CACHE_TTL_MS = 60_000;
 
 // ── Bounded output buffer ────────────────────────────────────────────
 
@@ -146,6 +155,23 @@ export interface RawSessionEntry {
   isSubagent: boolean;
 }
 
+interface SessionDiscoveryCache {
+  entries: RawSessionEntry[];
+  byId: Map<string, RawSessionEntry>;
+  fileMatchesById: Map<string, MatchedSessionFile[]>;
+  expiresAt: number;
+}
+
+let sessionDiscoveryCache: SessionDiscoveryCache | null = null;
+
+interface SessionMessagesCacheEntry {
+  messages: RawSessionMessage[];
+  sourceSignature: string | null;
+  expiresAt: number;
+}
+
+const sessionMessagesCache = new Map<string, SessionMessagesCacheEntry>();
+
 export interface RawSessionMessage {
   id: string;
   role: "user" | "assistant" | "system";
@@ -185,23 +211,37 @@ const ATTACHMENT_WRAPPER_REQUEST_MARKER = "User request:";
  * Codex has never run.
  */
 export async function scanSessionDirs(): Promise<RawSessionEntry[]> {
+  const cached = sessionDiscoveryCache;
+  if (cached && cached.expiresAt > Date.now()) {
+    return cached.entries;
+  }
+
   const base = codexStateDir();
 
   const files = await findSessionFiles(base);
   const byId = new Map<string, RawSessionEntry>();
+  const fileMatchesById = new Map<string, MatchedSessionFile[]>();
   for (const filePath of files) {
     try {
       const parsed = await readSessionFile(filePath);
       if (!parsed.id) continue;
       const s = await stat(filePath);
+      const matchedFile: MatchedSessionFile = {
+        filePath,
+        parsed,
+        lastActivityAt: parsed.lastActivityAt ?? s.mtime.toISOString(),
+      };
       const next: RawSessionEntry = {
         id: parsed.id,
         cwd: parsed.cwd,
         title: parsed.title,
         lastPreview: parsed.lastPreview,
-        lastActivityAt: parsed.lastActivityAt ?? s.mtime.toISOString(),
+        lastActivityAt: matchedFile.lastActivityAt,
         isSubagent: parsed.isSubagent,
       };
+      const currentMatches = fileMatchesById.get(parsed.id) ?? [];
+      currentMatches.push(matchedFile);
+      fileMatchesById.set(parsed.id, currentMatches);
 
       const prev = byId.get(parsed.id);
       byId.set(parsed.id, mergeSessionEntries(prev, next));
@@ -210,12 +250,31 @@ export async function scanSessionDirs(): Promise<RawSessionEntry[]> {
     }
   }
 
-  return [...byId.values()]
+  const entries = [...byId.values()]
     .filter((entry) => !entry.isSubagent)
     .filter((entry) => isVisibleSession(entry.cwd))
     .sort((a, b) =>
       (b.lastActivityAt ?? "").localeCompare(a.lastActivityAt ?? ""),
     );
+  sessionDiscoveryCache = {
+    entries,
+    byId,
+    fileMatchesById: new Map(
+      [...fileMatchesById.entries()].map(([sessionId, matches]) => [
+        sessionId,
+        matches.sort((a, b) =>
+          (a.lastActivityAt ?? "").localeCompare(b.lastActivityAt ?? ""),
+        ),
+      ]),
+    ),
+    expiresAt: Date.now() + SESSION_DISCOVERY_CACHE_TTL_MS,
+  };
+  return entries;
+}
+
+export function invalidateSessionDiscoveryCache(): void {
+  sessionDiscoveryCache = null;
+  sessionMessagesCache.clear();
 }
 
 function mergeSessionEntries(
@@ -309,6 +368,10 @@ async function findSessionFiles(dir: string): Promise<string[]> {
  * session-state tree.
  */
 export async function sessionDirExists(codexSessionId: string): Promise<boolean> {
+  const cached = sessionDiscoveryCache;
+  if (cached?.expiresAt && cached.expiresAt > Date.now() && cached.byId.has(codexSessionId)) {
+    return true;
+  }
   return (await findSessionFilesById(codexSessionId)).length > 0;
 }
 
@@ -321,6 +384,19 @@ export async function readSessionMeta(codexSessionId: string): Promise<{
   cwd: string | null;
   lastActivityAt: string | null;
 }> {
+  const cached = sessionDiscoveryCache;
+  if (cached?.expiresAt && cached.expiresAt > Date.now()) {
+    const entry = cached.byId.get(codexSessionId);
+    if (entry) {
+      return {
+        title: entry.title,
+        lastPreview: entry.lastPreview,
+        cwd: entry.cwd,
+        lastActivityAt: entry.lastActivityAt,
+      };
+    }
+  }
+
   const matches = await findSessionFilesById(codexSessionId);
   if (matches.length === 0) {
     return {
@@ -361,6 +437,11 @@ interface MatchedSessionFile {
 async function findSessionFilesById(
   codexSessionId: string,
 ): Promise<MatchedSessionFile[]> {
+  const cached = sessionDiscoveryCache;
+  if (cached && cached.expiresAt > Date.now()) {
+    return cached.fileMatchesById.get(codexSessionId) ?? [];
+  }
+
   const files = await findSessionFiles(codexStateDir());
   const matches: MatchedSessionFile[] = [];
   for (const filePath of files) {
@@ -385,31 +466,152 @@ async function findSessionFilesById(
 
 export async function readSessionMessages(
   codexSessionId: string,
-  limit = 80,
+  options: {
+    limit?: number;
+    beforeOrderIndex?: number;
+  } = {},
 ): Promise<RawSessionMessage[]> {
+  const startedAt = Date.now();
+  const limit = options.limit ?? 80;
   const matches = await findSessionFilesById(codexSessionId);
-  if (matches.length === 0) return [];
+  if (matches.length === 0) {
+    console.info(
+      `[perf][adapter][session-messages] session=${codexSessionId} source=miss ms=${Date.now() - startedAt} limit=${limit} before=${options.beforeOrderIndex ?? "none"}`,
+    );
+    return [];
+  }
 
   try {
-    const messages: ParsedHistoryMessage[] = [];
-    for (const match of matches) {
-      const raw = await readFile(match.filePath, "utf-8");
-      appendParsedMessages(messages, raw);
+    const sourceSignature = `${matches.length}:${matches.at(-1)?.lastActivityAt ?? ""}`;
+    let source = "memory-cache";
+    let normalizedMessages = getCachedSessionMessages(
+      codexSessionId,
+      sourceSignature,
+    );
+
+    if (!normalizedMessages) {
+      source = "sqlite-cache";
+      normalizedMessages = getPersistentSessionMessagesCache(
+        codexSessionId,
+        sourceSignature,
+      );
+      if (normalizedMessages) {
+        sessionMessagesCache.set(codexSessionId, {
+          messages: normalizedMessages,
+          sourceSignature,
+          expiresAt: Date.now() + SESSION_MESSAGES_CACHE_TTL_MS,
+        });
+      }
     }
 
-    return collapseSessionMessages(messages)
-      .filter((message, index, all) => !isBootstrapMessage(message, index, all))
-      .filter((message) => !isInternalBootstrapPrompt(message))
-      .filter((message) => !isInternalContextMessage(message))
-      .map((message, index) => ({
-        ...message,
-        orderIndex: message.orderIndex ?? index,
-        isStreaming: message.isStreaming ?? false,
-      }))
-      .slice(-limit);
+    if (!normalizedMessages) {
+      source = "rebuild";
+      const messages: ParsedHistoryMessage[] = [];
+      for (const match of matches) {
+        const raw = await readFile(match.filePath, "utf-8");
+        appendParsedMessages(messages, raw);
+      }
+
+      normalizedMessages = collapseSessionMessages(messages)
+        .filter((message, index, all) => !isBootstrapMessage(message, index, all))
+        .filter((message) => !isInternalBootstrapPrompt(message))
+        .filter((message) => !isInternalContextMessage(message))
+        .map((message, index) => ({
+          ...message,
+          orderIndex: message.orderIndex ?? index,
+          isStreaming: message.isStreaming ?? false,
+        }));
+
+      sessionMessagesCache.set(codexSessionId, {
+        messages: normalizedMessages,
+        sourceSignature,
+        expiresAt: Date.now() + SESSION_MESSAGES_CACHE_TTL_MS,
+      });
+      persistSessionMessagesCache(
+        codexSessionId,
+        sourceSignature,
+        normalizedMessages,
+      );
+    }
+
+    const filteredMessages =
+      options.beforeOrderIndex !== undefined
+        ? normalizedMessages.filter(
+            (message) => (message.orderIndex ?? 0) < options.beforeOrderIndex!,
+          )
+        : normalizedMessages;
+    const result = filteredMessages.slice(-limit);
+    console.info(
+      `[perf][adapter][session-messages] session=${codexSessionId} source=${source} ms=${Date.now() - startedAt} total=${normalizedMessages.length} result=${result.length} limit=${limit} before=${options.beforeOrderIndex ?? "none"}`,
+    );
+    return result;
   } catch {
     return [];
   }
+}
+
+function getCachedSessionMessages(
+  sessionId: string,
+  sourceSignature: string | null,
+): RawSessionMessage[] | null {
+  const cached = sessionMessagesCache.get(sessionId);
+  if (!cached) return null;
+  if (cached.expiresAt <= Date.now()) {
+    sessionMessagesCache.delete(sessionId);
+    return null;
+  }
+  if (cached.sourceSignature !== sourceSignature) {
+    sessionMessagesCache.delete(sessionId);
+    return null;
+  }
+  return cached.messages;
+}
+
+function getPersistentSessionMessagesCache(
+  sessionId: string,
+  sourceSignature: string | null,
+): RawSessionMessage[] | null {
+  if (!sourceSignature) return null;
+  const cutoff = new Date(Date.now() - SESSION_MESSAGES_CACHE_TTL_MS).toISOString();
+  const row = getDb()
+    .prepare(
+      `SELECT messages_json as messagesJson
+         FROM session_message_cache
+        WHERE session_id = ?
+          AND source_signature = ?
+          AND updated_at >= ?`,
+    )
+    .get(sessionId, sourceSignature, cutoff) as { messagesJson: string } | undefined;
+
+  if (!row) return null;
+
+  try {
+    return JSON.parse(row.messagesJson) as RawSessionMessage[];
+  } catch {
+    return null;
+  }
+}
+
+function persistSessionMessagesCache(
+  sessionId: string,
+  sourceSignature: string | null,
+  messages: RawSessionMessage[],
+): void {
+  if (!sourceSignature) return;
+  getDb()
+    .prepare(
+      `INSERT INTO session_message_cache (
+          session_id,
+          source_signature,
+          messages_json,
+          updated_at
+        ) VALUES (?, ?, ?, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+        ON CONFLICT(session_id) DO UPDATE SET
+          source_signature = excluded.source_signature,
+          messages_json = excluded.messages_json,
+          updated_at = excluded.updated_at`,
+    )
+    .run(sessionId, sourceSignature, JSON.stringify(messages));
 }
 
 function appendParsedMessages(
@@ -928,15 +1130,239 @@ export interface SpawnedNewRun extends SpawnedRun {
   sessionId: string;
 }
 
-function codexExecArgs(args: string[]): string[] {
-  return [
-    "-a",
-    "never",
-    "-s",
-    "danger-full-access",
-    "exec",
-    ...args,
-  ];
+function effectivePermissionMode(permissionMode?: PermissionMode): PermissionMode {
+  return permissionMode ?? "on-request";
+}
+
+function codexExecArgs(args: string[], permissionMode?: PermissionMode): string[] {
+  if (effectivePermissionMode(permissionMode) === "on-request") {
+    return ["-a", "on-request", "-s", "workspace-write", "exec", ...args];
+  }
+
+  return ["-a", "never", "-s", "danger-full-access", "exec", ...args];
+}
+
+function appServerThreadRuntimePolicyParams(
+  permissionMode?: PermissionMode,
+): Record<string, unknown> {
+  if (effectivePermissionMode(permissionMode) === "on-request") {
+    return {
+      approvalPolicy: "on-request",
+      approvalsReviewer: "user",
+      sandbox: "workspace-write",
+    };
+  }
+
+  return {
+    approvalPolicy: "never",
+    approvalsReviewer: "user",
+    sandbox: "danger-full-access",
+  };
+}
+
+function appServerTurnRuntimePolicyParams(
+  permissionMode?: PermissionMode,
+): Record<string, unknown> {
+  if (effectivePermissionMode(permissionMode) === "on-request") {
+    return {
+      approvalPolicy: "on-request",
+      approvalsReviewer: "user",
+      sandboxPolicy: {
+        type: "workspaceWrite",
+        networkAccess: true,
+      },
+    };
+  }
+
+  return {
+    approvalPolicy: "never",
+    approvalsReviewer: "user",
+    sandboxPolicy: {
+      type: "dangerFullAccess",
+    },
+  };
+}
+
+function approvalRequestId(
+  rpcMethod: CodexApprovalRequest["rpcMethod"],
+  rpcRequestId: string,
+  approvalId?: string | null,
+  itemId?: string | null,
+): string {
+  const suffix = approvalId?.trim() || itemId?.trim() || "request";
+  return `${rpcMethod}:${rpcRequestId}:${suffix}`;
+}
+
+function toRpcRequestId(value: unknown): string | null {
+  if (typeof value === "string" || typeof value === "number") {
+    return String(value);
+  }
+  return null;
+}
+
+function toPermissionProfile(value: unknown): CodexPermissionProfile | null {
+  if (!value || typeof value !== "object") return null;
+  const record = value as Record<string, unknown>;
+  const fileSystem =
+    record["fileSystem"] && typeof record["fileSystem"] === "object"
+      ? (record["fileSystem"] as Record<string, unknown>)
+      : null;
+  const network =
+    record["network"] && typeof record["network"] === "object"
+      ? (record["network"] as Record<string, unknown>)
+      : null;
+
+  return {
+    fileSystem: fileSystem
+      ? {
+          read: Array.isArray(fileSystem["read"])
+            ? fileSystem["read"].filter((entry): entry is string => typeof entry === "string")
+            : null,
+          write: Array.isArray(fileSystem["write"])
+            ? fileSystem["write"].filter((entry): entry is string => typeof entry === "string")
+            : null,
+        }
+      : null,
+    network: network
+      ? {
+          enabled:
+            typeof network["enabled"] === "boolean" ? network["enabled"] : null,
+        }
+      : null,
+  };
+}
+
+function parseApprovalRequest(message: Record<string, unknown>): CodexApprovalRequest | null {
+  const rpcRequestIdValue =
+    typeof message["id"] === "string" || typeof message["id"] === "number"
+      ? message["id"]
+      : null;
+  const rpcRequestId = toRpcRequestId(rpcRequestIdValue);
+  const rpcMethod = message["method"];
+  const params =
+    message["params"] && typeof message["params"] === "object"
+      ? (message["params"] as Record<string, unknown>)
+      : null;
+  if (rpcRequestIdValue === null || !rpcRequestId || !params || typeof rpcMethod !== "string") {
+    return null;
+  }
+
+  const threadId = typeof params["threadId"] === "string" ? params["threadId"] : null;
+  const turnId = typeof params["turnId"] === "string" ? params["turnId"] : null;
+  const itemId = typeof params["itemId"] === "string" ? params["itemId"] : null;
+  if (!threadId || !turnId || !itemId) return null;
+
+  const reason = typeof params["reason"] === "string" ? params["reason"] : null;
+  const createdAt = new Date().toISOString();
+
+  if (rpcMethod === "item/commandExecution/requestApproval") {
+    const approvalId = typeof params["approvalId"] === "string" ? params["approvalId"] : null;
+    const command = typeof params["command"] === "string" ? params["command"] : null;
+    const cwd = typeof params["cwd"] === "string" ? params["cwd"] : null;
+    const networkApprovalContext =
+      params["networkApprovalContext"] &&
+      typeof params["networkApprovalContext"] === "object"
+        ? (params["networkApprovalContext"] as Record<string, unknown>)
+        : null;
+    const networkHost =
+      typeof networkApprovalContext?.["host"] === "string"
+        ? networkApprovalContext["host"]
+        : null;
+    const networkProtocol =
+      typeof networkApprovalContext?.["protocol"] === "string"
+        ? networkApprovalContext["protocol"]
+        : null;
+
+    return {
+      id: approvalRequestId(rpcMethod, rpcRequestId, approvalId, itemId),
+      threadId,
+      turnId,
+      itemId,
+      kind: "command",
+      scope: "turn",
+      status: "pending",
+      createdAt,
+      reason,
+      title: "Command execution approval",
+      detail: command,
+      rpcRequestIdValue,
+      rpcRequestId,
+      rpcMethod,
+      approvalId,
+      command,
+      cwd,
+      networkHost,
+      networkProtocol,
+    };
+  }
+
+  if (rpcMethod === "item/fileChange/requestApproval") {
+    const grantRoot =
+      typeof params["grantRoot"] === "string" ? params["grantRoot"] : null;
+    return {
+      id: approvalRequestId(rpcMethod, rpcRequestId, null, itemId),
+      threadId,
+      turnId,
+      itemId,
+      kind: "fileChange",
+      scope: "turn",
+      status: "pending",
+      createdAt,
+      reason,
+      title: "File change approval",
+      detail: grantRoot,
+      rpcRequestIdValue,
+      rpcRequestId,
+      rpcMethod,
+      grantRoot,
+    };
+  }
+
+  if (rpcMethod === "item/permissions/requestApproval") {
+    const permissions = toPermissionProfile(params["permissions"]);
+    return {
+      id: approvalRequestId(rpcMethod, rpcRequestId, null, itemId),
+      threadId,
+      turnId,
+      itemId,
+      kind: "permissions",
+      scope: "turn",
+      status: "pending",
+      createdAt,
+      reason,
+      title: "Additional permissions approval",
+      detail: reason,
+      rpcRequestIdValue,
+      rpcRequestId,
+      rpcMethod,
+      permissions,
+    };
+  }
+
+  return null;
+}
+
+function approvalDecisionResult(
+  approval: CodexApprovalRequest,
+  decision: CodexApprovalDecision,
+): Record<string, unknown> {
+  if (approval.kind === "permissions") {
+    if (decision.kind !== "permissions") {
+      throw new Error(`Approval '${approval.id}' expects a permissions decision`);
+    }
+    return {
+      permissions: decision.permissions,
+      scope: decision.scope,
+    };
+  }
+
+  if (approval.kind !== decision.kind) {
+    throw new Error(`Approval '${approval.id}' expects a ${approval.kind} decision`);
+  }
+
+  return {
+    decision: decision.decision,
+  };
 }
 
 /**
@@ -955,13 +1381,13 @@ function codexExecArgs(args: string[]): string[] {
 export function spawnCodexRun(
   codexSessionId: string,
   prompt: string,
-  opts?: { model?: string; reasoningEffort?: string },
+  opts?: { model?: string; reasoningEffort?: string; permissionMode?: PermissionMode },
 ): SpawnedRun {
   const args = codexExecArgs([
     "resume",
     codexSessionId,
     "--skip-git-repo-check",
-  ]);
+  ], opts?.permissionMode);
 
   if (opts?.model) {
     args.push("--model", opts.model);
@@ -1006,9 +1432,9 @@ export function spawnCodexRun(
 export async function spawnCodexNewRun(
   cwd: string,
   prompt: string,
-  opts?: { model?: string; reasoningEffort?: string },
+  opts?: { model?: string; reasoningEffort?: string; permissionMode?: PermissionMode },
 ): Promise<SpawnedNewRun> {
-  const args = codexExecArgs(["--json", "--skip-git-repo-check"]);
+  const args = codexExecArgs(["--json", "--skip-git-repo-check"], opts?.permissionMode);
 
   if (opts?.model) {
     args.push("--model", opts.model);
@@ -1176,7 +1602,7 @@ export async function detectCodexAppServerThreadStart(): Promise<CodexThreadStar
 
 export async function spawnCodexAppServerNewThread(
   cwd: string,
-  opts?: { model?: string; prompt?: string },
+  opts?: { model?: string; prompt?: string; permissionMode?: PermissionMode },
 ): Promise<SpawnedNewRun> {
   const appServerBin = await codexAppServerBin();
   const child = spawn(
@@ -1230,9 +1656,7 @@ export async function spawnCodexAppServerNewThread(
             model: opts?.model ?? null,
             ephemeral: false,
             serviceName: "chatgpt",
-            approvalPolicy: "never",
-            approvalsReviewer: "user",
-            sandbox: "danger-full-access",
+            ...appServerThreadRuntimePolicyParams(opts?.permissionMode),
           },
         })}\n`,
       );
@@ -1256,11 +1680,7 @@ export async function spawnCodexAppServerNewThread(
             threadId,
             cwd,
             model: opts?.model ?? null,
-            approvalPolicy: "never",
-            approvalsReviewer: "user",
-            sandboxPolicy: {
-              type: "dangerFullAccess",
-            },
+            ...appServerTurnRuntimePolicyParams(opts?.permissionMode),
             input: [
               {
                 type: "text",
@@ -1442,7 +1862,12 @@ export async function spawnCodexAppServerNewThread(
 export async function spawnCodexAppServerResumeRun(
   threadId: string,
   prompt: string,
-  opts?: { cwd?: string | null; model?: string; reasoningEffort?: string },
+  opts?: {
+    cwd?: string | null;
+    model?: string;
+    reasoningEffort?: string;
+    permissionMode?: PermissionMode;
+  },
 ): Promise<RunHandle> {
   const appServerBin = await codexAppServerBin();
   const child = spawn(
@@ -1467,6 +1892,8 @@ export async function spawnCodexAppServerResumeRun(
   let onExitDelivered = false;
   let shutdownTimer: NodeJS.Timeout | null = null;
   const exitCallbacks = new Set<(code: number | null) => void>();
+  const approvalCallbacks = new Set<(approval: CodexApprovalRequest) => void>();
+  const pendingApprovals = new Map<string, CodexApprovalRequest>();
 
   const emitExit = (code: number | null) => {
     if (onExitDelivered) return;
@@ -1519,11 +1946,7 @@ export async function spawnCodexAppServerResumeRun(
             cwd: opts?.cwd ?? null,
             model: opts?.model ?? null,
             effort: opts?.reasoningEffort ?? null,
-            approvalPolicy: "never",
-            approvalsReviewer: "user",
-            sandboxPolicy: {
-              type: "dangerFullAccess",
-            },
+            ...appServerTurnRuntimePolicyParams(opts?.permissionMode),
             input: [
               {
                 type: "text",
@@ -1546,9 +1969,7 @@ export async function spawnCodexAppServerResumeRun(
             threadId,
             cwd: opts?.cwd ?? null,
             model: opts?.model ?? null,
-            approvalPolicy: "never",
-            approvalsReviewer: "user",
-            sandbox: "danger-full-access",
+            ...appServerThreadRuntimePolicyParams(opts?.permissionMode),
           },
         })}\n`,
       );
@@ -1605,6 +2026,15 @@ export async function spawnCodexAppServerResumeRun(
             return;
           }
           resolveStart();
+          return;
+        }
+
+        const approval = parseApprovalRequest(message);
+        if (approval) {
+          pendingApprovals.set(approval.id, approval);
+          for (const cb of approvalCallbacks) {
+            cb({ ...approval });
+          }
           return;
         }
 
@@ -1754,6 +2184,32 @@ export async function spawnCodexAppServerResumeRun(
     },
     onExit: (cb) => {
       exitCallbacks.add(cb);
+    },
+    onApprovalRequest: (cb) => {
+      approvalCallbacks.add(cb);
+      for (const approval of pendingApprovals.values()) {
+        cb({ ...approval });
+      }
+      return () => {
+        approvalCallbacks.delete(cb);
+      };
+    },
+    respondToApproval: async (approvalId, decision) => {
+      const approval = pendingApprovals.get(approvalId);
+      if (!approval) {
+        throw new Error(`Unknown approval '${approvalId}'`);
+      }
+      if (child.exitCode !== null || child.signalCode !== null || onExitDelivered) {
+        throw new Error("Cannot resolve approval after the app-server has exited");
+      }
+      child.stdin?.write(
+        `${JSON.stringify({
+          jsonrpc: "2.0",
+          id: approval.rpcRequestIdValue,
+          result: approvalDecisionResult(approval, decision),
+        })}\n`,
+      );
+      pendingApprovals.delete(approvalId);
     },
   };
 }

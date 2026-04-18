@@ -43,7 +43,13 @@ export interface CodexAdapter {
    * Phase 1 strategy: parse the local Codex JSONL rollout and extract
    * user/assistant/system messages that are suitable for display.
    */
-  getSessionMessages(codexSessionId: string): Promise<CodexSessionMessage[]>;
+  getSessionMessages(
+    codexSessionId: string,
+    options?: {
+      limit?: number;
+      beforeOrderIndex?: number;
+    },
+  ): Promise<CodexSessionMessage[]>;
 
   /**
    * Start (or resume) a Codex run inside the given session.

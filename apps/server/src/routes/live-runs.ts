@@ -4,15 +4,40 @@ import {
   StartLiveRunRequest,
   type StartLiveRunResponse,
   type GetLiveRunResponse,
+  SessionHydrationResponse,
   type StopLiveRunResponse,
+  ListPendingApprovalsResponse,
+  LiveApprovalDecisionParams,
+  PendingApprovalDecisionRequest,
+  PendingApprovalDecisionResponse,
   type Run,
 } from "@codexremote/shared";
 import { LOCAL_HOST_ID } from "../constants.js";
+import type { CodexAdapter } from "../codex/index.js";
 import type { RunManager } from "../runs/manager.js";
 import { SSE_IDLE_TIMEOUT_MS, SSE_WRITE_BUFFER_MAX } from "../config.js";
+import { getRepoStatusForCwd } from "./sessions.js";
+import { hasCachedSessionMetadata } from "../codex/local.js";
 
 const SSE_HEARTBEAT_MS = 15_000;
 const TERMINAL_STATUSES = new Set(["completed", "failed", "stopped"]);
+
+function normalizePermissionMode(
+  value: string | null | undefined,
+): "on-request" | "full-access" | undefined {
+  switch (value?.trim()) {
+    case "on-request":
+    case "onRequest":
+    case "default":
+      return "on-request";
+    case "full-access":
+    case "fullAccess":
+    case "full":
+      return "full-access";
+    default:
+      return undefined;
+  }
+}
 
 /**
  * Validate the shared :hostId/:sessionId params.
@@ -45,6 +70,7 @@ async function requireSession(
   sessionId: string,
   reply: FastifyReply,
 ): Promise<boolean> {
+  if (hasCachedSessionMetadata(sessionId)) return true;
   if (await runManager.sessionExists(sessionId)) return true;
   reply.status(404).send({ error: `Session '${sessionId}' not found` });
   return false;
@@ -57,12 +83,17 @@ async function requireSession(
  * active Codex run.  Uses the RunManager for lifecycle tracking
  * so the adapter boundary stays clean.
  */
-export function liveRunRoutes(runManager: RunManager, overrides?: { sseIdleTimeoutMs?: number; sseWriteBufferMax?: number }) {
+export function liveRunRoutes(
+  adapter: CodexAdapter,
+  runManager: RunManager,
+  overrides?: { sseIdleTimeoutMs?: number; sseWriteBufferMax?: number },
+) {
   return async function register(app: FastifyInstance): Promise<void> {
     // ── GET  .../live ──────────────────────────────────────────────
     app.get(
       "/api/hosts/:hostId/sessions/:sessionId/live",
       async (request: FastifyRequest, reply: FastifyReply) => {
+        const startedAt = Date.now();
         const params = parseParams(request, reply);
         if (!params) return;
         if (!(await requireSession(runManager, params.sessionId, reply)))
@@ -70,7 +101,47 @@ export function liveRunRoutes(runManager: RunManager, overrides?: { sseIdleTimeo
 
         const run = runManager.getRun(params.sessionId);
         const body: GetLiveRunResponse = run ?? null;
+        console.info(
+          `[perf][route][live-run] session=${params.sessionId} ms=${Date.now() - startedAt} hasRun=${run ? "yes" : "no"}`,
+        );
         return reply.send(body);
+      },
+    );
+
+    app.get(
+      "/api/hosts/:hostId/sessions/:sessionId/live/hydration",
+      async (request: FastifyRequest, reply: FastifyReply) => {
+        const startedAt = Date.now();
+        const params = parseParams(request, reply);
+        if (!params) return;
+        if (!(await requireSession(runManager, params.sessionId, reply))) {
+          return;
+        }
+
+        const run = runManager.getRun(params.sessionId);
+        const approvals = runManager.getPendingApprovals(params.sessionId);
+
+        let repoStatus = null;
+        try {
+          const detail = await adapter.getSessionDetail(params.sessionId);
+          if (detail?.cwd) {
+            repoStatus = await getRepoStatusForCwd(detail.cwd);
+          }
+        } catch {
+          repoStatus = null;
+        }
+
+        console.info(
+          `[perf][route][live-hydration] session=${params.sessionId} ms=${Date.now() - startedAt} hasRun=${run ? "yes" : "no"} approvals=${approvals.length} hasRepo=${repoStatus ? "yes" : "no"}`,
+        );
+
+        return reply.send(
+          SessionHydrationResponse.parse({
+            run,
+            approvals,
+            repoStatus,
+          }),
+        );
       },
     );
 
@@ -93,6 +164,7 @@ export function liveRunRoutes(runManager: RunManager, overrides?: { sseIdleTimeo
             prompt: bodyParsed.data.prompt,
             model: bodyParsed.data.model,
             reasoningEffort: bodyParsed.data.reasoningEffort,
+            permissionMode: normalizePermissionMode(bodyParsed.data.permissionMode),
           });
 
           const body: StartLiveRunResponse = { runId: run.id };
@@ -128,6 +200,59 @@ export function liveRunRoutes(runManager: RunManager, overrides?: { sseIdleTimeo
       },
     );
 
+    app.get(
+      "/api/hosts/:hostId/sessions/:sessionId/live/approvals",
+      async (request: FastifyRequest, reply: FastifyReply) => {
+        const params = parseParams(request, reply);
+        if (!params) return;
+        if (!(await requireSession(runManager, params.sessionId, reply))) {
+          return;
+        }
+
+        return reply.send(
+          ListPendingApprovalsResponse.parse({
+            approvals: runManager.getPendingApprovals(params.sessionId),
+          }),
+        );
+      },
+    );
+
+    app.post(
+      "/api/hosts/:hostId/sessions/:sessionId/live/approvals/:approvalId/decision",
+      async (request: FastifyRequest, reply: FastifyReply) => {
+        const params = LiveApprovalDecisionParams.safeParse(request.params);
+        if (!params.success) {
+          return reply.status(400).send({ error: "Invalid route params" });
+        }
+        if (params.data.hostId !== LOCAL_HOST_ID) {
+          return reply
+            .status(404)
+            .send({ error: `Host '${params.data.hostId}' not found` });
+        }
+        if (!(await requireSession(runManager, params.data.sessionId, reply))) {
+          return;
+        }
+
+        const bodyParsed = PendingApprovalDecisionRequest.safeParse(request.body);
+        if (!bodyParsed.success) {
+          return reply.status(400).send({ error: "Invalid request body" });
+        }
+
+        try {
+          await runManager.decideApproval(
+            params.data.sessionId,
+            params.data.approvalId,
+            bodyParsed.data,
+          );
+          return reply.send(PendingApprovalDecisionResponse.parse({ ok: true }));
+        } catch (error) {
+          const message =
+            error instanceof Error ? error.message : "Failed to resolve approval";
+          return reply.status(404).send({ error: message });
+        }
+      },
+    );
+
     // ── GET  .../live/stream (SSE) ─────────────────────────────────
     app.get(
       "/api/hosts/:hostId/sessions/:sessionId/live/stream",
@@ -159,6 +284,7 @@ export function liveRunRoutes(runManager: RunManager, overrides?: { sseIdleTimeo
         let heartbeat: NodeJS.Timeout | null = null;
         let idleTimer: NodeJS.Timeout | null = null;
         let unsubscribe: (() => void) | null = null;
+        let unsubscribeApprovals: (() => void) | null = null;
 
         const idleTimeoutMs = overrides?.sseIdleTimeoutMs ?? SSE_IDLE_TIMEOUT_MS;
         const writeBufferMax = overrides?.sseWriteBufferMax ?? SSE_WRITE_BUFFER_MAX;
@@ -177,6 +303,10 @@ export function liveRunRoutes(runManager: RunManager, overrides?: { sseIdleTimeo
           if (unsubscribe) {
             unsubscribe();
             unsubscribe = null;
+          }
+          if (unsubscribeApprovals) {
+            unsubscribeApprovals();
+            unsubscribeApprovals = null;
           }
           if (!raw.destroyed) {
             // force: used by the backpressure guard — raw.end() would try
@@ -267,6 +397,14 @@ export function liveRunRoutes(runManager: RunManager, overrides?: { sseIdleTimeo
             send("stream-end", { reason: run.status });
           }
         });
+
+        unsubscribeApprovals = runManager.subscribeApprovals(
+          params.sessionId,
+          (approval, seq) => {
+            if (!send("approval", approval, seq)) return;
+            touchIdle();
+          },
+        );
 
         // Heartbeat keeps the connection alive through proxies.
         heartbeat = setInterval(() => {

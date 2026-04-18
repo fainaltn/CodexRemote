@@ -1,6 +1,7 @@
 package dev.codexremote.android.ui.sessions
 
 import android.app.Application
+import android.os.SystemClock
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
@@ -133,6 +134,7 @@ private data class SessionRecency(
 
 private enum class SessionEmphasis {
     Primary,
+    Accent,
     Secondary,
     Neutral,
 }
@@ -148,12 +150,12 @@ private fun sessionRecency(session: Session, resources: Resources): SessionRecen
     return when {
         age.toMinutes() < 5 -> SessionRecency(
             label = resources.getString(R.string.session_list_recency_just_active),
-            emphasis = SessionEmphasis.Primary,
+            emphasis = SessionEmphasis.Accent,
             isRecent = true,
         )
         age.toMinutes() < 60 -> SessionRecency(
             label = resources.getString(R.string.session_list_recency_recent_hour),
-            emphasis = SessionEmphasis.Primary,
+            emphasis = SessionEmphasis.Accent,
             isRecent = true,
         )
         age.toHours() < 24 -> SessionRecency(
@@ -279,6 +281,7 @@ private fun <T> MutableList<T>.move(fromIndex: Int, toIndex: Int) {
 
 class SessionListViewModel(application: Application) : AndroidViewModel(application) {
     private val repo = ServerRepository(application)
+    private val prewarmSessionIds = mutableSetOf<String>()
 
     private val _sessions = MutableStateFlow<List<Session>>(emptyList())
     val sessions = _sessions.asStateFlow()
@@ -345,6 +348,40 @@ class SessionListViewModel(application: Application) : AndroidViewModel(applicat
         }
     }
 
+    fun prewarmSessionBootstrap(serverId: String, session: Session) {
+        if (!prewarmSessionIds.add(session.id)) {
+            SessionDetailBootstrapStore.seed(session)
+            return
+        }
+        SessionDetailBootstrapStore.seed(session)
+        viewModelScope.launch {
+            val startedAt = SystemClock.elapsedRealtime()
+            runCatching {
+                withServerClient(serverId) { client, token ->
+                    client.getSessionMessages(
+                        token = token,
+                        hostId = "local",
+                        sessionId = session.id,
+                        limit = FOREGROUND_MESSAGE_TAIL_LIMIT,
+                    )
+                }
+            }.onSuccess { payload ->
+                val bootstrapLoadMs = SystemClock.elapsedRealtime() - startedAt
+                SessionDetailBootstrapStore.store(
+                    SessionDetailBootstrapSnapshot(
+                        session = session,
+                        messages = payload.messages,
+                        hasMoreHistory = payload.hasMore,
+                        nextBeforeOrderIndex = payload.nextBeforeOrderIndex,
+                        bootstrapLoadMs = bootstrapLoadMs,
+                    ),
+                )
+            }.also {
+                prewarmSessionIds.remove(session.id)
+            }
+        }
+    }
+
     fun toggleFolderCollapsed(serverId: String, folderKey: String) {
         viewModelScope.launch {
             val nextValue = _collapsedFolderKeys.value.toggle(folderKey)
@@ -406,6 +443,11 @@ class SessionListViewModel(application: Application) : AndroidViewModel(applicat
                 client.listSessions(token, hostId = "local")
             }
             _sessions.value = response.sessions
+            response.sessions
+                .take(3)
+                .forEach { session ->
+                    prewarmSessionBootstrap(serverId, session)
+                }
         } catch (e: UnauthorizedException) {
             repo.updateToken(serverId, null)
             _authExpired.value = true
@@ -494,6 +536,7 @@ fun SessionListScreen(
     onNewThread: (cwd: String?) -> Unit,
     onAuthExpired: () -> Unit,
     selectedProjectCwd: String?,
+    selectedSessionId: String?,
     onProjectHandled: () -> Unit,
     onBack: () -> Unit,
     viewModel: SessionListViewModel = viewModel(),
@@ -922,12 +965,14 @@ fun SessionListScreen(
                                             folder.sessions.forEach { session ->
                                                 SessionCard(
                                                     session = session,
+                                                    isCurrentSession = session.id == selectedSessionId,
                                                     selected = selectedSessionIds.contains(session.id),
                                                     selectionMode = selectionMode,
                                                     onTap = {
                                                         if (selectionMode) {
                                                             selectedSessionIds = selectedSessionIds.toggle(session.id)
                                                         } else {
+                                                            viewModel.prewarmSessionBootstrap(serverId, session)
                                                             onSelectSession(session.hostId, session.id)
                                                         }
                                                     },
@@ -1130,7 +1175,7 @@ private fun SessionNavigationSummary(
                 )
                 StatusChip(
                     text = recentCountText,
-                    emphasis = if (recentSessionCount > 0) SessionEmphasis.Primary else SessionEmphasis.Neutral,
+                    emphasis = if (recentSessionCount > 0) SessionEmphasis.Accent else SessionEmphasis.Neutral,
                 )
                 if (currentProjectFolder != null) {
                     StatusChip(
@@ -1150,6 +1195,7 @@ private fun StatusChip(
 ) {
     val colors = when (emphasis) {
         SessionEmphasis.Primary -> MaterialTheme.colorScheme.primaryContainer to MaterialTheme.colorScheme.onPrimaryContainer
+        SessionEmphasis.Accent -> MaterialTheme.colorScheme.secondaryContainer to MaterialTheme.colorScheme.onSecondaryContainer
         SessionEmphasis.Secondary -> MaterialTheme.colorScheme.secondaryContainer to MaterialTheme.colorScheme.onSecondaryContainer
         SessionEmphasis.Neutral -> MaterialTheme.colorScheme.surfaceContainerLow to MaterialTheme.colorScheme.onSurfaceVariant
     }
@@ -1393,6 +1439,7 @@ private fun FolderRow(
 @Composable
 private fun SessionCard(
     session: Session,
+    isCurrentSession: Boolean,
     selected: Boolean,
     selectionMode: Boolean,
     onTap: () -> Unit,
@@ -1441,10 +1488,20 @@ private fun SessionCard(
                             text = stringResource(R.string.session_list_session_selected_chip),
                             emphasis = SessionEmphasis.Primary,
                         )
+                    } else if (isCurrentSession) {
+                        StatusChip(
+                            text = stringResource(R.string.session_list_session_current_chip),
+                            emphasis = SessionEmphasis.Primary,
+                        )
                     } else if (recency.emphasis == SessionEmphasis.Primary) {
                         StatusChip(
                             text = recency.label,
-                            emphasis = SessionEmphasis.Primary,
+                            emphasis = recency.emphasis,
+                        )
+                    } else if (recency.emphasis == SessionEmphasis.Accent) {
+                        StatusChip(
+                            text = recency.label,
+                            emphasis = SessionEmphasis.Accent,
                         )
                     }
                 }

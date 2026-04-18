@@ -16,6 +16,7 @@ NODE_BIN="${NODE_BIN:-$(command -v node)}"
 HOST_VALUE="${HOST:-0.0.0.0}"
 PORT_VALUE="${PORT:-31807}"
 PATH_VALUE="${PATH}"
+WEB_API_URL_VALUE="${CODEXREMOTE_API_URL:-}"
 
 if [[ -f "$ENV_FILE" ]]; then
   set -a
@@ -26,6 +27,17 @@ fi
 : "${CODEXREMOTE_PASSWORD:?Set CODEXREMOTE_PASSWORD or provide it in .env.local}"
 HOST_VALUE="${HOST:-$HOST_VALUE}"
 PORT_VALUE="${PORT:-$PORT_VALUE}"
+
+if [[ -z "$WEB_API_URL_VALUE" ]]; then
+  case "$HOST_VALUE" in
+    ""|"0.0.0.0"|"::")
+      WEB_API_URL_VALUE="http://127.0.0.1:${PORT_VALUE}"
+      ;;
+    *)
+      WEB_API_URL_VALUE="http://${HOST_VALUE}:${PORT_VALUE}"
+      ;;
+  esac
+fi
 
 mkdir -p "$LAUNCH_AGENTS_DIR"
 mkdir -p "$APP_SUPPORT_DIR"
@@ -81,6 +93,7 @@ sed \
   -e "s|__ENV_FILE__|$ENV_FILE|g" \
   -e "s|__HOME_DIR__|$HOME|g" \
   -e "s|__LOG_DIR__|$LOG_DIR|g" \
+  -e "s|__CODEXREMOTE_API_URL__|$WEB_API_URL_VALUE|g" \
   -e "s|__WEB_LAUNCHER__|$WEB_LAUNCHER|g" \
   -e "s|__PATH__|$PATH_VALUE|g" \
   "$REPO_ROOT/infra/launchd/dev.codexremote.web.plist" > "$WEB_PLIST"

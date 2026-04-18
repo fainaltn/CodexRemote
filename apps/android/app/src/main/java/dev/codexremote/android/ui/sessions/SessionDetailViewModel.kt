@@ -2,17 +2,23 @@ package dev.codexremote.android.ui.sessions
 
 import android.app.Application
 import android.net.Uri
+import android.os.SystemClock
 import android.provider.OpenableColumns
+import android.util.Log
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import dev.codexremote.android.R
 import dev.codexremote.android.data.model.Artifact
 import dev.codexremote.android.data.model.FileEntry
 import dev.codexremote.android.data.model.ListFilesResponse
+import dev.codexremote.android.data.model.PendingApproval
+import dev.codexremote.android.data.model.PendingApprovalDecisionRequest
+import dev.codexremote.android.data.model.PendingPermissionProfile
 import dev.codexremote.android.data.model.RepoActionRequest
 import dev.codexremote.android.data.model.RepoActionResponse
 import dev.codexremote.android.data.model.RepoLogEntry
 import dev.codexremote.android.data.model.Run
+import dev.codexremote.android.data.model.RuntimeModelDescriptor
 import dev.codexremote.android.data.model.RepoStatus
 import dev.codexremote.android.data.model.Session
 import dev.codexremote.android.data.model.SessionDetailResponse
@@ -43,12 +49,86 @@ import kotlinx.coroutines.withContext
 import java.io.File
 
 private const val SESSION_HOST_ID = "local"
+internal const val FOREGROUND_MESSAGE_TAIL_LIMIT = 40
+private const val SESSION_BOOTSTRAP_CACHE_TTL_MS = 15_000L
+private const val PERF_TAG = "CodexRemotePerf"
+
+internal data class SessionDetailBootstrapSnapshot(
+    val session: Session,
+    val messages: List<SessionMessage> = emptyList(),
+    val hasMoreHistory: Boolean = false,
+    val nextBeforeOrderIndex: Int? = null,
+    val bootstrapLoadMs: Long? = null,
+    val summaryLoadMs: Long? = null,
+    val tailLoadMs: Long? = null,
+    val fetchedAtMillis: Long = System.currentTimeMillis(),
+)
+
+internal data class SessionPerformanceSnapshot(
+    val bootstrapLoadMs: Long? = null,
+    val bootstrapStatus: String? = null,
+    val summaryLoadMs: Long? = null,
+    val tailLoadMs: Long? = null,
+    val liveRefreshMs: Long? = null,
+    val liveStatus: String? = null,
+    val repoRefreshMs: Long? = null,
+    val repoStatus: String? = null,
+    val approvalsRefreshMs: Long? = null,
+    val approvalsStatus: String? = null,
+)
+
+internal object SessionPerformanceStore {
+    private val snapshots = linkedMapOf<String, SessionPerformanceSnapshot>()
+
+    fun update(
+        sessionId: String,
+        block: (SessionPerformanceSnapshot) -> SessionPerformanceSnapshot,
+    ) {
+        val current = snapshots[sessionId] ?: SessionPerformanceSnapshot()
+        snapshots[sessionId] = block(current)
+    }
+
+    fun peek(sessionId: String): SessionPerformanceSnapshot? = snapshots[sessionId]
+}
+
+internal object SessionDetailBootstrapStore {
+    private val snapshots = linkedMapOf<String, SessionDetailBootstrapSnapshot>()
+
+    fun seed(session: Session) {
+        val existing = snapshots[session.id]
+        snapshots[session.id] = if (existing != null) {
+            existing.copy(session = session, fetchedAtMillis = System.currentTimeMillis())
+        } else {
+            SessionDetailBootstrapSnapshot(session = session)
+        }
+    }
+
+    fun store(snapshot: SessionDetailBootstrapSnapshot) {
+        snapshots[snapshot.session.id] = snapshot.copy(fetchedAtMillis = System.currentTimeMillis())
+    }
+
+    fun peek(sessionId: String): SessionDetailBootstrapSnapshot? {
+        val snapshot = snapshots[sessionId] ?: return null
+        if (System.currentTimeMillis() - snapshot.fetchedAtMillis > SESSION_BOOTSTRAP_CACHE_TTL_MS) {
+            snapshots.remove(sessionId)
+            return null
+        }
+        return snapshot
+    }
+}
+
+data class DownloadedSessionFile(
+    val file: File,
+    val fileName: String,
+    val mimeType: String,
+)
 
 data class SessionDetailUiState(
     val loading: Boolean = false,
     val refreshing: Boolean = false,
     val archiving: Boolean = false,
     val archived: Boolean = false,
+    val transitionLoading: Boolean = false,
     val session: Session? = null,
     val repoStatus: RepoStatus? = null,
     val messages: List<SessionMessage> = emptyList(),
@@ -58,8 +138,16 @@ data class SessionDetailUiState(
     val lastSubmittedPromptWithAttachments: String? = null,
     val selectedModel: String? = null,
     val selectedReasoningEffort: String? = null,
+    val selectedPermissionMode: String = "on-request",
+    val lastRequestedPermissionMode: String? = null,
     val runtimeControlsInitialized: Boolean = false,
+    val runtimeModels: List<RuntimeModelDescriptor> = emptyList(),
     val pendingArtifacts: List<Artifact> = emptyList(),
+    val pendingApprovals: List<PendingApproval> = emptyList(),
+    val resolvingApprovalId: String? = null,
+    val hasMoreHistory: Boolean = false,
+    val nextBeforeOrderIndex: Int? = null,
+    val loadingOlderHistory: Boolean = false,
     val pendingLocalAttachments: List<PendingLocalAttachment> = emptyList(),
     val queuedPrompts: List<QueuedPrompt> = emptyList(),
     val uploading: Boolean = false,
@@ -69,6 +157,12 @@ data class SessionDetailUiState(
     val repoActionSummary: String? = null,
     val repoLogEntries: List<RepoLogEntry> = emptyList(),
     val repoLogLoading: Boolean = false,
+    val lastBootstrapLoadMs: Long? = null,
+    val lastSummaryLoadMs: Long? = null,
+    val lastTailLoadMs: Long? = null,
+    val lastLiveRefreshMs: Long? = null,
+    val lastRepoRefreshMs: Long? = null,
+    val lastApprovalsRefreshMs: Long? = null,
     val error: String? = null,
     val createdSessionId: String? = null,
     val currentTurnPromptOverride: String? = null,
@@ -91,6 +185,7 @@ data class PendingLocalAttachment(
 private data class RuntimeControls(
     val model: String? = null,
     val reasoningEffort: String? = null,
+    val permissionMode: String = "on-request",
 )
 
 data class QueuedPrompt(
@@ -99,6 +194,7 @@ data class QueuedPrompt(
     val artifacts: List<Artifact> = emptyList(),
     val model: String? = null,
     val reasoningEffort: String? = null,
+    val permissionMode: String = "on-request",
 )
 
 private data class ServerHandle(
@@ -145,6 +241,25 @@ private fun sanitizePromptDisplay(prompt: String?): String? {
 private fun normalizeRuntimeControl(value: String?): String? =
     value?.trim()?.takeIf { it.isNotBlank() }
 
+private fun normalizePermissionMode(value: String?): String =
+    when (value?.trim()) {
+        null, "", "default", "on-request", "onRequest" -> "on-request"
+        "full", "full-access", "fullAccess" -> "full-access"
+        else -> "on-request"
+    }
+
+private fun mergeApprovalEvent(
+    current: List<PendingApproval>,
+    update: PendingApproval,
+): List<PendingApproval> {
+    val remaining = current.filterNot { it.id == update.id }
+    return if (update.status == "pending") {
+        (remaining + update).sortedBy { it.createdAt }
+    } else {
+        remaining
+    }
+}
+
 private fun isRecoverableConnectivityError(error: Throwable): Boolean {
     val resolved = ApiClient.describeNetworkFailure(error)
     val message = error.message.orEmpty()
@@ -165,6 +280,26 @@ private fun hasVisibleSessionContent(state: SessionDetailUiState): Boolean =
         !state.liveRun?.lastOutput.isNullOrBlank() ||
         !state.retainedLiveOutput.isNullOrBlank() ||
         !state.currentTurnPromptOverride.isNullOrBlank()
+
+private fun mergeSessionMessages(
+    current: List<SessionMessage>,
+    incoming: List<SessionMessage>,
+): List<SessionMessage> {
+    if (current.isEmpty()) return incoming
+    if (incoming.isEmpty()) return current
+
+    val mergedById = linkedMapOf<String, SessionMessage>()
+    current.forEach { message ->
+        mergedById[message.id] = message
+    }
+    incoming.forEach { message ->
+        mergedById[message.id] = message
+    }
+
+    return mergedById.values.sortedWith(
+        compareBy<SessionMessage>({ it.orderIndex }, { it.createdAt }, { it.id }),
+    )
+}
 
 class SessionDetailViewModel(application: Application) : AndroidViewModel(application) {
     private val repo = ServerRepository(application)
@@ -245,7 +380,8 @@ class SessionDetailViewModel(application: Application) : AndroidViewModel(applic
         if (snapshot.runtimeControlsInitialized) return
         val defaultModel = repo.getRuntimeDefaultModel(serverId)
         val defaultReasoning = repo.getRuntimeDefaultReasoningEffort(serverId)
-        if (defaultModel.isNullOrBlank() && defaultReasoning.isNullOrBlank()) return
+        val defaultPermissionMode = repo.getRuntimeDefaultPermissionMode(serverId)
+        if (defaultModel.isNullOrBlank() && defaultReasoning.isNullOrBlank() && defaultPermissionMode.isNullOrBlank()) return
         _uiState.update { state ->
             if (state.runtimeControlsInitialized) {
                 state
@@ -253,22 +389,256 @@ class SessionDetailViewModel(application: Application) : AndroidViewModel(applic
                 state.copy(
                     selectedModel = normalizeRuntimeControl(defaultModel),
                     selectedReasoningEffort = normalizeRuntimeControl(defaultReasoning),
+                    selectedPermissionMode = normalizePermissionMode(defaultPermissionMode),
                     runtimeControlsInitialized = true,
                 )
             }
         }
     }
 
+    private suspend fun fetchRuntimeCatalog(serverId: String) {
+        runCatching {
+            withServerClient(serverId) { handle ->
+                handle.client.getRuntimeCatalog(handle.token, SESSION_HOST_ID)
+            }
+        }.onSuccess { catalog ->
+            _uiState.update { state ->
+                state.copy(runtimeModels = catalog.models)
+            }
+        }
+    }
+
+    fun refreshRuntimeCatalog(serverId: String) {
+        viewModelScope.launch {
+            fetchRuntimeCatalog(serverId)
+        }
+    }
+
+    private suspend fun refreshPendingApprovals(serverId: String, sessionId: String) {
+        runCatching {
+            withServerClient(serverId) { handle ->
+                handle.client.listPendingApprovals(
+                    token = handle.token,
+                    hostId = SESSION_HOST_ID,
+                    sessionId = sessionId,
+                ).approvals
+            }
+        }.onSuccess { approvals ->
+            _uiState.update { state ->
+                state.copy(
+                    pendingApprovals = approvals.sortedBy { it.createdAt },
+                    resolvingApprovalId = state.resolvingApprovalId?.takeIf { id ->
+                        approvals.any { it.id == id }
+                    },
+                )
+            }
+        }
+    }
+
+    private fun launchDeferredSessionRefreshes(serverId: String, sessionId: String) {
+        startForegroundMessageSyncIfNeeded(serverId, sessionId)
+        viewModelScope.launch {
+            val hydrationStartedAt = SystemClock.elapsedRealtime()
+            runCatching {
+                withServerClient(serverId) { handle ->
+                    handle.client.getSessionHydration(
+                        token = handle.token,
+                        hostId = SESSION_HOST_ID,
+                        sessionId = sessionId,
+                    )
+                }
+            }.also {
+                val hydrationMs = SystemClock.elapsedRealtime() - hydrationStartedAt
+                val status = if (it.isSuccess) "ok" else "error"
+                _uiState.update { state ->
+                    state.copy(
+                        lastLiveRefreshMs = hydrationMs,
+                        lastRepoRefreshMs = hydrationMs,
+                        lastApprovalsRefreshMs = hydrationMs,
+                    )
+                }
+                SessionPerformanceStore.update(sessionId) {
+                    it.copy(
+                        liveRefreshMs = hydrationMs,
+                        liveStatus = status,
+                        repoRefreshMs = hydrationMs,
+                        repoStatus = status,
+                        approvalsRefreshMs = hydrationMs,
+                        approvalsStatus = status,
+                    )
+                }
+            }.onSuccess { payload ->
+                _uiState.update { state ->
+                    applyConversationContinuity(
+                        state = state.copy(
+                            liveRun = payload.run,
+                            repoStatus = payload.repoStatus,
+                            pendingApprovals = payload.approvals.sortedBy { approval -> approval.createdAt },
+                        ),
+                        liveRun = payload.run,
+                    )
+                }
+                seedRuntimeControlsFromRun(payload.run)
+                maybeNotifyRunState(serverId, sessionId, payload.run)
+                maybeNotifyRecovered(serverId, sessionId, payload.run)
+                startBackgroundMonitorIfNeeded()
+                Log.d(
+                    PERF_TAG,
+                    "hydration session=$sessionId ms=${_uiState.value.lastLiveRefreshMs ?: 0L} hasRun=${payload.run != null} approvals=${payload.approvals.size} hasRepo=${payload.repoStatus != null}",
+                )
+            }.onFailure {
+                Log.d(
+                    PERF_TAG,
+                    "hydration session=$sessionId ms=${_uiState.value.lastLiveRefreshMs ?: 0L} success=false",
+                )
+            }
+        }
+    }
+
+    private suspend fun fetchBootstrapSnapshot(
+        serverId: String,
+        sessionId: String,
+        loadStartedAt: Long,
+    ): SessionDetailBootstrapSnapshot = withServerClient(serverId) { handle ->
+        coroutineScope {
+            val summaryDeferred = async(Dispatchers.IO) {
+                handle.client.getSessionSummary(handle.token, SESSION_HOST_ID, sessionId)
+            }
+            val tailDeferred = async(Dispatchers.IO) {
+                handle.client.getSessionMessages(
+                    token = handle.token,
+                    hostId = SESSION_HOST_ID,
+                    sessionId = sessionId,
+                    limit = FOREGROUND_MESSAGE_TAIL_LIMIT,
+                )
+            }
+
+            val summary = summaryDeferred.await()
+            val summaryLoadMs = SystemClock.elapsedRealtime() - loadStartedAt
+            val tailPayload = tailDeferred.await()
+            val tailLoadMs = SystemClock.elapsedRealtime() - loadStartedAt
+            val bootstrapLoadMs = tailLoadMs
+
+            SessionDetailBootstrapSnapshot(
+                session = summary.session,
+                messages = tailPayload.messages,
+                hasMoreHistory = tailPayload.hasMore,
+                nextBeforeOrderIndex = tailPayload.nextBeforeOrderIndex,
+                bootstrapLoadMs = bootstrapLoadMs,
+                summaryLoadMs = summaryLoadMs,
+                tailLoadMs = tailLoadMs,
+            )
+        }
+    }
+
     fun load(serverId: String, sessionId: String) {
         rememberActiveSession(serverId, sessionId)
         viewModelScope.launch {
-            _uiState.update { it.copy(loading = true, error = null, recoveryNotice = null) }
+            val cachedBootstrap = SessionDetailBootstrapStore.peek(sessionId)
+            val startedFromBootstrap = cachedBootstrap != null
+            val loadStartedAt = SystemClock.elapsedRealtime()
+            _uiState.update {
+                it.copy(
+                    loading = !startedFromBootstrap,
+                    transitionLoading = false,
+                    error = null,
+                    recoveryNotice = null,
+                    session = cachedBootstrap?.session ?: it.session,
+                    messages = cachedBootstrap?.messages ?: it.messages,
+                    hasMoreHistory = cachedBootstrap?.hasMoreHistory ?: it.hasMoreHistory,
+                    nextBeforeOrderIndex = cachedBootstrap?.nextBeforeOrderIndex ?: it.nextBeforeOrderIndex,
+                    lastBootstrapLoadMs = cachedBootstrap?.bootstrapLoadMs ?: it.lastBootstrapLoadMs,
+                    lastSummaryLoadMs = cachedBootstrap?.summaryLoadMs ?: it.lastSummaryLoadMs,
+                    lastTailLoadMs = cachedBootstrap?.tailLoadMs ?: it.lastTailLoadMs,
+                )
+            }
             try {
                 applyStoredRuntimeDefaultsIfNeeded(serverId)
-                refreshSessionAndLive(serverId, sessionId)
+                viewModelScope.launch {
+                    fetchRuntimeCatalog(serverId)
+                }
+                val applyBootstrap: suspend (SessionDetailBootstrapSnapshot) -> Unit = { snapshot ->
+                    _uiState.update { state ->
+                        applyConversationContinuity(
+                            state = state.copy(
+                                session = snapshot.session,
+                                messages = snapshot.messages,
+                                hasMoreHistory = snapshot.hasMoreHistory,
+                                nextBeforeOrderIndex = snapshot.nextBeforeOrderIndex,
+                                loadingOlderHistory = false,
+                                lastBootstrapLoadMs = snapshot.bootstrapLoadMs,
+                                lastSummaryLoadMs = snapshot.summaryLoadMs,
+                                lastTailLoadMs = snapshot.tailLoadMs,
+                            ),
+                            messages = snapshot.messages,
+                            liveRun = state.liveRun,
+                        )
+                    }
+                    Log.d(
+                        PERF_TAG,
+                        "bootstrap session=$sessionId cached=$startedFromBootstrap ms=${snapshot.bootstrapLoadMs ?: 0L} summaryMs=${snapshot.summaryLoadMs ?: 0L} tailMs=${snapshot.tailLoadMs ?: 0L} tail=${snapshot.messages.size} hasMore=${snapshot.hasMoreHistory}",
+                    )
+                    SessionPerformanceStore.update(sessionId) {
+                        it.copy(
+                            bootstrapLoadMs = snapshot.bootstrapLoadMs,
+                            bootstrapStatus = "ok",
+                            summaryLoadMs = snapshot.summaryLoadMs,
+                            tailLoadMs = snapshot.tailLoadMs,
+                        )
+                    }
+                    SessionDetailBootstrapStore.store(snapshot)
+                }
+
+                if (startedFromBootstrap) {
+                    launchDeferredSessionRefreshes(serverId, sessionId)
+                    viewModelScope.launch {
+                        runCatching {
+                            fetchBootstrapSnapshot(
+                                serverId = serverId,
+                                sessionId = sessionId,
+                                loadStartedAt = SystemClock.elapsedRealtime(),
+                            )
+                        }.onSuccess { snapshot ->
+                            applyBootstrap(snapshot)
+                        }.onFailure { error ->
+                            val bootstrapLoadMs = SystemClock.elapsedRealtime() - loadStartedAt
+                            SessionPerformanceStore.update(sessionId) {
+                                it.copy(
+                                    bootstrapLoadMs = bootstrapLoadMs,
+                                    bootstrapStatus = "error",
+                                )
+                            }
+                            Log.d(
+                                PERF_TAG,
+                                "bootstrap session=$sessionId cached=true ms=$bootstrapLoadMs success=false reason=${error.message ?: "unknown"}",
+                            )
+                        }
+                    }
+                    return@launch
+                }
+
+                val snapshot = fetchBootstrapSnapshot(serverId, sessionId, loadStartedAt)
+                applyBootstrap(snapshot)
+                _uiState.update { it.copy(loading = false) }
+                launchDeferredSessionRefreshes(serverId, sessionId)
             } catch (e: Exception) {
+                val bootstrapLoadMs = SystemClock.elapsedRealtime() - loadStartedAt
+                _uiState.update { state ->
+                    state.copy(lastBootstrapLoadMs = bootstrapLoadMs)
+                }
+                Log.d(
+                    PERF_TAG,
+                    "bootstrap session=$sessionId cached=$startedFromBootstrap ms=$bootstrapLoadMs success=false",
+                )
+                SessionPerformanceStore.update(sessionId) {
+                    it.copy(
+                        bootstrapLoadMs = bootstrapLoadMs,
+                        bootstrapStatus = "error",
+                    )
+                }
                 val existingState = _uiState.value
                 if (
+                    startedFromBootstrap ||
                     (isTransientTimeout(e) || isRecoverableConnectivityError(e)) &&
                     hasVisibleSessionContent(existingState)
                 ) {
@@ -279,6 +649,7 @@ class SessionDetailViewModel(application: Application) : AndroidViewModel(applic
                             recoveryNotice = string(R.string.session_detail_recovery_degraded),
                         )
                     }
+                    launchDeferredSessionRefreshes(serverId, sessionId)
                     maybeNotifyBackgroundNeedsAttention(serverId, sessionId, existingState)
                 } else {
                     _uiState.update {
@@ -289,8 +660,8 @@ class SessionDetailViewModel(application: Application) : AndroidViewModel(applic
                         )
                     }
                 }
-            } finally {
-                _uiState.update { it.copy(loading = false, refreshing = false) }
+        } finally {
+                _uiState.update { it.copy(loading = false, refreshing = false, transitionLoading = false) }
             }
         }
     }
@@ -306,13 +677,18 @@ class SessionDetailViewModel(application: Application) : AndroidViewModel(applic
         val snapshot = _uiState.value
         _uiState.value = SessionDetailUiState(
             loading = false,
+            transitionLoading = false,
             selectedModel = snapshot.selectedModel,
             selectedReasoningEffort = snapshot.selectedReasoningEffort,
+            selectedPermissionMode = snapshot.selectedPermissionMode,
+            lastRequestedPermissionMode = snapshot.lastRequestedPermissionMode,
             runtimeControlsInitialized = snapshot.runtimeControlsInitialized,
+            runtimeModels = snapshot.runtimeModels,
         )
         if (!serverId.isNullOrBlank()) {
             viewModelScope.launch {
                 applyStoredRuntimeDefaultsIfNeeded(serverId)
+                fetchRuntimeCatalog(serverId)
             }
         }
     }
@@ -350,9 +726,19 @@ class SessionDetailViewModel(application: Application) : AndroidViewModel(applic
     private fun silentRefreshSessionAndLive(serverId: String, sessionId: String) {
         viewModelScope.launch {
             try {
-                refreshSessionAndLive(serverId, sessionId)
+                refreshSessionMessagesTail(serverId, sessionId)
+                val snapshot = _uiState.value
+                val needsFullRefresh = snapshot.session == null ||
+                    !hasSettledCurrentTurn(snapshot.messages, snapshot.currentTurnPromptOverride)
+                if (needsFullRefresh) {
+                    refreshSessionAndLive(serverId, sessionId)
+                }
             } catch (_: Exception) {
-                // Best-effort; the page already has streaming data.
+                try {
+                    refreshSessionAndLive(serverId, sessionId)
+                } catch (_: Exception) {
+                    // Best-effort; the page already has streaming data.
+                }
             }
         }
     }
@@ -360,12 +746,27 @@ class SessionDetailViewModel(application: Application) : AndroidViewModel(applic
     fun refreshLiveRun(serverId: String, sessionId: String) {
         rememberActiveSession(serverId, sessionId)
         viewModelScope.launch {
+            val startedAt = SystemClock.elapsedRealtime()
             try {
                 val liveRun = fetchLiveRun(serverId, sessionId)
+                val liveMs = SystemClock.elapsedRealtime() - startedAt
                 _uiState.update { state ->
                     applyConversationContinuity(
-                        state = state.copy(liveRun = liveRun),
+                        state = state.copy(
+                            liveRun = liveRun,
+                            lastLiveRefreshMs = liveMs,
+                        ),
                         liveRun = liveRun,
+                    )
+                }
+                Log.d(
+                    PERF_TAG,
+                    "live session=$sessionId ms=$liveMs status=${liveRun?.status ?: "none"}",
+                )
+                SessionPerformanceStore.update(sessionId) {
+                    it.copy(
+                        liveRefreshMs = liveMs,
+                        liveStatus = "ok",
                     )
                 }
                 seedRuntimeControlsFromRun(liveRun)
@@ -374,6 +775,20 @@ class SessionDetailViewModel(application: Application) : AndroidViewModel(applic
                 markRecoverySyncedIfNeeded()
                 startBackgroundMonitorIfNeeded()
             } catch (_: Exception) {
+                val liveMs = SystemClock.elapsedRealtime() - startedAt
+                _uiState.update { state ->
+                    state.copy(lastLiveRefreshMs = liveMs)
+                }
+                Log.d(
+                    PERF_TAG,
+                    "live session=$sessionId ms=$liveMs status=error",
+                )
+                SessionPerformanceStore.update(sessionId) {
+                    it.copy(
+                        liveRefreshMs = liveMs,
+                        liveStatus = "error",
+                    )
+                }
                 // Keep the last visible live state when polling blips.
             }
         }
@@ -439,6 +854,19 @@ class SessionDetailViewModel(application: Application) : AndroidViewModel(applic
                                 if (isTerminal) {
                                     silentRefreshSessionAndLive(serverId, sessionId)
                                     maybeDispatchQueuedPrompt(serverId, sessionId)
+                                }
+                            }
+                            is LiveRunStreamEvent.ApprovalUpdate -> {
+                                liveStreamLastEventId = event.eventId ?: liveStreamLastEventId
+                                _uiState.update { state ->
+                                    state.copy(
+                                        pendingApprovals = mergeApprovalEvent(
+                                            state.pendingApprovals,
+                                            event.approval,
+                                        ),
+                                        resolvingApprovalId = state.resolvingApprovalId
+                                            ?.takeIf { it != event.approval.id || event.approval.status == "pending" },
+                                    )
                                 }
                             }
                             is LiveRunStreamEvent.Gap -> {
@@ -558,14 +986,25 @@ class SessionDetailViewModel(application: Application) : AndroidViewModel(applic
         }
     }
 
+    fun setSelectedPermissionMode(permissionMode: String?) {
+        _uiState.update {
+            it.copy(
+                selectedPermissionMode = normalizePermissionMode(permissionMode),
+                runtimeControlsInitialized = true,
+            )
+        }
+    }
+
     fun setRuntimeControls(
         model: String?,
         reasoningEffort: String?,
+        permissionMode: String?,
     ) {
         _uiState.update { state ->
             state.copy(
                 selectedModel = normalizeRuntimeControl(model),
                 selectedReasoningEffort = normalizeRuntimeControl(reasoningEffort),
+                selectedPermissionMode = normalizePermissionMode(permissionMode),
                 runtimeControlsInitialized = true,
             )
         }
@@ -575,18 +1014,21 @@ class SessionDetailViewModel(application: Application) : AndroidViewModel(applic
         sessionId: String?,
         model: String? = null,
         reasoningEffort: String? = null,
+        permissionMode: String? = null,
     ) {
         val snapshot = _uiState.value
         val runtimeControls = resolveRuntimeControls(
             snapshot = snapshot,
             model = model,
             reasoningEffort = reasoningEffort,
+            permissionMode = permissionMode,
         )
-        if (model != null || reasoningEffort != null) {
+        if (model != null || reasoningEffort != null || permissionMode != null) {
             _uiState.update { state ->
                 state.copy(
                     selectedModel = runtimeControls.model,
                     selectedReasoningEffort = runtimeControls.reasoningEffort,
+                    selectedPermissionMode = runtimeControls.permissionMode,
                     runtimeControlsInitialized = true,
                 )
             }
@@ -609,6 +1051,7 @@ class SessionDetailViewModel(application: Application) : AndroidViewModel(applic
             artifacts = snapshot.pendingArtifacts,
             model = runtimeControls.model,
             reasoningEffort = runtimeControls.reasoningEffort,
+            permissionMode = runtimeControls.permissionMode,
         )
         _uiState.update {
             it.copy(
@@ -636,6 +1079,7 @@ class SessionDetailViewModel(application: Application) : AndroidViewModel(applic
                 pendingArtifacts = queuedPrompt.artifacts,
                 selectedModel = queuedPrompt.model,
                 selectedReasoningEffort = queuedPrompt.reasoningEffort,
+                selectedPermissionMode = queuedPrompt.permissionMode,
                 runtimeControlsInitialized = true,
                 queuedPrompts = state.queuedPrompts.filterNot { it.id == queuedPromptId },
                 error = null,
@@ -912,6 +1356,7 @@ class SessionDetailViewModel(application: Application) : AndroidViewModel(applic
                 composedPrompt = composedPrompt.trim(),
                 model = controls.model,
                 reasoningEffort = controls.reasoningEffort,
+                permissionMode = controls.permissionMode,
             )
             _uiState.update {
                 val afterComposer =
@@ -933,6 +1378,9 @@ class SessionDetailViewModel(application: Application) : AndroidViewModel(applic
             }
             startForegroundMessageSyncIfNeeded(serverId, sessionId)
             refreshLiveRun(serverId, sessionId)
+            runCatching {
+                refreshSessionMessagesTail(serverId, sessionId)
+            }
             return true
         } catch (e: Exception) {
             _uiState.update {
@@ -1070,6 +1518,7 @@ class SessionDetailViewModel(application: Application) : AndroidViewModel(applic
         draftCwd: String? = null,
         model: String? = null,
         reasoningEffort: String? = null,
+        permissionMode: String? = null,
     ) {
         viewModelScope.launch {
             val snapshot = _uiState.value
@@ -1077,12 +1526,14 @@ class SessionDetailViewModel(application: Application) : AndroidViewModel(applic
                 snapshot = snapshot,
                 model = model,
                 reasoningEffort = reasoningEffort,
+                permissionMode = permissionMode,
             )
-            if (model != null || reasoningEffort != null) {
+            if (model != null || reasoningEffort != null || permissionMode != null) {
                 _uiState.update { state ->
                     state.copy(
                         selectedModel = runtimeControls.model,
                         selectedReasoningEffort = runtimeControls.reasoningEffort,
+                        selectedPermissionMode = runtimeControls.permissionMode,
                         runtimeControlsInitialized = true,
                     )
                 }
@@ -1104,7 +1555,7 @@ class SessionDetailViewModel(application: Application) : AndroidViewModel(applic
                         localAttachments = snapshot.pendingLocalAttachments,
                         runtimeControls = runtimeControls,
                     )
-                } else if (hasExplicitRuntimeControls(snapshot, model, reasoningEffort)) {
+                } else if (hasExplicitRuntimeControls(snapshot, model, reasoningEffort, permissionMode)) {
                     createSession(
                         serverId = serverId,
                         cwd = draftCwd,
@@ -1134,7 +1585,11 @@ class SessionDetailViewModel(application: Application) : AndroidViewModel(applic
         composedPrompt: String,
         model: String? = null,
         reasoningEffort: String? = null,
+        permissionMode: String = "full-access",
     ) {
+        _uiState.update {
+            it.copy(lastRequestedPermissionMode = normalizePermissionMode(permissionMode))
+        }
         withServerClient(serverId) { handle ->
             handle.client.startLiveRun(
                 token = handle.token,
@@ -1143,6 +1598,7 @@ class SessionDetailViewModel(application: Application) : AndroidViewModel(applic
                 prompt = composedPrompt,
                 model = model,
                 reasoningEffort = reasoningEffort,
+                permissionMode = permissionMode,
             )
         }
     }
@@ -1168,6 +1624,110 @@ class SessionDetailViewModel(application: Application) : AndroidViewModel(applic
         }
     }
 
+    fun decidePendingApproval(
+        serverId: String,
+        sessionId: String?,
+        approval: PendingApproval,
+        decision: String,
+        onResolved: (() -> Unit)? = null,
+    ) {
+        if (sessionId.isNullOrBlank()) return
+        viewModelScope.launch {
+            _uiState.update { it.copy(resolvingApprovalId = approval.id, error = null) }
+            try {
+                withServerClient(serverId) { handle ->
+                    handle.client.decidePendingApproval(
+                        token = handle.token,
+                        hostId = SESSION_HOST_ID,
+                        sessionId = sessionId,
+                        approvalId = approval.id,
+                        request = when (approval.kind) {
+                            "permissions" -> PendingApprovalDecisionRequest(
+                                kind = "permissions",
+                                permissions = approval.permissions ?: PendingPermissionProfile(),
+                                scope = if (decision == "acceptForSession") "session" else "turn",
+                            )
+                            else -> PendingApprovalDecisionRequest(
+                                kind = approval.kind,
+                                decision = decision,
+                            )
+                        },
+                    )
+                }
+                refreshPendingApprovals(serverId, sessionId)
+                onResolved?.invoke()
+            } catch (e: Exception) {
+                _uiState.update {
+                    it.copy(
+                        error = userFacingMessage(e, string(R.string.session_detail_error_refresh)),
+                    )
+                }
+            } finally {
+                _uiState.update { state ->
+                    state.copy(
+                        resolvingApprovalId = state.resolvingApprovalId?.takeIf { it != approval.id },
+                    )
+                }
+            }
+        }
+    }
+
+    suspend fun downloadSessionFile(
+        serverId: String,
+        sessionId: String,
+        relativePath: String,
+    ): DownloadedSessionFile {
+        val payload = withServerClient(serverId) { handle ->
+            handle.client.downloadSessionFile(
+                token = handle.token,
+                hostId = SESSION_HOST_ID,
+                sessionId = sessionId,
+                relativePath = relativePath,
+            )
+        }
+
+        val downloadsDir = File(getApplication<Application>().cacheDir, "downloads").apply {
+            mkdirs()
+        }
+        val outputFile = File(downloadsDir, payload.fileName)
+        withContext(Dispatchers.IO) {
+            outputFile.writeBytes(payload.bytes)
+        }
+        return DownloadedSessionFile(
+            file = outputFile,
+            fileName = payload.fileName,
+            mimeType = payload.mimeType,
+        )
+    }
+
+    suspend fun downloadAbsoluteFile(
+        serverId: String,
+        sessionId: String,
+        absolutePath: String,
+    ): DownloadedSessionFile {
+        val payload = withServerClient(serverId) { handle ->
+            handle.client.downloadAbsoluteFile(
+                token = handle.token,
+                hostId = SESSION_HOST_ID,
+                sessionId = sessionId,
+                absolutePath = absolutePath,
+            )
+        }
+
+        val downloadsDir = File(getApplication<Application>().cacheDir, "downloads").apply {
+            mkdirs()
+        }
+        val outputFile = File(downloadsDir, payload.fileName)
+        withContext(Dispatchers.IO) {
+            outputFile.writeBytes(payload.bytes)
+        }
+        return DownloadedSessionFile(
+            file = outputFile,
+            fileName = payload.fileName,
+            mimeType = payload.mimeType,
+        )
+    }
+
     private suspend fun refreshSessionAndLive(
         serverId: String,
         sessionId: String,
@@ -1180,6 +1740,11 @@ class SessionDetailViewModel(application: Application) : AndroidViewModel(applic
                 val liveDeferred = async(Dispatchers.IO) {
                     handle.client.getLiveRun(handle.token, SESSION_HOST_ID, sessionId)
                 }
+                val approvalsDeferred = async(Dispatchers.IO) {
+                    runCatching {
+                        handle.client.listPendingApprovals(handle.token, SESSION_HOST_ID, sessionId).approvals
+                    }.getOrElse { emptyList() }
+                }
                 val repoDeferred = async(Dispatchers.IO) {
                     runCatching {
                         handle.client.getRepoStatus(handle.token, SESSION_HOST_ID, sessionId).repoStatus
@@ -1187,6 +1752,7 @@ class SessionDetailViewModel(application: Application) : AndroidViewModel(applic
                 }
                 val session = sessionDeferred.await()
                 val liveRun = liveDeferred.await()
+                val approvals = approvalsDeferred.await()
                 val repoStatus = repoDeferred.await()
                 _uiState.update { state ->
                     applyConversationContinuity(
@@ -1195,6 +1761,7 @@ class SessionDetailViewModel(application: Application) : AndroidViewModel(applic
                             repoStatus = repoStatus,
                             messages = session.messages,
                             liveRun = liveRun,
+                            pendingApprovals = approvals.sortedBy { it.createdAt },
                         ),
                         messages = session.messages,
                         liveRun = liveRun,
@@ -1217,6 +1784,77 @@ class SessionDetailViewModel(application: Application) : AndroidViewModel(applic
                     state.copy(
                         session = detail.session,
                         messages = detail.messages,
+                    )
+                }
+            }
+        }
+    }
+
+    private suspend fun refreshSessionMessagesTail(
+        serverId: String,
+        sessionId: String,
+        limit: Int = FOREGROUND_MESSAGE_TAIL_LIMIT,
+    ) {
+        val tailMessages = withServerClient(serverId) { handle ->
+            handle.client.getSessionMessages(
+                token = handle.token,
+                hostId = SESSION_HOST_ID,
+                sessionId = sessionId,
+                limit = limit,
+            )
+        }
+        _uiState.update { state ->
+            val mergedMessages = mergeSessionMessages(state.messages, tailMessages.messages)
+            applyConversationContinuity(
+                state = state.copy(
+                    messages = mergedMessages,
+                    hasMoreHistory = if (state.nextBeforeOrderIndex != null) {
+                        state.hasMoreHistory
+                    } else {
+                        tailMessages.hasMore
+                    },
+                    nextBeforeOrderIndex = state.nextBeforeOrderIndex ?: tailMessages.nextBeforeOrderIndex,
+                ),
+                messages = mergedMessages,
+                liveRun = state.liveRun,
+            )
+        }
+    }
+
+    fun loadOlderHistory(serverId: String, sessionId: String) {
+        val cursor = _uiState.value.nextBeforeOrderIndex ?: return
+        if (_uiState.value.loadingOlderHistory) return
+
+        viewModelScope.launch {
+            _uiState.update { it.copy(loadingOlderHistory = true, error = null) }
+            try {
+                val payload = withServerClient(serverId) { handle ->
+                    handle.client.getSessionMessages(
+                        token = handle.token,
+                        hostId = SESSION_HOST_ID,
+                        sessionId = sessionId,
+                        limit = FOREGROUND_MESSAGE_TAIL_LIMIT,
+                        beforeOrderIndex = cursor,
+                    )
+                }
+                _uiState.update { state ->
+                    val mergedMessages = mergeSessionMessages(state.messages, payload.messages)
+                    applyConversationContinuity(
+                        state = state.copy(
+                            messages = mergedMessages,
+                            hasMoreHistory = payload.hasMore,
+                            nextBeforeOrderIndex = payload.nextBeforeOrderIndex,
+                            loadingOlderHistory = false,
+                        ),
+                        messages = mergedMessages,
+                        liveRun = state.liveRun,
+                    )
+                }
+            } catch (e: Exception) {
+                _uiState.update {
+                    it.copy(
+                        loadingOlderHistory = false,
+                        error = userFacingMessage(e, string(R.string.session_detail_error_refresh)),
                     )
                 }
             }
@@ -1294,6 +1932,7 @@ class SessionDetailViewModel(application: Application) : AndroidViewModel(applic
                 runtimeControls = RuntimeControls(
                     model = nextQueuedPrompt.model,
                     reasoningEffort = nextQueuedPrompt.reasoningEffort,
+                    permissionMode = nextQueuedPrompt.permissionMode,
                 ),
             )
 
@@ -1361,6 +2000,7 @@ class SessionDetailViewModel(application: Application) : AndroidViewModel(applic
                     composedPrompt = composedPrompt,
                     model = effectiveRuntimeControls.model,
                     reasoningEffort = effectiveRuntimeControls.reasoningEffort,
+                    permissionMode = effectiveRuntimeControls.permissionMode,
                 )
                 newSessionId
             }
@@ -1433,6 +2073,7 @@ class SessionDetailViewModel(application: Application) : AndroidViewModel(applic
                 composedPrompt = composedPrompt,
                 model = effectiveRuntimeControls.model,
                 reasoningEffort = effectiveRuntimeControls.reasoningEffort,
+                permissionMode = effectiveRuntimeControls.permissionMode,
             )
             startForegroundMessageSyncIfNeeded(serverId, createdSessionId)
             refreshSessionAndLive(serverId, createdSessionId)
@@ -1474,12 +2115,15 @@ class SessionDetailViewModel(application: Application) : AndroidViewModel(applic
         snapshot: SessionDetailUiState,
         model: String?,
         reasoningEffort: String?,
+        permissionMode: String? = null,
     ): RuntimeControls {
         val normalizedModel = normalizeRuntimeControl(model)
         val normalizedReasoningEffort = normalizeRuntimeControl(reasoningEffort)
         return RuntimeControls(
             model = normalizedModel ?: currentRuntimeControls(snapshot).model,
             reasoningEffort = normalizedReasoningEffort ?: currentRuntimeControls(snapshot).reasoningEffort,
+            permissionMode = permissionMode?.let(::normalizePermissionMode)
+                ?: currentRuntimeControls(snapshot).permissionMode,
         )
     }
 
@@ -1487,23 +2131,29 @@ class SessionDetailViewModel(application: Application) : AndroidViewModel(applic
         snapshot: SessionDetailUiState,
         model: String?,
         reasoningEffort: String?,
+        permissionMode: String? = null,
     ): Boolean {
-        val controls = resolveRuntimeControls(snapshot, model, reasoningEffort)
-        return controls.model != null || controls.reasoningEffort != null
+        val controls = resolveRuntimeControls(snapshot, model, reasoningEffort, permissionMode)
+        return controls.model != null ||
+            controls.reasoningEffort != null ||
+            controls.permissionMode != "on-request"
     }
 
     private fun currentRuntimeControls(snapshot: SessionDetailUiState): RuntimeControls {
         val selectedModel = normalizeRuntimeControl(snapshot.selectedModel)
         val selectedReasoningEffort = normalizeRuntimeControl(snapshot.selectedReasoningEffort)
+        val selectedPermissionMode = normalizePermissionMode(snapshot.selectedPermissionMode)
         return if (snapshot.runtimeControlsInitialized) {
             RuntimeControls(
                 model = selectedModel,
                 reasoningEffort = selectedReasoningEffort,
+                permissionMode = selectedPermissionMode,
             )
         } else {
             RuntimeControls(
                 model = selectedModel ?: normalizeRuntimeControl(snapshot.liveRun?.model),
                 reasoningEffort = selectedReasoningEffort ?: normalizeRuntimeControl(snapshot.liveRun?.reasoningEffort),
+                permissionMode = selectedPermissionMode,
             )
         }
     }
@@ -1519,6 +2169,7 @@ class SessionDetailViewModel(application: Application) : AndroidViewModel(applic
                 state.copy(
                     selectedModel = seededModel,
                     selectedReasoningEffort = seededReasoningEffort,
+                    selectedPermissionMode = normalizePermissionMode(state.selectedPermissionMode),
                     runtimeControlsInitialized = true,
                 )
             }
@@ -1578,19 +2229,7 @@ class SessionDetailViewModel(application: Application) : AndroidViewModel(applic
                     break
                 }
                 try {
-                    val detail = withServerClient(serverId) { handle ->
-                        handle.client.getSessionDetail(handle.token, SESSION_HOST_ID, sessionId)
-                    }
-                    _uiState.update { state ->
-                        applyConversationContinuity(
-                            state = state.copy(
-                                session = detail.session,
-                                messages = detail.messages,
-                            ),
-                            messages = detail.messages,
-                            liveRun = state.liveRun,
-                        )
-                    }
+                    refreshSessionMessagesTail(serverId, sessionId)
                 } catch (_: Exception) {
                     // Best effort only. Live run continuity should not be blocked by message polling blips.
                 }

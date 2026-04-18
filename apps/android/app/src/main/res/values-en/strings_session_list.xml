@@ -112,6 +112,7 @@
     <string name="session_list_folder_summary_total">%1$s</string>
     <string name="session_list_folder_new_session_desc">Create a new session in this project</string>
     <string name="session_list_folder_drag_sort_desc">Press and hold to drag and reorder</string>
+    <string name="session_list_session_current_chip">Current session</string>
     <string name="session_list_session_selected_chip">Selected</string>
     <string name="session_list_session_long_press_multi_select_chip">Long-press to multi-select</string>
 

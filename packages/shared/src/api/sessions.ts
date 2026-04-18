@@ -25,6 +25,29 @@ export type SessionDetailResponse = z.infer<typeof SessionDetailResponse>;
 export const GetSessionResponse = SessionDetailResponse;
 export type GetSessionResponse = SessionDetailResponse;
 
+export const SessionSummaryResponse = z.object({
+  session: Session,
+});
+export type SessionSummaryResponse = z.infer<typeof SessionSummaryResponse>;
+export const GetSessionSummaryResponse = SessionSummaryResponse;
+export type GetSessionSummaryResponse = SessionSummaryResponse;
+
+export const SessionMessagesQuery = z.object({
+  limit: z.coerce.number().int().positive().max(200).optional(),
+  beforeOrderIndex: z.coerce.number().int().nonnegative().optional(),
+});
+export type SessionMessagesQuery = z.infer<typeof SessionMessagesQuery>;
+
+export const SessionMessagesResponse = z.object({
+  messages: z.array(SessionMessage),
+  limit: z.number().int().positive(),
+  hasMore: z.boolean(),
+  nextBeforeOrderIndex: z.number().int().nonnegative().nullable(),
+});
+export type SessionMessagesResponse = z.infer<typeof SessionMessagesResponse>;
+export const GetSessionMessagesResponse = SessionMessagesResponse;
+export type GetSessionMessagesResponse = SessionMessagesResponse;
+
 // --- GET /api/hosts/:hostId/sessions/:sessionId/repo-status ---
 
 export const RepoStatus = z.discriminatedUnion("isRepo", [

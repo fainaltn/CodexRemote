@@ -10,6 +10,9 @@ import {
   ArchiveSessionsRequest,
   UnarchiveSessionsRequest,
   SessionDetailResponse,
+  SessionSummaryResponse,
+  SessionMessagesQuery,
+  SessionMessagesResponse,
   RepoActionRequest,
   RepoActionResponse,
   RepoLogResponse,
@@ -22,6 +25,8 @@ import {
   type UpdateSessionTitleResponse,
   type ArchiveSessionsResponse,
   type UnarchiveSessionsResponse,
+  type SessionSummaryResponse as SessionSummaryResponseBody,
+  type SessionMessagesResponse as SessionMessagesResponseBody,
   type Session,
 } from "@codexremote/shared";
 import type { CodexAdapter } from "../codex/index.js";
@@ -35,6 +40,7 @@ const EMPTY_SESSION_BOOTSTRAP_PROMPT =
 const SESSION_READY_TIMEOUT_MS = 5_000;
 const SESSION_READY_POLL_MS = 150;
 const SESSION_SHELL_EXIT_TIMEOUT_MS = 5_000;
+const SESSION_MESSAGES_TAIL_LIMIT_DEFAULT = 20;
 const execFileAsync = promisify(execFile);
 
 /**
@@ -160,35 +166,99 @@ export function sessionRoutes(adapter: CodexAdapter, runManager?: RunManager) {
           });
         }
 
-        const messages = (await adapter.getSessionMessages(parsed.data.sessionId))
-          .map((message, index) => ({
-            ...message,
-            orderIndex: message.orderIndex ?? index,
-            isStreaming: message.isStreaming ?? false,
-          }));
-        const stored = getStoredSessionRow(parsed.data.sessionId);
-
-        const now = new Date().toISOString();
+        const messages = normalizeSessionMessages(
+          await adapter.getSessionMessages(parsed.data.sessionId),
+        );
         const body = {
-          session: {
-            id: detail.codexSessionId,
-            hostId: LOCAL_HOST_ID,
-            provider: "codex" as const,
-            codexSessionId: detail.codexSessionId,
-            title:
-              getPreferredTitle(stored?.title, detail.codexSessionId) ??
-              detail.title ??
-              detail.codexSessionId,
-            cwd: stored?.cwd ?? detail.cwd,
-            createdAt: stored?.createdAt ?? detail.lastActivityAt ?? now,
-            updatedAt: detail.lastActivityAt ?? now,
-            lastPreview: detail.lastPreview,
-            archivedAt: stored?.archivedAt ?? null,
-          },
+          session: buildSessionPayload(parsed.data.sessionId, detail),
           messages,
         };
 
         return reply.send(SessionDetailResponse.parse(body));
+      },
+    );
+
+    app.get(
+      "/api/hosts/:hostId/sessions/:sessionId/summary",
+      async (request: FastifyRequest, reply: FastifyReply) => {
+        const startedAt = Date.now();
+        const parsed = SessionParams.safeParse(request.params);
+        if (!parsed.success) {
+          return reply.status(400).send({ error: "Invalid route params" });
+        }
+
+        if (parsed.data.hostId !== LOCAL_HOST_ID) {
+          return reply
+            .status(404)
+            .send({ error: `Host '${parsed.data.hostId}' not found` });
+        }
+
+        const detail = await adapter.getSessionDetail(parsed.data.sessionId);
+        if (!detail) {
+          return reply.status(404).send({
+            error: `Session '${parsed.data.sessionId}' not found`,
+          });
+        }
+
+        const body: SessionSummaryResponseBody = {
+          session: buildSessionPayload(parsed.data.sessionId, detail),
+        };
+        console.info(
+          `[perf][route][session-summary] session=${parsed.data.sessionId} ms=${Date.now() - startedAt}`,
+        );
+        return reply.send(SessionSummaryResponse.parse(body));
+      },
+    );
+
+    app.get(
+      "/api/hosts/:hostId/sessions/:sessionId/messages",
+      async (request: FastifyRequest, reply: FastifyReply) => {
+        const startedAt = Date.now();
+        const params = SessionParams.safeParse(request.params);
+        if (!params.success) {
+          return reply.status(400).send({ error: "Invalid route params" });
+        }
+
+        if (params.data.hostId !== LOCAL_HOST_ID) {
+          return reply
+            .status(404)
+            .send({ error: `Host '${params.data.hostId}' not found` });
+        }
+
+        const query = SessionMessagesQuery.safeParse(request.query);
+        if (!query.success) {
+          return reply.status(400).send({ error: "Invalid query params" });
+        }
+
+        const detail = await adapter.getSessionDetail(params.data.sessionId);
+        if (!detail) {
+          return reply.status(404).send({
+            error: `Session '${params.data.sessionId}' not found`,
+          });
+        }
+
+        const limit = query.data.limit ?? SESSION_MESSAGES_TAIL_LIMIT_DEFAULT;
+        const messages = normalizeSessionMessages(
+          await adapter.getSessionMessages(params.data.sessionId, {
+            limit,
+            beforeOrderIndex: query.data.beforeOrderIndex,
+          }),
+        );
+        const hasMore = messages.length > 0 && (
+          query.data.beforeOrderIndex !== undefined
+            ? (messages[0]?.orderIndex ?? 0) > 0
+            : messages.length >= limit
+        );
+        const body: SessionMessagesResponseBody = {
+          messages,
+          limit,
+          hasMore,
+          nextBeforeOrderIndex: hasMore ? (messages[0]?.orderIndex ?? null) : null,
+        };
+        console.info(
+          `[perf][route][session-messages] session=${params.data.sessionId} ms=${Date.now() - startedAt} limit=${limit} before=${query.data.beforeOrderIndex ?? "none"} result=${messages.length} hasMore=${hasMore}`,
+        );
+        return reply.send(SessionMessagesResponse.parse(body));
       },
     );
 
@@ -487,6 +557,39 @@ function isDisplayableSession(session: Session): boolean {
   return hasPreview || !looksPlaceholder;
 }
 
+function normalizeSessionMessages(
+  messages: Awaited<ReturnType<CodexAdapter["getSessionMessages"]>>,
+) {
+  return messages.map((message, index) => ({
+    ...message,
+    orderIndex: message.orderIndex ?? index,
+    isStreaming: message.isStreaming ?? false,
+  }));
+}
+
+function buildSessionPayload(
+  sessionId: string,
+  detail: NonNullable<Awaited<ReturnType<CodexAdapter["getSessionDetail"]>>>,
+): Session {
+  const stored = getStoredSessionRow(sessionId);
+  const now = new Date().toISOString();
+  return {
+    id: detail.codexSessionId,
+    hostId: LOCAL_HOST_ID,
+    provider: "codex" as const,
+    codexSessionId: detail.codexSessionId,
+    title:
+      getPreferredTitle(stored?.title, detail.codexSessionId) ??
+      detail.title ??
+      detail.codexSessionId,
+    cwd: stored?.cwd ?? detail.cwd,
+    createdAt: stored?.createdAt ?? detail.lastActivityAt ?? now,
+    updatedAt: detail.lastActivityAt ?? now,
+    lastPreview: detail.lastPreview,
+    archivedAt: stored?.archivedAt ?? null,
+  };
+}
+
 async function waitForSessionReady(
   adapter: CodexAdapter,
   sessionId: string,
@@ -572,7 +675,7 @@ function getPreferredTitle(
   return storedTitle === sessionId ? null : storedTitle;
 }
 
-async function getRepoStatusForCwd(cwd: string | null): Promise<RepoStatus> {
+export async function getRepoStatusForCwd(cwd: string | null): Promise<RepoStatus> {
   const safeCwd = cwd?.trim();
   if (!safeCwd) {
     return nonRepoStatus(safeCwd ?? "");

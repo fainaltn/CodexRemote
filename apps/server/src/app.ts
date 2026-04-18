@@ -8,6 +8,7 @@ import { sessionRoutes } from "./routes/sessions.js";
 import { fileRoutes } from "./routes/files.js";
 import { skillRoutes } from "./routes/skills.js";
 import { projectRoutes } from "./routes/projects.js";
+import { runtimeRoutes } from "./routes/runtime.js";
 import { liveRunRoutes } from "./routes/live-runs.js";
 import { uploadRoutes } from "./routes/uploads.js";
 import { inboxRoutes } from "./routes/inbox.js";
@@ -153,10 +154,11 @@ export async function buildApp(opts: AppOptions = {}): Promise<{
     scope.addHook("preHandler", requireAuth);
 
     await scope.register(sessionRoutes(adapter, runManager));
+    await scope.register(runtimeRoutes());
     await scope.register(fileRoutes(adapter));
     await scope.register(skillRoutes());
     await scope.register(projectRoutes());
-    await scope.register(liveRunRoutes(runManager, {
+    await scope.register(liveRunRoutes(adapter, runManager, {
       sseIdleTimeoutMs: opts.sseIdleTimeoutMs,
       sseWriteBufferMax: opts.sseWriteBufferMax,
     }));

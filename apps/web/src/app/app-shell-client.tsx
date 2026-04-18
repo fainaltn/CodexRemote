@@ -5,9 +5,12 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import { useAuth } from "@/lib/auth";
 import {
+  clearSessionTransition,
   getShellDataEventName,
+  markSessionTransition,
   listDraftProjects,
   listSessions,
+  prefetchSessionBootstrap,
   type DraftProject,
   type Session,
 } from "@/lib/api";
@@ -86,7 +89,7 @@ function getSessionSignal(
     return { label: "当前会话", tone: "primary" };
   }
   if (isFreshActivity(session.updatedAt, 45)) {
-    return { label: "活跃", tone: "accent" };
+    return { label: "最近活跃", tone: "accent" };
   }
   return { label: "历史", tone: "muted" };
 }
@@ -175,6 +178,7 @@ export function AppShellClient({ children }: { children: ReactNode }) {
   const [groups, setGroups] = useState<SessionTreeGroup[]>([]);
   const [expandedGroups, setExpandedGroups] = useState<Record<string, boolean>>({});
   const [selectedProject, setSelectedProject] = useState<string | null>(null);
+  const [transitioningSessionId, setTransitioningSessionId] = useState<string | null>(null);
 
   const refreshTree = useCallback(async () => {
     if (!isAuthenticated) {
@@ -258,6 +262,29 @@ export function AppShellClient({ children }: { children: ReactNode }) {
     : selectedProject
       ? "项目聚焦"
       : "浏览全局";
+
+  const warmSession = useCallback((sessionId: string) => {
+    void prefetchSessionBootstrap(sessionId).catch(() => {
+      // Best-effort warm path only.
+    });
+  }, []);
+
+  const enterSession = useCallback((session: Session) => {
+    setTransitioningSessionId(session.id);
+    markSessionTransition(session);
+    void prefetchSessionBootstrap(session.id).catch(() => {
+      // Best-effort warm path only.
+    });
+    router.push(`/sessions/${session.id}`);
+  }, [router]);
+
+  useEffect(() => {
+    if (!transitioningSessionId) return;
+    if (currentSessionId === transitioningSessionId) {
+      clearSessionTransition(transitioningSessionId);
+      setTransitioningSessionId(null);
+    }
+  }, [currentSessionId, transitioningSessionId]);
   const focusedGroupKey = useMemo(() => {
     const selectedGroup = treeGroups.find(
       (group) => selectedProject === routeProjectValue(group),
@@ -395,16 +422,16 @@ export function AppShellClient({ children }: { children: ReactNode }) {
                         {shortenPath(group.path)}
                       </span>
                       <div className="desktop-tree-folder-badges">
-                        <span className={`desktop-tree-tag desktop-tree-tag-${groupSignal.tone}`}>
+                        <span className={`desktop-tree-tag status-chip status-chip-${groupSignal.tone} desktop-tree-tag-${groupSignal.tone}`}>
                           {groupSignal.label}
                         </span>
                         {group.draftOnly && (
-                          <span className="desktop-tree-tag desktop-tree-tag-muted">
+                          <span className="desktop-tree-tag status-chip status-chip-muted desktop-tree-tag-muted">
                             草稿目录
                           </span>
                         )}
                         {containsActiveSession && !activeProject && (
-                          <span className="desktop-tree-tag desktop-tree-tag-accent">
+                          <span className="desktop-tree-tag status-chip status-chip-accent desktop-tree-tag-accent">
                             当前会话
                           </span>
                         )}
@@ -444,20 +471,26 @@ export function AppShellClient({ children }: { children: ReactNode }) {
                                   ? "desktop-tree-session-active"
                                   : ""
                               } ${
+                                transitioningSessionId === session.id
+                                  ? "desktop-tree-session-transitioning"
+                                  : ""
+                              } ${
                                 session.archivedAt
                                   ? "desktop-tree-session-archived"
                                   : ""
                               }`}
-                              onClick={() => router.push(`/sessions/${session.id}`)}
+                              onMouseEnter={() => warmSession(session.id)}
+                              onFocus={() => warmSession(session.id)}
+                              onClick={() => enterSession(session)}
                             >
                               <div className="desktop-tree-session-top">
                                 <span className="desktop-tree-session-title">
                                   {session.title || session.id}
                                 </span>
                                 <span
-                                  className={`desktop-tree-session-status desktop-tree-session-status-${sessionSignal.tone}`}
+                                  className={`desktop-tree-session-status status-chip status-chip-${sessionSignal.tone} desktop-tree-session-status-${sessionSignal.tone}`}
                                 >
-                                  {sessionSignal.label}
+                                  {transitioningSessionId === session.id ? "切换中" : sessionSignal.label}
                                 </span>
                               </div>
                               <div className="desktop-tree-session-bottom">

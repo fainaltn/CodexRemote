@@ -1,35 +1,44 @@
 package dev.codexremote.android.data.network
 
-import dev.codexremote.android.data.model.ListSessionsResponse
 import dev.codexremote.android.data.model.ArchiveSessionsResponse
-import dev.codexremote.android.data.model.UnarchiveSessionsResponse
 import dev.codexremote.android.data.model.Artifact
-import dev.codexremote.android.data.model.SessionDetailResponse
-import dev.codexremote.android.data.model.ListInboxResponse
+import dev.codexremote.android.data.model.BrowseProjectsResponse
 import dev.codexremote.android.data.model.ChangePasswordRequest
 import dev.codexremote.android.data.model.ChangePasswordResponse
+import dev.codexremote.android.data.model.CreateSessionRequest
+import dev.codexremote.android.data.model.CreateSessionResponse
+import dev.codexremote.android.data.model.InboxItem
+import dev.codexremote.android.data.model.ListFilesResponse
+import dev.codexremote.android.data.model.ListInboxResponse
+import dev.codexremote.android.data.model.ListPendingApprovalsResponse
+import dev.codexremote.android.data.model.ListSessionsResponse
+import dev.codexremote.android.data.model.ListSkillsResponse
 import dev.codexremote.android.data.model.LoginRequest
 import dev.codexremote.android.data.model.LoginResponse
 import dev.codexremote.android.data.model.PairingClaimRequest
 import dev.codexremote.android.data.model.PairingClaimResponse
-import dev.codexremote.android.data.model.InboxItem
-import dev.codexremote.android.data.model.BrowseProjectsResponse
-import dev.codexremote.android.data.model.ListFilesResponse
-import dev.codexremote.android.data.model.ListSkillsResponse
-import dev.codexremote.android.data.model.CreateSessionRequest
-import dev.codexremote.android.data.model.CreateSessionResponse
-import dev.codexremote.android.data.model.SearchFilesResponse
+import dev.codexremote.android.data.model.PendingApproval
+import dev.codexremote.android.data.model.PendingApprovalDecisionRequest
+import dev.codexremote.android.data.model.PendingApprovalDecisionResponse
 import dev.codexremote.android.data.model.RepoActionRequest
 import dev.codexremote.android.data.model.RepoActionResponse
 import dev.codexremote.android.data.model.RepoLogResponse
 import dev.codexremote.android.data.model.RepoStatusResponse
+import dev.codexremote.android.data.model.SearchFilesResponse
+import dev.codexremote.android.data.model.RuntimeCatalogResponse
+import dev.codexremote.android.data.model.RuntimeUsageResponse
+import dev.codexremote.android.data.model.Run
+import dev.codexremote.android.data.model.SessionDetailResponse
+import dev.codexremote.android.data.model.SessionHydrationResponse
+import dev.codexremote.android.data.model.SessionSummaryResponse
+import dev.codexremote.android.data.model.SessionMessagesResponse
 import dev.codexremote.android.data.model.StartLiveRunRequest
 import dev.codexremote.android.data.model.StartLiveRunResponse
 import dev.codexremote.android.data.model.StopLiveRunResponse
 import dev.codexremote.android.data.model.SubmitInboxLinkRequest
 import dev.codexremote.android.data.model.TrustedReconnectRequest
 import dev.codexremote.android.data.model.TrustedReconnectResponse
-import dev.codexremote.android.data.model.Run
+import dev.codexremote.android.data.model.UnarchiveSessionsResponse
 import io.ktor.client.HttpClient
 import io.ktor.client.call.body
 import io.ktor.client.engine.okhttp.OkHttp
@@ -38,6 +47,7 @@ import io.ktor.client.plugins.HttpTimeout
 import io.ktor.client.request.bearerAuth
 import io.ktor.client.request.get
 import io.ktor.client.request.patch
+import io.ktor.client.request.parameter
 import io.ktor.client.request.post
 import io.ktor.client.request.setBody
 import io.ktor.client.request.forms.MultiPartFormDataContent
@@ -85,6 +95,13 @@ data class ConnectionCheckResult(
     val degraded: Boolean = false,
 )
 
+data class DownloadedFilePayload(
+    val fileName: String,
+    val mimeType: String,
+    val sizeBytes: Long,
+    val bytes: ByteArray,
+)
+
 sealed interface LiveRunStreamEvent {
     data class Connected(
         val resumedFromEventId: Long?,
@@ -112,6 +129,11 @@ sealed interface LiveRunStreamEvent {
         val attempt: Int,
         val delayMs: Long,
         val message: String,
+    ) : LiveRunStreamEvent
+
+    data class ApprovalUpdate(
+        val approval: PendingApproval,
+        val eventId: Long?,
     ) : LiveRunStreamEvent
 }
 
@@ -300,12 +322,49 @@ class ApiClient(baseUrl: String) {
         return decodeResponse(response)
     }
 
+    suspend fun getSessionSummary(
+        token: String,
+        hostId: String,
+        sessionId: String,
+    ): SessionSummaryResponse {
+        val response = http.get("$baseUrl/api/hosts/$hostId/sessions/${encode(sessionId)}/summary") {
+            bearerAuth(token)
+        }
+        return decodeResponse(response)
+    }
+
+    suspend fun getSessionMessages(
+        token: String,
+        hostId: String,
+        sessionId: String,
+        limit: Int? = null,
+        beforeOrderIndex: Int? = null,
+    ): SessionMessagesResponse {
+        val response = http.get("$baseUrl/api/hosts/$hostId/sessions/${encode(sessionId)}/messages") {
+            bearerAuth(token)
+            limit?.let { parameter("limit", it) }
+            beforeOrderIndex?.let { parameter("beforeOrderIndex", it) }
+        }
+        return decodeResponse(response)
+    }
+
     suspend fun getLiveRun(
         token: String,
         hostId: String,
         sessionId: String,
     ): Run? {
         val response = http.get("$baseUrl/api/hosts/$hostId/sessions/${encode(sessionId)}/live") {
+            bearerAuth(token)
+        }
+        return decodeResponse(response)
+    }
+
+    suspend fun getSessionHydration(
+        token: String,
+        hostId: String,
+        sessionId: String,
+    ): SessionHydrationResponse {
+        val response = http.get("$baseUrl/api/hosts/$hostId/sessions/${encode(sessionId)}/live/hydration") {
             bearerAuth(token)
         }
         return decodeResponse(response)
@@ -411,6 +470,26 @@ class ApiClient(baseUrl: String) {
         return decodeResponse(response)
     }
 
+    suspend fun getRuntimeCatalog(
+        token: String,
+        hostId: String,
+    ): RuntimeCatalogResponse {
+        val response = http.get("$baseUrl/api/hosts/$hostId/runtime/catalog") {
+            bearerAuth(token)
+        }
+        return decodeResponse(response)
+    }
+
+    suspend fun getRuntimeUsage(
+        token: String,
+        hostId: String,
+    ): RuntimeUsageResponse {
+        val response = http.get("$baseUrl/api/hosts/$hostId/runtime/usage") {
+            bearerAuth(token)
+        }
+        return decodeResponse(response)
+    }
+
     suspend fun createSession(
         token: String,
         hostId: String,
@@ -488,6 +567,7 @@ class ApiClient(baseUrl: String) {
         prompt: String,
         model: String? = null,
         reasoningEffort: String? = null,
+        permissionMode: String? = null,
     ): StartLiveRunResponse {
         return http.post("$baseUrl/api/hosts/$hostId/sessions/${encode(sessionId)}/live") {
             bearerAuth(token)
@@ -497,9 +577,102 @@ class ApiClient(baseUrl: String) {
                     prompt = prompt,
                     model = model?.takeIf { it.isNotBlank() },
                     reasoningEffort = reasoningEffort?.takeIf { it.isNotBlank() },
+                    permissionMode = permissionMode?.takeIf { it.isNotBlank() },
                 )
             )
         }.body()
+    }
+
+    suspend fun listPendingApprovals(
+        token: String,
+        hostId: String,
+        sessionId: String,
+    ): ListPendingApprovalsResponse {
+        val response = http.get("$baseUrl/api/hosts/$hostId/sessions/${encode(sessionId)}/live/approvals") {
+            bearerAuth(token)
+        }
+        return decodeResponse(response)
+    }
+
+    suspend fun downloadSessionFile(
+        token: String,
+        hostId: String,
+        sessionId: String,
+        relativePath: String,
+    ): DownloadedFilePayload {
+        val response = http.get("$baseUrl/api/hosts/$hostId/files/download") {
+            bearerAuth(token)
+            url {
+                parameters.append("source", "cwd")
+                parameters.append("sessionId", sessionId)
+                parameters.append("path", relativePath)
+            }
+        }
+        if (!response.status.isSuccess()) {
+            throw IllegalStateException(
+                extractErrorMessage(response.bodyAsText(), response.status.value),
+            )
+        }
+        val bytes = response.body<ByteArray>()
+        val fileName = response.headers["X-Codex-File-Name"] ?: relativePath.substringAfterLast('/')
+        val mimeType = response.headers[HttpHeaders.ContentType] ?: "application/octet-stream"
+        val sizeBytes = response.headers["X-Codex-File-Size-Bytes"]?.toLongOrNull()
+            ?: bytes.size.toLong()
+        return DownloadedFilePayload(
+            fileName = fileName,
+            mimeType = mimeType,
+            sizeBytes = sizeBytes,
+            bytes = bytes,
+        )
+    }
+
+    suspend fun downloadAbsoluteFile(
+        token: String,
+        hostId: String,
+        sessionId: String,
+        absolutePath: String,
+    ): DownloadedFilePayload {
+        val response = http.get("$baseUrl/api/hosts/$hostId/files/download") {
+            bearerAuth(token)
+            url {
+                parameters.append("source", "absolute")
+                parameters.append("sessionId", sessionId)
+                parameters.append("path", absolutePath)
+            }
+        }
+        if (!response.status.isSuccess()) {
+            throw IllegalStateException(
+                extractErrorMessage(response.bodyAsText(), response.status.value),
+            )
+        }
+        val bytes = response.body<ByteArray>()
+        val fileName = response.headers["X-Codex-File-Name"] ?: absolutePath.substringAfterLast('/')
+        val mimeType = response.headers[HttpHeaders.ContentType] ?: "application/octet-stream"
+        val sizeBytes = response.headers["X-Codex-File-Size-Bytes"]?.toLongOrNull()
+            ?: bytes.size.toLong()
+        return DownloadedFilePayload(
+            fileName = fileName,
+            mimeType = mimeType,
+            sizeBytes = sizeBytes,
+            bytes = bytes,
+        )
+    }
+
+    suspend fun decidePendingApproval(
+        token: String,
+        hostId: String,
+        sessionId: String,
+        approvalId: String,
+        request: PendingApprovalDecisionRequest,
+    ): PendingApprovalDecisionResponse {
+        val response = http.post(
+            "$baseUrl/api/hosts/$hostId/sessions/${encode(sessionId)}/live/approvals/${encode(approvalId)}/decision"
+        ) {
+            bearerAuth(token)
+            contentType(ContentType.Application.Json)
+            setBody(request)
+        }
+        return decodeResponse(response)
     }
 
     suspend fun stopLiveRun(
@@ -581,6 +754,10 @@ class ApiClient(baseUrl: String) {
                             "run" -> {
                                 val run = json.decodeFromString<Run?>(eventData)
                                 emit(LiveRunStreamEvent.RunSnapshot(run = run, eventId = currentId))
+                            }
+                            "approval" -> {
+                                val approval = json.decodeFromString<PendingApproval>(eventData)
+                                emit(LiveRunStreamEvent.ApprovalUpdate(approval = approval, eventId = currentId))
                             }
                             "gap" -> {
                                 val payload = json.decodeFromString<GapPayload>(eventData)
@@ -664,8 +841,6 @@ class ApiClient(baseUrl: String) {
             reconnectDelayMs = (reconnectDelayMs * 2).coerceAtMost(SSE_RECONNECT_MAX_MS)
         }
     }
-
-    // ── Inbox ───────────────────────────────────────────────────────────
 
     suspend fun listInbox(token: String, hostId: String): ListInboxResponse {
         val response = http.get("$baseUrl/api/hosts/$hostId/inbox") {

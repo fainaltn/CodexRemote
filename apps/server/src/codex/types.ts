@@ -46,6 +46,7 @@ export interface StartRunOptions {
   prompt: string;
   model?: string;
   reasoningEffort?: string;
+  permissionMode?: PermissionMode;
   /**
    * Distinguishes "create an empty shell session" from
    * "create a session and immediately run the first prompt".
@@ -56,6 +57,69 @@ export interface StartRunOptions {
    */
   startupMode?: "create-only" | "create-and-run";
 }
+
+export type PermissionMode = "on-request" | "full-access";
+
+export type CodexApprovalKind = "command" | "fileChange" | "permissions";
+export type CodexApprovalScope = "turn" | "session";
+export type CodexApprovalStatus =
+  | "pending"
+  | "approved"
+  | "declined"
+  | "cancelled"
+  | "failed";
+
+export interface CodexPermissionProfile {
+  fileSystem?: {
+    read?: string[] | null;
+    write?: string[] | null;
+  } | null;
+  network?: {
+    enabled?: boolean | null;
+  } | null;
+}
+
+export interface CodexApprovalRequest {
+  id: string;
+  threadId: string;
+  turnId: string;
+  itemId: string;
+  kind: CodexApprovalKind;
+  scope: CodexApprovalScope;
+  status: CodexApprovalStatus;
+  createdAt: string;
+  reason?: string | null;
+  title: string;
+  detail?: string | null;
+  rpcRequestIdValue: string | number;
+  rpcRequestId: string;
+  rpcMethod:
+    | "item/commandExecution/requestApproval"
+    | "item/fileChange/requestApproval"
+    | "item/permissions/requestApproval";
+  approvalId?: string | null;
+  command?: string | null;
+  cwd?: string | null;
+  networkHost?: string | null;
+  networkProtocol?: string | null;
+  grantRoot?: string | null;
+  permissions?: CodexPermissionProfile | null;
+}
+
+export type CodexApprovalDecision =
+  | {
+      kind: "command";
+      decision: "accept" | "acceptForSession" | "decline" | "cancel";
+    }
+  | {
+      kind: "fileChange";
+      decision: "accept" | "acceptForSession" | "decline" | "cancel";
+    }
+  | {
+      kind: "permissions";
+      scope: CodexApprovalScope;
+      permissions: CodexPermissionProfile;
+    };
 
 /** Handle returned after spawning a Codex process. */
 export interface RunHandle {
@@ -69,6 +133,15 @@ export interface RunHandle {
   stop: () => Promise<void>;
   /** Register a callback that fires when the child process exits. */
   onExit: (cb: (code: number | null) => void) => void;
+  /** Register a callback that fires when the run requests user approval. */
+  onApprovalRequest?: (
+    cb: (approval: CodexApprovalRequest) => void,
+  ) => () => void;
+  /** Submit a decision for a pending approval request. */
+  respondToApproval?: (
+    approvalId: string,
+    decision: CodexApprovalDecision,
+  ) => Promise<void>;
 }
 
 export interface NewRunHandle {

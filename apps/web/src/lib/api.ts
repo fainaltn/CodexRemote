@@ -17,6 +17,10 @@ export interface SessionMessage {
   id: string;
   role: "user" | "assistant" | "system";
   kind: "message" | "reasoning";
+  turnId?: string;
+  itemId?: string;
+  orderIndex: number;
+  isStreaming?: boolean;
   text: string;
   createdAt: string;
 }
@@ -24,6 +28,30 @@ export interface SessionMessage {
 export interface SessionDetail {
   session: Session;
   messages: SessionMessage[];
+}
+
+export interface SessionSummaryPayload {
+  session: Session;
+}
+
+export interface SessionMessagesPayload {
+  messages: SessionMessage[];
+  limit: number;
+  hasMore: boolean;
+  nextBeforeOrderIndex: number | null;
+}
+
+export interface SessionBootstrapPayload {
+  session: Session;
+  messages: SessionMessage[];
+  hasMore: boolean;
+  nextBeforeOrderIndex: number | null;
+  fetchedAt: number;
+}
+
+export interface SessionTransitionPayload {
+  session: Session;
+  startedAt: number;
 }
 
 export interface ProjectDirectory {
@@ -41,6 +69,14 @@ export interface BrowseProjectsResponse {
 export interface DraftProject {
   path: string;
   addedAt: string;
+}
+
+export interface ActiveSessionMarker {
+  sessionId: string;
+  cwd: string | null;
+  title: string;
+  updatedAt: string;
+  focusedAt: number;
 }
 
 export type RunStatus = "pending" | "running" | "completed" | "failed" | "stopped";
@@ -105,7 +141,14 @@ export interface InboxItem {
 const TOKEN_KEY = "codexremote_token";
 const EXPIRES_KEY = "codexremote_token_expires";
 const DRAFT_PROJECTS_KEY = "codexremote_draft_projects";
+const ACTIVE_SESSION_KEY = "codexremote_active_session";
 const SHELL_DATA_EVENT = "codexremote-shell-data-changed";
+const SESSION_BOOTSTRAP_CACHE_TTL_MS = 15_000;
+const SESSION_TRANSITION_TTL_MS = 15_000;
+const sessionBootstrapCache = new Map<string, SessionBootstrapPayload>();
+const sessionBootstrapInflight = new Map<string, Promise<SessionBootstrapPayload>>();
+const sessionTransitionCache = new Map<string, SessionTransitionPayload>();
+let activeSessionCache: ActiveSessionMarker | null = null;
 
 export function notifyShellDataChanged(): void {
   if (typeof window === "undefined") return;
@@ -129,6 +172,102 @@ function setToken(token: string, expiresAt: string): void {
 export function clearToken(): void {
   localStorage.removeItem(TOKEN_KEY);
   localStorage.removeItem(EXPIRES_KEY);
+}
+
+function sameActiveSessionMarker(
+  left: ActiveSessionMarker | null,
+  right: ActiveSessionMarker | null,
+): boolean {
+  if (left === right) return true;
+  if (!left || !right) return false;
+  return (
+    left.sessionId === right.sessionId &&
+    left.cwd === right.cwd &&
+    left.title === right.title &&
+    left.updatedAt === right.updatedAt &&
+    left.focusedAt === right.focusedAt
+  );
+}
+
+function readActiveSessionMarker(): ActiveSessionMarker | null {
+  if (typeof window === "undefined") return null;
+
+  const raw = localStorage.getItem(ACTIVE_SESSION_KEY);
+  if (!raw) return null;
+
+  try {
+    const parsed = JSON.parse(raw) as unknown;
+    if (!parsed || typeof parsed !== "object") return null;
+
+    const sessionId = (parsed as { sessionId?: unknown }).sessionId;
+    const cwd = (parsed as { cwd?: unknown }).cwd;
+    const title = (parsed as { title?: unknown }).title;
+    const updatedAt = (parsed as { updatedAt?: unknown }).updatedAt;
+    const focusedAt = (parsed as { focusedAt?: unknown }).focusedAt;
+
+    if (
+      typeof sessionId !== "string" ||
+      (cwd !== null && cwd !== undefined && typeof cwd !== "string") ||
+      typeof title !== "string" ||
+      typeof updatedAt !== "string" ||
+      typeof focusedAt !== "number"
+    ) {
+      return null;
+    }
+
+    return {
+      sessionId,
+      cwd: typeof cwd === "string" ? cwd : null,
+      title,
+      updatedAt,
+      focusedAt,
+    };
+  } catch {
+    return null;
+  }
+}
+
+export function getRememberedActiveSession(): ActiveSessionMarker | null {
+  if (activeSessionCache) {
+    return activeSessionCache;
+  }
+  const marker = readActiveSessionMarker();
+  activeSessionCache = marker;
+  return marker;
+}
+
+export function rememberActiveSession(session: Session): ActiveSessionMarker {
+  const next: ActiveSessionMarker = {
+    sessionId: session.id,
+    cwd: session.cwd,
+    title: session.title,
+    updatedAt: session.updatedAt,
+    focusedAt: Date.now(),
+  };
+
+  activeSessionCache = next;
+
+  if (typeof window !== "undefined") {
+    const previous = readActiveSessionMarker();
+    if (!sameActiveSessionMarker(previous, next)) {
+      localStorage.setItem(ACTIVE_SESSION_KEY, JSON.stringify(next));
+      notifyShellDataChanged();
+    }
+  }
+
+  return next;
+}
+
+export function clearRememberedActiveSession(sessionId?: string): void {
+  const current = getRememberedActiveSession();
+  if (sessionId && current?.sessionId !== sessionId) {
+    return;
+  }
+
+  activeSessionCache = null;
+  if (typeof window === "undefined") return;
+  localStorage.removeItem(ACTIVE_SESSION_KEY);
+  notifyShellDataChanged();
 }
 
 function normalizeProjectPath(path: string): string {
@@ -289,6 +428,95 @@ export async function listSessions(): Promise<{ sessions: Session[] }> {
 
 export async function getSessionDetail(sessionId: string): Promise<SessionDetail> {
   return apiFetch(`/api/hosts/${HOST}/sessions/${encodeURIComponent(sessionId)}`);
+}
+
+export async function getSessionSummary(
+  sessionId: string,
+): Promise<SessionSummaryPayload> {
+  return apiFetch(`/api/hosts/${HOST}/sessions/${encodeURIComponent(sessionId)}/summary`);
+}
+
+export async function getSessionMessages(
+  sessionId: string,
+  opts?: { limit?: number; beforeOrderIndex?: number | null },
+): Promise<SessionMessagesPayload> {
+  const search = new URLSearchParams();
+  if (opts?.limit) {
+    search.set("limit", String(opts.limit));
+  }
+  if (opts?.beforeOrderIndex !== undefined && opts.beforeOrderIndex !== null) {
+    search.set("beforeOrderIndex", String(opts.beforeOrderIndex));
+  }
+  const suffix = search.size > 0 ? `?${search.toString()}` : "";
+  return apiFetch(
+    `/api/hosts/${HOST}/sessions/${encodeURIComponent(sessionId)}/messages${suffix}`,
+  );
+}
+
+export function getCachedSessionBootstrap(
+  sessionId: string,
+): SessionBootstrapPayload | null {
+  const cached = sessionBootstrapCache.get(sessionId);
+  if (!cached) return null;
+  if (Date.now() - cached.fetchedAt > SESSION_BOOTSTRAP_CACHE_TTL_MS) {
+    sessionBootstrapCache.delete(sessionId);
+    return null;
+  }
+  return cached;
+}
+
+export async function prefetchSessionBootstrap(
+  sessionId: string,
+  opts?: { limit?: number },
+): Promise<SessionBootstrapPayload> {
+  const cached = getCachedSessionBootstrap(sessionId);
+  if (cached) return cached;
+
+  const inflight = sessionBootstrapInflight.get(sessionId);
+  if (inflight) return inflight;
+
+  const request = Promise.all([
+    getSessionSummary(sessionId),
+    getSessionMessages(sessionId, { limit: opts?.limit ?? 40 }),
+  ]).then(([summary, tail]) => {
+    const payload: SessionBootstrapPayload = {
+      session: summary.session,
+      messages: tail.messages,
+      hasMore: tail.hasMore,
+      nextBeforeOrderIndex: tail.nextBeforeOrderIndex,
+      fetchedAt: Date.now(),
+    };
+    sessionBootstrapCache.set(sessionId, payload);
+    sessionBootstrapInflight.delete(sessionId);
+    return payload;
+  }).catch((error) => {
+    sessionBootstrapInflight.delete(sessionId);
+    throw error;
+  });
+
+  sessionBootstrapInflight.set(sessionId, request);
+  return request;
+}
+
+export function markSessionTransition(session: Session): void {
+  sessionTransitionCache.set(session.id, {
+    session,
+    startedAt: Date.now(),
+  });
+}
+
+export function getSessionTransition(sessionId: string): SessionTransitionPayload | null {
+  const cached = sessionTransitionCache.get(sessionId);
+  if (!cached) return null;
+  if (Date.now() - cached.startedAt > SESSION_TRANSITION_TTL_MS) {
+    sessionTransitionCache.delete(sessionId);
+    return null;
+  }
+  return cached;
+}
+
+export function clearSessionTransition(sessionId: string): void {
+  sessionTransitionCache.delete(sessionId);
 }
 
 export async function createSession(

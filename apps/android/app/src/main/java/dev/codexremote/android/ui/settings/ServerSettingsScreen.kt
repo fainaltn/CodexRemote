@@ -5,6 +5,7 @@ import android.content.Intent
 import android.net.Uri
 import android.os.Build
 import android.provider.Settings
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Column
@@ -31,6 +32,7 @@ import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.Surface
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.runtime.Composable
@@ -54,11 +56,13 @@ import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.compose.viewModel
 import dev.codexremote.android.R
 import dev.codexremote.android.data.model.Server
+import dev.codexremote.android.data.model.RuntimeCatalogResponse
+import dev.codexremote.android.data.model.RuntimeCreditsSnapshot
+import dev.codexremote.android.data.model.RuntimeModelDescriptor
+import dev.codexremote.android.data.model.RuntimeRateLimitWindow
+import dev.codexremote.android.data.model.RuntimeUsageResponse
 import dev.codexremote.android.data.network.ApiClient
 import dev.codexremote.android.data.repository.ServerRepository
-import dev.codexremote.android.ui.sessions.RuntimeControlSheetContent
-import dev.codexremote.android.ui.sessions.RuntimeControlTarget
-import dev.codexremote.android.ui.sessions.runtimeControlLabel
 import dev.codexremote.android.ui.sessions.ShimmerBlock
 import dev.codexremote.android.ui.sessions.TimelineNoticeCard
 import dev.codexremote.android.ui.sessions.TimelineNoticeTone
@@ -74,13 +78,32 @@ import java.time.Instant
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 
+private const val SETTINGS_HOST_ID = "local"
+
 data class ServerSettingsUiState(
     val loading: Boolean = true,
     val saving: Boolean = false,
     val server: Server? = null,
     val runtimeDefaultModel: String? = null,
     val runtimeDefaultReasoningEffort: String? = null,
+    val runtimeDefaultPermissionMode: String? = null,
+    val runtimeCatalog: RuntimeCatalogResponse? = null,
+    val runtimeUsage: RuntimeUsageResponse? = null,
+    val runtimeLoading: Boolean = false,
+    val runtimeError: String? = null,
     val error: String? = null,
+)
+
+private enum class RuntimeSettingTarget {
+    Model,
+    ReasoningEffort,
+    PermissionMode,
+}
+
+private data class RuntimeSelectionOption(
+    val value: String?,
+    val title: String,
+    val detail: String,
 )
 
 class ServerSettingsViewModel(application: Application) : AndroidViewModel(application) {
@@ -92,6 +115,60 @@ class ServerSettingsViewModel(application: Application) : AndroidViewModel(appli
     private fun userFacingMessage(error: Throwable, fallback: String): String {
         val resolved = ApiClient.describeNetworkFailure(error)
         return if (resolved.isBlank() || resolved == "连接失败，请稍后重试") fallback else resolved
+    }
+
+    private suspend fun loadRuntimeData(server: Server) {
+        val token = server.token?.takeIf { it.isNotBlank() }
+        if (token == null) {
+            _uiState.update {
+                it.copy(
+                    runtimeLoading = false,
+                    runtimeError = getApplication<Application>().getString(R.string.server_settings_error_not_logged_in),
+                )
+            }
+            return
+        }
+
+        _uiState.update { it.copy(runtimeLoading = true, runtimeError = null) }
+        val client = ApiClient(server.baseUrl)
+        try {
+            val catalog = runCatching {
+                client.getRuntimeCatalog(token = token, hostId = SETTINGS_HOST_ID)
+            }
+            val usage = runCatching {
+                client.getRuntimeUsage(token = token, hostId = SETTINGS_HOST_ID)
+            }
+
+            val runtimeError = buildList {
+                catalog.exceptionOrNull()?.let {
+                    add(
+                        userFacingMessage(
+                            it,
+                            getApplication<Application>().getString(R.string.server_settings_usage_unavailable),
+                        )
+                    )
+                }
+                usage.exceptionOrNull()?.let {
+                    add(
+                        userFacingMessage(
+                            it,
+                            getApplication<Application>().getString(R.string.server_settings_usage_unavailable),
+                        )
+                    )
+                }
+            }.distinct().joinToString("\n").ifBlank { null }
+
+            _uiState.update { current ->
+                current.copy(
+                    runtimeCatalog = catalog.getOrNull(),
+                    runtimeUsage = usage.getOrNull(),
+                    runtimeLoading = false,
+                    runtimeError = runtimeError,
+                )
+            }
+        } finally {
+            client.close()
+        }
     }
 
     fun load(serverId: String) {
@@ -108,7 +185,9 @@ class ServerSettingsViewModel(application: Application) : AndroidViewModel(appli
                     server = server,
                     runtimeDefaultModel = repo.getRuntimeDefaultModel(serverId),
                     runtimeDefaultReasoningEffort = repo.getRuntimeDefaultReasoningEffort(serverId),
+                    runtimeDefaultPermissionMode = repo.getRuntimeDefaultPermissionMode(serverId),
                 )
+                loadRuntimeData(server)
             } catch (error: Exception) {
                 _uiState.value = ServerSettingsUiState(
                     loading = false,
@@ -125,6 +204,7 @@ class ServerSettingsViewModel(application: Application) : AndroidViewModel(appli
         serverId: String,
         model: String?,
         reasoningEffort: String?,
+        permissionMode: String?,
         onSuccess: (String) -> Unit,
         onError: (String) -> Unit,
     ) {
@@ -136,9 +216,11 @@ class ServerSettingsViewModel(application: Application) : AndroidViewModel(appli
             try {
                 repo.setRuntimeDefaultModel(serverId, model)
                 repo.setRuntimeDefaultReasoningEffort(serverId, reasoningEffort)
+                repo.setRuntimeDefaultPermissionMode(serverId, permissionMode)
                 _uiState.value = _uiState.value.copy(
                     runtimeDefaultModel = model,
                     runtimeDefaultReasoningEffort = reasoningEffort,
+                    runtimeDefaultPermissionMode = permissionMode,
                     server = server,
                 )
                 onSuccess(getApplication<Application>().getString(R.string.server_settings_runtime_saved))
@@ -162,9 +244,18 @@ class ServerSettingsViewModel(application: Application) : AndroidViewModel(appli
             serverId = serverId,
             model = null,
             reasoningEffort = null,
+            permissionMode = null,
             onSuccess = onSuccess,
             onError = onError,
         )
+    }
+
+    fun refreshRuntimeData(serverId: String) {
+        viewModelScope.launch {
+            val server = _uiState.value.server ?: return@launch
+            if (server.id != serverId) return@launch
+            loadRuntimeData(server)
+        }
     }
 
     fun updateTrustedReconnect(
@@ -364,7 +455,7 @@ fun ServerSettingsScreen(
     var newPassword by remember { mutableStateOf("") }
     var confirmPassword by remember { mutableStateOf("") }
     var localError by remember { mutableStateOf<String?>(null) }
-    var runtimeSheetTarget by remember { mutableStateOf<RuntimeControlTarget?>(null) }
+    var runtimeSheetTarget by remember { mutableStateOf<RuntimeSettingTarget?>(null) }
     val snackbarHostState = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
 
@@ -410,9 +501,18 @@ fun ServerSettingsScreen(
     val notificationsEnabled = stringResource(R.string.server_settings_notifications_enabled)
     val notificationsDisabled = stringResource(R.string.server_settings_notifications_disabled)
     val notificationsManage = stringResource(R.string.server_settings_notifications_manage)
+    val usageTitle = stringResource(R.string.server_settings_usage_title)
+    val usageMessage = stringResource(R.string.server_settings_usage_message)
+    val usageLoading = stringResource(R.string.server_settings_usage_loading)
+    val usageRefresh = stringResource(R.string.server_settings_usage_refresh)
+    val usagePlanLabel = stringResource(R.string.server_settings_usage_plan_label)
+    val usageCreditsLabel = stringResource(R.string.server_settings_usage_credits_label)
+    val usageWindow5hLabel = stringResource(R.string.server_settings_usage_window_5h_label)
+    val usageWindow7dLabel = stringResource(R.string.server_settings_usage_window_7d_label)
     val runtimeTitle = stringResource(R.string.server_settings_runtime_title)
     val runtimeMessage = stringResource(R.string.server_settings_runtime_message)
     val runtimeReset = stringResource(R.string.server_settings_runtime_reset)
+    val runtimePermissionTitle = stringResource(R.string.server_settings_runtime_permission_title)
     val passwordTitle = stringResource(R.string.server_settings_password_title)
     val passwordMessage = stringResource(R.string.server_settings_password_message)
     val trustLabelTitle = stringResource(R.string.server_settings_trust_label_title)
@@ -551,6 +651,63 @@ fun ServerSettingsScreen(
                     Spacer(modifier = Modifier.height(16.dp))
 
                     TimelineNoticeCard(
+                        title = usageTitle,
+                        message = when {
+                            uiState.runtimeLoading && uiState.runtimeUsage == null -> usageLoading
+                            uiState.runtimeError != null && uiState.runtimeUsage == null -> uiState.runtimeError.orEmpty()
+                            else -> usageMessage
+                        },
+                        tone = if (uiState.runtimeError != null && uiState.runtimeUsage == null) {
+                            TimelineNoticeTone.Warning
+                        } else {
+                            TimelineNoticeTone.Neutral
+                        },
+                        stateLabel = when {
+                            uiState.runtimeLoading && uiState.runtimeUsage == null -> loadingStateLabel
+                            uiState.runtimeError != null && uiState.runtimeUsage == null -> errorStateLabel
+                            else -> runtimePlanLabel(uiState.runtimeUsage?.rateLimits?.planType)
+                        },
+                        content = {
+                            if (uiState.runtimeLoading && uiState.runtimeUsage == null) {
+                                ShimmerBlock(lines = 2)
+                            } else {
+                                val usage = uiState.runtimeUsage?.rateLimits
+                                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                    SettingsMetaRow(
+                                        usagePlanLabel,
+                                        runtimePlanLabel(usage?.planType),
+                                    )
+                                    SettingsMetaRow(
+                                        usageCreditsLabel,
+                                        runtimeCreditsLabel(usage?.credits),
+                                    )
+                                    SettingsMetaRow(
+                                        usageWindow5hLabel,
+                                        runtimeWindowSummary(usage?.primary),
+                                    )
+                                    SettingsMetaRow(
+                                        usageWindow7dLabel,
+                                        runtimeWindowSummary(usage?.secondary),
+                                    )
+                                    if (uiState.runtimeError != null && uiState.runtimeUsage != null) {
+                                        Text(
+                                            text = uiState.runtimeError.orEmpty(),
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        )
+                                    }
+                                    TextButton(
+                                        onClick = { viewModel.refreshRuntimeData(serverId) },
+                                    ) {
+                                        Text(usageRefresh)
+                                    }
+                                }
+                            }
+                        },
+                    )
+                    Spacer(modifier = Modifier.height(16.dp))
+
+                    TimelineNoticeCard(
                         title = runtimeTitle,
                         message = runtimeMessage,
                         tone = TimelineNoticeTone.Neutral,
@@ -558,23 +715,33 @@ fun ServerSettingsScreen(
                         content = {
                             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                                 TextButton(
-                                    onClick = { runtimeSheetTarget = RuntimeControlTarget.Model },
+                                    onClick = { runtimeSheetTarget = RuntimeSettingTarget.Model },
                                 ) {
                                     Text(
                                         stringResource(
                                             R.string.session_control_model_format,
-                                            runtimeControlLabel(RuntimeControlTarget.Model, uiState.runtimeDefaultModel),
+                                            runtimeModelDisplayLabel(
+                                                uiState.runtimeDefaultModel,
+                                                uiState.runtimeCatalog,
+                                            ),
                                         ),
                                     )
                                 }
                                 TextButton(
-                                    onClick = { runtimeSheetTarget = RuntimeControlTarget.ReasoningEffort },
+                                    onClick = { runtimeSheetTarget = RuntimeSettingTarget.ReasoningEffort },
                                 ) {
                                     Text(
                                         stringResource(
                                             R.string.session_control_reasoning_format,
-                                            runtimeControlLabel(RuntimeControlTarget.ReasoningEffort, uiState.runtimeDefaultReasoningEffort),
+                                            runtimeReasoningDisplayLabel(uiState.runtimeDefaultReasoningEffort),
                                         ),
+                                    )
+                                }
+                                TextButton(
+                                    onClick = { runtimeSheetTarget = RuntimeSettingTarget.PermissionMode },
+                                ) {
+                                    Text(
+                                        "${runtimePermissionTitle} · ${runtimePermissionDisplayLabel(uiState.runtimeDefaultPermissionMode)}",
                                     )
                                 }
                                 TextButton(
@@ -775,31 +942,36 @@ fun ServerSettingsScreen(
     }
 
     if (runtimeSheetTarget != null) {
-        val target = runtimeSheetTarget ?: RuntimeControlTarget.Model
+        val target = runtimeSheetTarget ?: RuntimeSettingTarget.Model
         val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
         ModalBottomSheet(
             onDismissRequest = { runtimeSheetTarget = null },
             sheetState = sheetState,
         ) {
-            RuntimeControlSheetContent(
+            RuntimeSelectionSheetContent(
                 target = target,
-                currentValue = when (target) {
-                    RuntimeControlTarget.Model -> uiState.runtimeDefaultModel
-                    RuntimeControlTarget.ReasoningEffort -> uiState.runtimeDefaultReasoningEffort
-                },
+                catalog = uiState.runtimeCatalog,
+                currentModel = uiState.runtimeDefaultModel,
+                currentReasoning = uiState.runtimeDefaultReasoningEffort,
+                currentPermissionMode = uiState.runtimeDefaultPermissionMode,
                 onSelect = { value ->
                     val nextModel = when (target) {
-                        RuntimeControlTarget.Model -> value
-                        RuntimeControlTarget.ReasoningEffort -> uiState.runtimeDefaultModel
+                        RuntimeSettingTarget.Model -> value
+                        else -> uiState.runtimeDefaultModel
                     }
                     val nextReasoning = when (target) {
-                        RuntimeControlTarget.Model -> uiState.runtimeDefaultReasoningEffort
-                        RuntimeControlTarget.ReasoningEffort -> value
+                        RuntimeSettingTarget.ReasoningEffort -> value
+                        else -> uiState.runtimeDefaultReasoningEffort
+                    }
+                    val nextPermissionMode = when (target) {
+                        RuntimeSettingTarget.PermissionMode -> value
+                        else -> uiState.runtimeDefaultPermissionMode
                     }
                     viewModel.updateRuntimeDefaults(
                         serverId = serverId,
                         model = nextModel,
                         reasoningEffort = nextReasoning,
+                        permissionMode = nextPermissionMode,
                         onSuccess = { message ->
                             scope.launch { snackbarHostState.showSnackbar(message) }
                         },
@@ -832,6 +1004,284 @@ private fun SettingsMetaRow(
         )
     }
 }
+
+@Composable
+private fun RuntimeSelectionSheetContent(
+    target: RuntimeSettingTarget,
+    catalog: RuntimeCatalogResponse?,
+    currentModel: String?,
+    currentReasoning: String?,
+    currentPermissionMode: String?,
+    onSelect: (String?) -> Unit,
+) {
+    val sheetScrollState = rememberScrollState()
+    val title = when (target) {
+        RuntimeSettingTarget.Model -> stringResource(R.string.server_settings_runtime_model_picker_title)
+        RuntimeSettingTarget.ReasoningEffort -> stringResource(R.string.server_settings_runtime_reasoning_picker_title)
+        RuntimeSettingTarget.PermissionMode -> stringResource(R.string.server_settings_runtime_permission_picker_title)
+    }
+    val message = when (target) {
+        RuntimeSettingTarget.Model -> stringResource(R.string.server_settings_runtime_message)
+        RuntimeSettingTarget.ReasoningEffort -> stringResource(R.string.server_settings_runtime_message)
+        RuntimeSettingTarget.PermissionMode -> stringResource(R.string.server_settings_runtime_permission_picker_message)
+    }
+    val options = runtimeSelectionOptions(target, catalog)
+
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 20.dp, vertical = 12.dp)
+            .verticalScroll(sheetScrollState),
+        verticalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        Text(
+            text = title,
+            style = MaterialTheme.typography.titleMedium,
+        )
+        Text(
+            text = message,
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+
+        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            options.forEach { option ->
+                val selected = when (target) {
+                    RuntimeSettingTarget.Model -> currentModel == option.value
+                    RuntimeSettingTarget.ReasoningEffort -> currentReasoning == option.value
+                    RuntimeSettingTarget.PermissionMode -> currentPermissionMode == option.value
+                }
+                Surface(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable { onSelect(option.value) },
+                    shape = MaterialTheme.shapes.medium,
+                    color = if (selected) {
+                        MaterialTheme.colorScheme.primaryContainer
+                    } else {
+                        MaterialTheme.colorScheme.surfaceVariant
+                    },
+                ) {
+                    Column(
+                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
+                        verticalArrangement = Arrangement.spacedBy(4.dp),
+                    ) {
+                        Text(
+                            text = option.title,
+                            style = MaterialTheme.typography.titleSmall,
+                            color = if (selected) {
+                                MaterialTheme.colorScheme.onPrimaryContainer
+                            } else {
+                                MaterialTheme.colorScheme.onSurface
+                            },
+                        )
+                        Text(
+                            text = option.detail,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = if (selected) {
+                                MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.78f)
+                            } else {
+                                MaterialTheme.colorScheme.onSurfaceVariant
+                            },
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun runtimeSelectionOptions(
+    target: RuntimeSettingTarget,
+    catalog: RuntimeCatalogResponse?,
+) = when (target) {
+    RuntimeSettingTarget.Model -> buildList {
+        add(
+            RuntimeSelectionOption(
+                value = null,
+                title = stringResource(R.string.session_controls_runtime_auto_label),
+                detail = stringResource(R.string.session_controls_runtime_model_auto_detail),
+            )
+        )
+        val models = catalog?.models
+            ?.filterNot { it.hidden }
+            ?.takeIf { it.isNotEmpty() }
+            ?: listOf(
+                RuntimeModelDescriptor(
+                    id = "gpt-5.4",
+                    model = "gpt-5.4",
+                    displayName = stringResource(R.string.session_controls_runtime_model_gpt_5_4_label),
+                    description = stringResource(R.string.session_controls_runtime_model_gpt_5_4_detail),
+                    hidden = false,
+                    isDefault = true,
+                    defaultReasoningEffort = "medium",
+                    supportedReasoningEfforts = emptyList(),
+                ),
+                RuntimeModelDescriptor(
+                    id = "o4-mini",
+                    model = "o4-mini",
+                    displayName = stringResource(R.string.session_controls_runtime_model_o4_mini_label),
+                    description = stringResource(R.string.session_controls_runtime_model_o4_mini_detail),
+                    hidden = false,
+                    isDefault = false,
+                    defaultReasoningEffort = "medium",
+                    supportedReasoningEfforts = emptyList(),
+                ),
+            )
+        models.sortedWith(
+            compareByDescending<RuntimeModelDescriptor> { it.isDefault }
+                .thenBy { it.displayName.lowercase() }
+        ).forEach { model ->
+            add(
+                RuntimeSelectionOption(
+                    value = model.model,
+                    title = model.displayName,
+                    detail = model.description,
+                )
+            )
+        }
+    }
+
+    RuntimeSettingTarget.ReasoningEffort -> buildList {
+        add(
+            RuntimeSelectionOption(
+                value = null,
+                title = stringResource(R.string.server_settings_runtime_reasoning_auto_label),
+                detail = stringResource(R.string.server_settings_runtime_reasoning_auto_detail),
+            )
+        )
+        val supportedEfforts = linkedMapOf<String, String>()
+        catalog?.models.orEmpty().forEach { model ->
+            model.supportedReasoningEfforts.forEach { effort ->
+                supportedEfforts.putIfAbsent(effort.reasoningEffort, effort.description)
+            }
+        }
+        val ordering = listOf("low", "medium", "high", "xhigh")
+        val orderedEfforts = if (supportedEfforts.isNotEmpty()) {
+            ordering.filter { supportedEfforts.containsKey(it) } + supportedEfforts.keys.filterNot { it in ordering }.sorted()
+        } else {
+            ordering
+        }
+        orderedEfforts.forEach { effort ->
+            add(
+                RuntimeSelectionOption(
+                    value = effort,
+                    title = runtimeReasoningDisplayLabel(effort),
+                    detail = supportedEfforts[effort] ?: runtimeReasoningDetailLabel(effort),
+                )
+            )
+        }
+    }
+
+    RuntimeSettingTarget.PermissionMode -> listOf(
+        RuntimeSelectionOption(
+            value = "on-request",
+            title = stringResource(R.string.server_settings_runtime_permission_on_request_label),
+            detail = stringResource(R.string.server_settings_runtime_permission_on_request_detail),
+        ),
+        RuntimeSelectionOption(
+            value = "full-access",
+            title = stringResource(R.string.server_settings_runtime_permission_full_label),
+            detail = stringResource(R.string.server_settings_runtime_permission_full_detail),
+        ),
+    )
+}
+
+@Composable
+private fun runtimeModelDisplayLabel(
+    currentModel: String?,
+    catalog: RuntimeCatalogResponse?,
+): String {
+    if (currentModel.isNullOrBlank()) {
+        return stringResource(R.string.session_controls_runtime_auto_label)
+    }
+    return catalog?.models
+        ?.firstOrNull { it.model == currentModel || it.id == currentModel }
+        ?.displayName
+        ?: currentModel.orEmpty()
+}
+
+@Composable
+private fun runtimeReasoningDisplayLabel(value: String?): String = when (value) {
+    null, "" -> stringResource(R.string.server_settings_runtime_reasoning_auto_label)
+    "low" -> stringResource(R.string.server_settings_runtime_reasoning_low_label)
+    "medium" -> stringResource(R.string.server_settings_runtime_reasoning_medium_label)
+    "high" -> stringResource(R.string.server_settings_runtime_reasoning_high_label)
+    "xhigh" -> stringResource(R.string.server_settings_runtime_reasoning_xhigh_label)
+    else -> value.orEmpty()
+}
+
+@Composable
+private fun runtimeReasoningDetailLabel(value: String?): String = when (value) {
+    null, "" -> stringResource(R.string.server_settings_runtime_reasoning_auto_detail)
+    "low" -> stringResource(R.string.server_settings_runtime_reasoning_low_detail)
+    "medium" -> stringResource(R.string.server_settings_runtime_reasoning_medium_detail)
+    "high" -> stringResource(R.string.server_settings_runtime_reasoning_high_detail)
+    "xhigh" -> stringResource(R.string.server_settings_runtime_reasoning_xhigh_detail)
+    else -> value.orEmpty()
+}
+
+@Composable
+private fun runtimePermissionDisplayLabel(value: String?): String = when (value) {
+    null, "", "default", "on-request", "onRequest" ->
+        stringResource(R.string.server_settings_runtime_permission_on_request_label)
+    "full", "full-access", "fullAccess" ->
+        stringResource(R.string.server_settings_runtime_permission_full_label)
+    else -> value.orEmpty()
+}
+
+@Composable
+private fun runtimePlanLabel(planType: String?): String {
+    val value = planType?.trim().orEmpty()
+    return if (value.isBlank()) {
+        "—"
+    } else {
+        value.replace('_', ' ')
+            .split(' ')
+            .joinToString(" ") { part ->
+                part.replaceFirstChar { char ->
+                    if (char.isLowerCase()) char.titlecase() else char.toString()
+                }
+            }
+    }
+}
+
+@Composable
+private fun runtimeCreditsLabel(snapshot: RuntimeCreditsSnapshot?): String = when {
+    snapshot == null -> "—"
+    snapshot.unlimited -> stringResource(R.string.server_settings_usage_credits_unlimited)
+    snapshot.balance?.isNotBlank() == true -> snapshot.balance.orEmpty()
+    snapshot.hasCredits -> stringResource(R.string.server_settings_usage_credits_available)
+    else -> "0"
+}
+
+@Composable
+private fun runtimeWindowSummary(window: RuntimeRateLimitWindow?): String {
+    if (window == null) {
+        return "—"
+    }
+    val percent = stringResource(
+        R.string.server_settings_usage_window_percent_format,
+        window.usedPercent,
+    )
+    val reset = window.resetsAt?.let { raw ->
+        formatRuntimeResetTime(raw)?.let {
+            stringResource(R.string.server_settings_usage_reset_format, it)
+        }
+    }
+    return listOfNotNull(percent, reset).joinToString(" · ")
+}
+
+private fun formatRuntimeResetTime(raw: Long): String? = runCatching {
+    val instant = if (raw > 1_000_000_000_000L) {
+        Instant.ofEpochMilli(raw)
+    } else {
+        Instant.ofEpochSecond(raw)
+    }
+    instant.atZone(ZoneId.systemDefault())
+        .format(DateTimeFormatter.ofPattern("MM-dd HH:mm"))
+}.getOrNull()
 
 private fun formatSettingsTimestamp(raw: String): String = runCatching {
     Instant.parse(raw)

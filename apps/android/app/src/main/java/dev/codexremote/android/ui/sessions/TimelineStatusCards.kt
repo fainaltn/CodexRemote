@@ -225,7 +225,7 @@ internal fun currentRunStateLabel(
     liveRunStatus == "pending" -> if (sending) localizedSessionText("等待调度", "Scheduling") else localizedSessionText("等待中", "Waiting")
     liveRunStatus == "running" && !hasVisibleOutput && liveStreamConnected -> localizedSessionText("思考中", "Thinking")
     liveRunStatus == "running" && hasVisibleOutput && liveStreamConnected -> localizedSessionText("流式输出", "Streaming output")
-    liveRunStatus == "running" && !liveStreamConnected -> localizedSessionText("恢复中", "Recovering")
+    liveRunStatus == "running" && !liveStreamConnected -> localizedSessionText("恢复同步", "Recovering sync")
     liveRunStatus == "completed" -> localizedSessionText("已完成", "Completed")
     liveRunStatus == "failed" -> localizedSessionText("失败", "Failed")
     liveRunStatus == "stopped" -> localizedSessionText("已停止", "Stopped")

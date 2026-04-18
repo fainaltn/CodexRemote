@@ -22,6 +22,19 @@ data class SessionDetailResponse(
 )
 
 @Serializable
+data class SessionSummaryResponse(
+    val session: Session,
+)
+
+@Serializable
+data class SessionMessagesResponse(
+    val messages: List<SessionMessage>,
+    val limit: Int,
+    val hasMore: Boolean,
+    val nextBeforeOrderIndex: Int? = null,
+)
+
+@Serializable
 data class Artifact(
     val id: String,
     val sessionId: String,
@@ -39,6 +52,7 @@ data class StartLiveRunRequest(
     val prompt: String,
     val model: String? = null,
     val reasoningEffort: String? = null,
+    val permissionMode: String? = null,
 )
 
 @Serializable
@@ -49,6 +63,13 @@ data class StartLiveRunResponse(
 @Serializable
 data class StopLiveRunResponse(
     val ok: Boolean,
+)
+
+@Serializable
+data class SessionHydrationResponse(
+    val run: Run? = null,
+    val approvals: List<PendingApproval> = emptyList(),
+    val repoStatus: RepoStatus? = null,
 )
 
 @Serializable

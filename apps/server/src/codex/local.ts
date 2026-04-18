@@ -9,6 +9,7 @@ import type {
 import {
   archiveCodexAppServerThread,
   detectCodexAppServerThreadStart,
+  invalidateSessionDiscoveryCache,
   scanSessionDirs,
   sessionDirExists,
   readSessionMeta,
@@ -18,9 +19,11 @@ import {
   spawnCodexRun,
   spawnCodexNewRun,
 } from "./cli.js";
+import { getDb } from "../db.js";
 
 const PREFERRED_SESSION_READY_TIMEOUT_MS = 8_000;
 const PREFERRED_SESSION_READY_POLL_MS = 150;
+const SESSION_METADATA_CACHE_TTL_MS = 15 * 60_000;
 
 /**
  * Local Codex adapter — talks directly to the Codex CLI and its
@@ -35,6 +38,7 @@ export class LocalCodexAdapter implements CodexAdapter {
 
   async listSessions(): Promise<CodexSessionSummary[]> {
     const raw = await scanSessionDirs();
+    persistSessionMetadataCache(raw);
     return raw.map((entry) => ({
       codexSessionId: entry.id,
       cwd: entry.cwd,
@@ -47,26 +51,57 @@ export class LocalCodexAdapter implements CodexAdapter {
   async getSessionDetail(
     codexSessionId: string,
   ): Promise<CodexSessionDetail | null> {
+    const startedAt = Date.now();
+    const cached = getCachedSessionMetadata(codexSessionId);
+    if (cached) {
+      console.info(
+        `[perf][adapter][session-detail] session=${codexSessionId} source=sqlite-cache ms=${Date.now() - startedAt}`,
+      );
+      return cached;
+    }
+
     // Unknown session → null (not an empty detail object)
     if (!(await sessionDirExists(codexSessionId))) {
+      console.info(
+        `[perf][adapter][session-detail] session=${codexSessionId} source=miss ms=${Date.now() - startedAt}`,
+      );
       return null;
     }
 
     const meta = await readSessionMeta(codexSessionId);
-    return {
+    const detail = {
       codexSessionId,
       cwd: meta.cwd,
       lastActivityAt: meta.lastActivityAt,
       title: meta.title,
       lastPreview: meta.lastPreview,
     };
+    persistSessionMetadataCache([
+      {
+        id: codexSessionId,
+        cwd: meta.cwd,
+        lastActivityAt: meta.lastActivityAt,
+        title: meta.title,
+        lastPreview: meta.lastPreview,
+      },
+    ]);
+    console.info(
+      `[perf][adapter][session-detail] session=${codexSessionId} source=filesystem ms=${Date.now() - startedAt}`,
+    );
+    return detail;
   }
 
-  async getSessionMessages(codexSessionId: string) {
+  async getSessionMessages(
+    codexSessionId: string,
+    options?: {
+      limit?: number;
+      beforeOrderIndex?: number;
+    },
+  ) {
     if (!(await sessionDirExists(codexSessionId))) {
       return [];
     }
-    return readSessionMessages(codexSessionId);
+    return readSessionMessages(codexSessionId, options);
   }
 
   // ── Run lifecycle ────────────────────────────────────────────────
@@ -86,6 +121,7 @@ export class LocalCodexAdapter implements CodexAdapter {
             cwd: detail?.cwd ?? null,
             model: options.model,
             reasoningEffort: options.reasoningEffort,
+            permissionMode: options.permissionMode,
           },
         );
         console.info(
@@ -110,7 +146,11 @@ export class LocalCodexAdapter implements CodexAdapter {
     const { child, readOutput, totalOutputBytes } = spawnCodexRun(
       codexSessionId,
       options.prompt,
-      { model: options.model, reasoningEffort: options.reasoningEffort },
+      {
+        model: options.model,
+        reasoningEffort: options.reasoningEffort,
+        permissionMode: options.permissionMode,
+      },
     );
 
     const pid = child.pid;
@@ -151,6 +191,7 @@ export class LocalCodexAdapter implements CodexAdapter {
     cwd: string,
     options: StartRunOptions,
   ): Promise<NewRunHandle> {
+    invalidateSessionDiscoveryCache();
     const startupMode = options.startupMode ?? "create-and-run";
     let spawned:
       | Awaited<ReturnType<typeof spawnCodexNewRun>>
@@ -167,6 +208,7 @@ export class LocalCodexAdapter implements CodexAdapter {
           spawned = await spawnCodexAppServerNewThread(cwd, {
             model: options.model,
             prompt: options.prompt,
+            permissionMode: options.permissionMode,
           });
           const preferredReadable = await waitForSessionReadable(
             spawned.sessionId,
@@ -203,6 +245,7 @@ export class LocalCodexAdapter implements CodexAdapter {
       spawned = await spawnCodexNewRun(cwd, options.prompt, {
         model: options.model,
         reasoningEffort: options.reasoningEffort,
+        permissionMode: options.permissionMode,
       });
       if (startupMode === "create-only") {
         console.info(
@@ -249,6 +292,7 @@ export class LocalCodexAdapter implements CodexAdapter {
   }
 
   async archiveSession(codexSessionId: string): Promise<void> {
+    invalidateSessionDiscoveryCache();
     const capability = await detectCodexAppServerThreadStart();
     if (!capability.available) {
       console.warn(
@@ -284,6 +328,95 @@ export class LocalCodexAdapter implements CodexAdapter {
       // Process may have already exited — that's acceptable.
     }
   }
+}
+
+function getCachedSessionMetadata(
+  sessionId: string,
+): CodexSessionDetail | null {
+  const cutoff = new Date(Date.now() - SESSION_METADATA_CACHE_TTL_MS).toISOString();
+  const row = getDb()
+    .prepare(
+      `SELECT session_id as sessionId,
+              title,
+              cwd,
+              last_activity_at as lastActivityAt,
+              last_preview as lastPreview
+         FROM session_metadata_cache
+        WHERE session_id = ?
+          AND synced_at >= ?`,
+    )
+    .get(sessionId, cutoff) as {
+    sessionId: string;
+    title: string | null;
+    cwd: string | null;
+    lastActivityAt: string | null;
+    lastPreview: string | null;
+  } | undefined;
+
+  if (!row) return null;
+  return {
+    codexSessionId: row.sessionId,
+    cwd: row.cwd,
+    lastActivityAt: row.lastActivityAt,
+    title: row.title,
+    lastPreview: row.lastPreview,
+  };
+}
+
+export function hasCachedSessionMetadata(sessionId: string): boolean {
+  const cutoff = new Date(Date.now() - SESSION_METADATA_CACHE_TTL_MS).toISOString();
+  const row = getDb()
+    .prepare(
+      `SELECT 1
+         FROM session_metadata_cache
+        WHERE session_id = ?
+          AND synced_at >= ?
+        LIMIT 1`,
+    )
+    .get(sessionId, cutoff) as { 1: number } | undefined;
+  return !!row;
+}
+
+function persistSessionMetadataCache(
+  entries: Array<{
+    id: string;
+    cwd: string | null;
+    lastActivityAt: string | null;
+    title: string | null;
+    lastPreview: string | null;
+  }>,
+): void {
+  if (entries.length === 0) return;
+
+  const db = getDb();
+  const statement = db.prepare(
+    `INSERT INTO session_metadata_cache (
+        session_id,
+        title,
+        cwd,
+        last_activity_at,
+        last_preview,
+        synced_at
+      ) VALUES (?, ?, ?, ?, ?, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+      ON CONFLICT(session_id) DO UPDATE SET
+        title = excluded.title,
+        cwd = excluded.cwd,
+        last_activity_at = excluded.last_activity_at,
+        last_preview = excluded.last_preview,
+        synced_at = excluded.synced_at`,
+  );
+
+  db.transaction((rows: typeof entries) => {
+    for (const entry of rows) {
+      statement.run(
+        entry.id,
+        entry.title,
+        entry.cwd,
+        entry.lastActivityAt,
+        entry.lastPreview,
+      );
+    }
+  })(entries);
 }
 
 async function waitForSessionReadable(sessionId: string): Promise<boolean> {

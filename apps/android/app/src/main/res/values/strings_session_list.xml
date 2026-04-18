@@ -112,6 +112,7 @@
     <string name="session_list_folder_summary_total">%1$s</string>
     <string name="session_list_folder_new_session_desc">在该项目中新建会话</string>
     <string name="session_list_folder_drag_sort_desc">按住拖拽排序</string>
+    <string name="session_list_session_current_chip">当前会话</string>
     <string name="session_list_session_selected_chip">已选中</string>
     <string name="session_list_session_long_press_multi_select_chip">长按多选</string>
 

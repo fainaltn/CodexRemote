@@ -3,4 +3,10 @@
     <cache-path
         name="camera"
         path="camera/" />
+    <cache-path
+        name="downloads"
+        path="downloads/" />
+    <cache-path
+        name="session-links"
+        path="session-links/" />
 </paths>

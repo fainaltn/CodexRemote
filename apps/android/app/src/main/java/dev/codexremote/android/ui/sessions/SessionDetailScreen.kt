@@ -3,14 +3,17 @@ package dev.codexremote.android.ui.sessions
 import android.Manifest
 import android.app.Activity
 import android.content.Context
+import android.content.Intent
 import android.content.pm.PackageManager
 import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.combinedClickable
@@ -53,6 +56,7 @@ import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.material3.rememberTopAppBarState
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -81,12 +85,14 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import dev.codexremote.android.R
 import dev.codexremote.android.ui.theme.PrecisionConsoleSnackbarHost
 import dev.codexremote.android.data.model.FileEntry
+import dev.codexremote.android.data.model.PendingApproval
 import dev.codexremote.android.data.model.SkillEntry
 import dev.codexremote.android.ui.theme.ThemePreference
 import dev.codexremote.android.ui.theme.ThemeToggleAction
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.isActive
+import kotlinx.coroutines.launch
 import java.io.File
 
 private enum class AttachmentTarget { Composer, Edit }
@@ -101,6 +107,20 @@ private fun createCameraCaptureUri(context: Context): Uri {
         "${context.packageName}.fileprovider",
         imageFile,
     )
+}
+
+private fun openDownloadedFile(context: Context, file: File, mimeType: String) {
+    val fileUri = FileProvider.getUriForFile(
+        context,
+        "${context.packageName}.fileprovider",
+        file,
+    )
+    val intent = Intent(Intent.ACTION_VIEW).apply {
+        setDataAndType(fileUri, mimeType)
+        addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+    }
+    context.startActivity(intent)
 }
 
 private fun relativeChildPath(rootPath: String, targetPath: String): String? {
@@ -135,6 +155,243 @@ private fun queuedPromptRuntimeSummary(
             )
         },
     )
+    append(" · ")
+    append(
+        when (queuedPrompt.permissionMode) {
+            "on-request", "onRequest", "default" ->
+                context.getString(R.string.session_detail_queue_permission_default)
+            else -> context.getString(R.string.session_detail_queue_permission_full)
+        },
+    )
+}
+
+private fun PendingApproval.toUiItem(context: Context): SessionApprovalUiItem {
+    val scope = when (scope.trim().lowercase()) {
+        "session" -> SessionApprovalScope.Session
+        else -> SessionApprovalScope.Turn
+    }
+    val resolvedTitle = title?.takeIf { it.isNotBlank() } ?: when (kind.trim().lowercase()) {
+        "command" -> context.getString(R.string.session_detail_approval_title_command)
+        "filechange", "file_change" -> context.getString(R.string.session_detail_approval_title_file_change)
+        else -> context.getString(R.string.session_detail_approval_title_permissions)
+    }
+    val detailParts = buildList {
+        reason?.takeIf { it.isNotBlank() }?.let { add(it) }
+        command?.takeIf { it.isNotBlank() }?.let { add(it) }
+        cwd?.takeIf { it.isNotBlank() }?.let { add(it) }
+        networkHost?.takeIf { it.isNotBlank() }?.let { host ->
+            add("${networkProtocol ?: "network"}://$host")
+        }
+        grantRoot?.takeIf { it.isNotBlank() }?.let { add(it) }
+        detail?.takeIf { it.isNotBlank() }?.let { add(it) }
+    }
+
+    return SessionApprovalUiItem(
+        id = id,
+        title = resolvedTitle,
+        detail = detailParts.distinct().joinToString("\n").ifBlank { null },
+        kind = kind,
+        scope = scope,
+        createdAt = createdAt,
+    )
+}
+
+@Composable
+private fun approvalTitle(approval: PendingApproval): String = when (approval.kind) {
+    "command" -> stringResource(R.string.session_detail_approval_title_command)
+    "fileChange" -> stringResource(R.string.session_detail_approval_title_file_change)
+    else -> stringResource(R.string.session_detail_approval_title_permissions)
+}
+
+@Composable
+private fun approvalMessage(approval: PendingApproval): String =
+    approval.reason?.takeIf { it.isNotBlank() }
+        ?: approval.detail?.takeIf { it.isNotBlank() }
+        ?: stringResource(R.string.session_detail_approval_fallback_message)
+
+@Composable
+private fun ApprovalCard(
+    approval: PendingApproval,
+    pendingCount: Int,
+    resolving: Boolean,
+    onViewDetails: () -> Unit,
+    onAllowOnce: () -> Unit,
+    onAllowSession: () -> Unit,
+    onReject: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    TimelineNoticeCard(
+        modifier = modifier,
+        title = approvalTitle(approval),
+        message = approvalMessage(approval),
+        tone = TimelineNoticeTone.Warning,
+        stateLabel = if (pendingCount > 1) {
+            stringResource(R.string.session_detail_approval_pending_count, pendingCount)
+        } else {
+            stringResource(R.string.session_detail_approval_pending_single)
+        },
+        content = {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                TextButton(
+                    onClick = onViewDetails,
+                    enabled = !resolving,
+                ) {
+                    Text(stringResource(R.string.session_detail_approval_view_details))
+                }
+                Button(
+                    onClick = onAllowOnce,
+                    enabled = !resolving,
+                ) {
+                    Text(stringResource(R.string.session_detail_approval_allow_once))
+                }
+            }
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                OutlinedActionTextButton(
+                    onClick = onAllowSession,
+                    enabled = !resolving,
+                    text = stringResource(R.string.session_detail_approval_allow_session),
+                )
+                OutlinedActionTextButton(
+                    onClick = onReject,
+                    enabled = !resolving,
+                    text = stringResource(R.string.session_detail_approval_reject),
+                )
+            }
+        },
+    )
+}
+
+@Composable
+private fun OutlinedActionTextButton(
+    onClick: () -> Unit,
+    enabled: Boolean,
+    text: String,
+) {
+    Surface(
+        shape = RoundedCornerShape(999.dp),
+        color = MaterialTheme.colorScheme.surface.copy(alpha = if (enabled) 1f else 0.6f),
+    ) {
+        TextButton(onClick = onClick, enabled = enabled) {
+            Text(text)
+        }
+    }
+}
+
+@Composable
+private fun ApprovalDetailSheet(
+    approval: PendingApproval,
+    pendingCount: Int,
+    resolving: Boolean,
+    onAllowOnce: () -> Unit,
+    onAllowSession: () -> Unit,
+    onReject: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Column(
+        modifier = modifier
+            .fillMaxWidth()
+            .padding(horizontal = 20.dp, vertical = 12.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        Text(
+            text = approvalTitle(approval),
+            style = MaterialTheme.typography.titleMedium,
+        )
+        if (pendingCount > 1) {
+            Text(
+                text = stringResource(R.string.session_detail_approval_pending_count, pendingCount),
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+        Text(
+            text = approvalMessage(approval),
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        approval.command?.takeIf { it.isNotBlank() }?.let { value ->
+            ApprovalMetaRow(stringResource(R.string.session_detail_approval_detail_command), value)
+        }
+        approval.cwd?.takeIf { it.isNotBlank() }?.let { value ->
+            ApprovalMetaRow(stringResource(R.string.session_detail_approval_detail_cwd), value)
+        }
+        approval.networkHost?.takeIf { it.isNotBlank() }?.let { host ->
+            val protocol = approval.networkProtocol?.takeIf { it.isNotBlank() } ?: "network"
+            ApprovalMetaRow(
+                stringResource(R.string.session_detail_approval_detail_network),
+                "$protocol://$host",
+            )
+        }
+        approval.grantRoot?.takeIf { it.isNotBlank() }?.let { value ->
+            ApprovalMetaRow(stringResource(R.string.session_detail_approval_detail_paths), value)
+        }
+        approval.permissions?.let { permissions ->
+            val pathSummary = buildList {
+                permissions.fileSystem?.read?.takeIf { it.isNotEmpty() }?.let { addAll(it) }
+                permissions.fileSystem?.write?.takeIf { it.isNotEmpty() }?.let { addAll(it) }
+            }.distinct().joinToString("\n")
+            if (pathSummary.isNotBlank()) {
+                ApprovalMetaRow(stringResource(R.string.session_detail_approval_detail_paths), pathSummary)
+            }
+        }
+        ApprovalMetaRow(
+            stringResource(R.string.session_detail_approval_detail_scope),
+            if (approval.kind == "permissions") {
+                stringResource(R.string.session_detail_approval_scope_turn)
+            } else {
+                stringResource(R.string.session_detail_approval_scope_session)
+            },
+        )
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Button(
+                onClick = onAllowOnce,
+                enabled = !resolving,
+                modifier = Modifier.weight(1f),
+            ) {
+                Text(stringResource(R.string.session_detail_approval_allow_once))
+            }
+            Button(
+                onClick = onAllowSession,
+                enabled = !resolving,
+                modifier = Modifier.weight(1f),
+            ) {
+                Text(stringResource(R.string.session_detail_approval_allow_session))
+            }
+        }
+        OutlinedActionTextButton(
+            onClick = onReject,
+            enabled = !resolving,
+            text = stringResource(R.string.session_detail_approval_reject),
+        )
+    }
+}
+
+@Composable
+private fun ApprovalMetaRow(
+    title: String,
+    value: String,
+) {
+    Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+        Text(
+            text = title,
+            style = MaterialTheme.typography.labelMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Text(
+            text = value,
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurface,
+        )
+    }
 }
 
 @Composable
@@ -236,6 +493,8 @@ fun SessionDetailScreen(
     onSessionCreated: (hostId: String, sessionId: String) -> Unit,
     onOpenNewThread: (cwd: String?) -> Unit,
     onOpenPairing: () -> Unit,
+    pendingApprovals: List<SessionApprovalUiItem> = emptyList(),
+    onApprovalDecision: (approvalId: String, decision: SessionApprovalDecision) -> Unit = { _, _ -> },
     onBack: () -> Unit,
     viewModel: SessionDetailViewModel = viewModel(),
 ) {
@@ -244,6 +503,13 @@ fun SessionDetailScreen(
     val coroutineScope = rememberCoroutineScope()
     val snackbarHostState = remember { SnackbarHostState() }
     val uiState by viewModel.uiState.collectAsState()
+    val activeApprovalItems = remember(uiState.pendingApprovals, pendingApprovals, context) {
+        if (uiState.pendingApprovals.isNotEmpty()) {
+            uiState.pendingApprovals.map { it.toUiItem(context) }
+        } else {
+            pendingApprovals
+        }
+    }
     val session = uiState.session
     val topBarState = rememberTopAppBarState()
     val topBarScrollBehavior = TopAppBarDefaults.enterAlwaysScrollBehavior(topBarState)
@@ -266,6 +532,8 @@ fun SessionDetailScreen(
     var repoActionDialogTarget by remember(stableDetailKey) { mutableStateOf<RepoActionDialogTarget?>(null) }
     var repoActionInput by remember(stableDetailKey) { mutableStateOf("") }
     var showRepoLogSheet by remember(stableDetailKey) { mutableStateOf(false) }
+    var repoStatusExpanded by rememberSaveable(stableDetailKey) { mutableStateOf(false) }
+    var showApprovalSheet by remember(stableDetailKey) { mutableStateOf(false) }
     var wasBackgrounded by remember(stableDetailKey) { mutableStateOf(false) }
     var pendingCameraCaptureUri by remember(stableDetailKey) { mutableStateOf<Uri?>(null) }
     var transientBannerMessage by remember(stableDetailKey) { mutableStateOf<String?>(null) }
@@ -391,11 +659,18 @@ fun SessionDetailScreen(
                             ),
                         )
                     }
+                    append(
+                        context.getString(
+                            R.string.session_detail_queue_permission_prefix,
+                            runtimeControlLabel(RuntimeControlTarget.PermissionMode, queuedPrompt.permissionMode),
+                        ),
+                    )
                 },
                 runtimeSummary = queuedPromptRuntimeSummary(context, queuedPrompt),
                 attachmentCount = queuedPrompt.artifacts.size,
                 model = queuedPrompt.model,
                 reasoningEffort = queuedPrompt.reasoningEffort,
+                permissionMode = queuedPrompt.permissionMode,
             )
         }
     }
@@ -594,6 +869,68 @@ fun SessionDetailScreen(
         uiState.liveStreamStatus == context.getString(R.string.session_detail_stream_connecting) -> SessionLoadingStage.Stream
         else -> SessionLoadingStage.Timeline
     }
+    val handleSessionFileDownload: (SessionFileLinkRequest) -> Unit = remember(
+        serverId,
+        sessionId,
+        session?.cwd,
+        coroutineScope,
+        context,
+    ) {
+        { request ->
+            val currentSessionId = sessionId
+            val cwd = session?.cwd
+            val relativePath = if (!cwd.isNullOrBlank()) {
+                relativeChildPath(cwd, request.target)
+            } else {
+                null
+            }
+            if (!currentSessionId.isNullOrBlank() && !relativePath.isNullOrBlank()) {
+                coroutineScope.launch {
+                    runCatching {
+                        viewModel.downloadSessionFile(
+                            serverId = serverId,
+                            sessionId = currentSessionId,
+                            relativePath = relativePath,
+                        )
+                    }.onSuccess { downloaded ->
+                        openDownloadedFile(
+                            context = context,
+                            file = downloaded.file,
+                            mimeType = downloaded.mimeType,
+                        )
+                    }.onFailure {
+                        viewModel.showError(
+                            context.getString(R.string.session_detail_error_file_read),
+                        )
+                    }
+                }
+            } else if (!currentSessionId.isNullOrBlank() && isLikelyHostAbsolutePath(request.target)) {
+                coroutineScope.launch {
+                    runCatching {
+                        viewModel.downloadAbsoluteFile(
+                            serverId = serverId,
+                            sessionId = currentSessionId,
+                            absolutePath = request.target,
+                        )
+                    }.onSuccess { downloaded ->
+                        openDownloadedFile(
+                            context = context,
+                            file = downloaded.file,
+                            mimeType = downloaded.mimeType,
+                        )
+                    }.onFailure {
+                        viewModel.showError(
+                            context.getString(R.string.session_detail_error_file_read),
+                        )
+                    }
+                }
+            } else {
+                viewModel.showError(
+                    context.getString(R.string.session_detail_error_file_read),
+                )
+            }
+        }
+    }
 
     // ── Side effects ─────────────────────────────────────────────
 
@@ -740,6 +1077,20 @@ fun SessionDetailScreen(
         viewModel.dismissRepoActionSummary()
     }
 
+    LaunchedEffect(runtimeSheetTarget) {
+        if (runtimeSheetTarget == RuntimeControlTarget.Model ||
+            runtimeSheetTarget == RuntimeControlTarget.ReasoningEffort
+        ) {
+            viewModel.refreshRuntimeCatalog(serverId)
+        }
+    }
+
+    LaunchedEffect(activeApprovalItems) {
+        if (activeApprovalItems.isEmpty()) {
+            showApprovalSheet = false
+        }
+    }
+
     LaunchedEffect(transientBannerMessage) {
         if (transientBannerMessage != null) {
             delay(8_000L)
@@ -790,11 +1141,12 @@ fun SessionDetailScreen(
 
     // ── UI ────────────────────────────────────────────────────────
 
-    Scaffold(
-        modifier = Modifier.nestedScroll(topBarScrollBehavior.nestedScrollConnection),
-        snackbarHost = { PrecisionConsoleSnackbarHost(snackbarHostState) },
-        topBar = {
-            TopAppBar(
+    CompositionLocalProvider(LocalSessionFileLinkHandler provides handleSessionFileDownload) {
+        Scaffold(
+            modifier = Modifier.nestedScroll(topBarScrollBehavior.nestedScrollConnection),
+            snackbarHost = { PrecisionConsoleSnackbarHost(snackbarHostState) },
+            topBar = {
+                TopAppBar(
                 title = {
                     Column(
                         modifier = Modifier.combinedClickable(
@@ -874,9 +1226,9 @@ fun SessionDetailScreen(
                         }
                     }
                 },
-            )
-        },
-    ) { padding ->
+                )
+            },
+        ) { padding ->
         when {
             uiState.loading && session == null -> {
                 Box(
@@ -915,6 +1267,20 @@ fun SessionDetailScreen(
                     )
 
                     AnimatedVisibility(
+                        visible = uiState.transitionLoading,
+                        enter = fadeIn(),
+                        exit = fadeOut(),
+                    ) {
+                        TimelineNoticeCard(
+                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp),
+                            title = stringResource(R.string.session_detail_transition_title),
+                            message = stringResource(R.string.session_detail_transition_message),
+                            footer = stringResource(R.string.session_detail_transition_footer),
+                            tone = TimelineNoticeTone.Neutral,
+                        )
+                    }
+
+                    AnimatedVisibility(
                         visible = !uiState.recoveryNotice.isNullOrBlank(),
                         enter = fadeIn(),
                         exit = fadeOut(),
@@ -941,11 +1307,25 @@ fun SessionDetailScreen(
                         )
                     }
 
+                    AnimatedVisibility(
+                        visible = activeApprovalItems.isNotEmpty(),
+                        enter = fadeIn() + expandVertically(expandFrom = Alignment.Top),
+                        exit = fadeOut() + shrinkVertically(shrinkTowards = Alignment.Top),
+                    ) {
+                        SessionApprovalPreviewCard(
+                            approvals = activeApprovalItems,
+                            onOpenDetails = { showApprovalSheet = true },
+                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp),
+                        )
+                    }
+
                     RepoStatusSurface(
                         repoStatus = uiState.repoStatus,
+                        expanded = repoStatusExpanded,
                         actionsEnabled = !isRunning,
                         actionBusy = uiState.repoActionBusy,
                         actionSummary = uiState.repoActionSummary,
+                        onToggleExpanded = { repoStatusExpanded = !repoStatusExpanded },
                         onCreateBranch = {
                             repoActionDialogTarget = RepoActionDialogTarget.CreateBranch
                             repoActionInput = ""
@@ -1017,6 +1397,13 @@ fun SessionDetailScreen(
                                 isDraft = isDraftSession,
                                 liveStreamConnected = uiState.liveStreamConnected,
                                 liveStreamStatus = uiState.liveStreamStatus,
+                                hasMoreHistory = uiState.hasMoreHistory,
+                                loadingOlderHistory = uiState.loadingOlderHistory,
+                                onLoadOlderHistory = {
+                                    if (!sessionId.isNullOrBlank()) {
+                                        viewModel.loadOlderHistory(serverId, sessionId)
+                                    }
+                                },
                                 onRetry = { prompt ->
                                     if (!sessionId.isNullOrBlank()) {
                                         viewModel.resendLatestPrompt(serverId, sessionId, prompt)
@@ -1024,6 +1411,14 @@ fun SessionDetailScreen(
                                 },
                                 onReusePrompt = { prompt ->
                                     viewModel.retryLatestPrompt(prompt)
+                                },
+                                onDownloadFile = { ref ->
+                                    handleSessionFileDownload(
+                                        SessionFileLinkRequest(
+                                            target = ref.absolutePath,
+                                            displayLabel = ref.label,
+                                        ),
+                                    )
                                 },
                             )
 
@@ -1083,6 +1478,7 @@ fun SessionDetailScreen(
                         liveStreamStatus = uiState.liveStreamStatus,
                         selectedModel = uiState.selectedModel,
                         selectedReasoningEffort = uiState.selectedReasoningEffort,
+                        selectedPermissionMode = uiState.selectedPermissionMode,
                         attachments = composerAttachments,
                         queuedPrompts = queuedPromptItems,
                         slashCommands = slashCommandSuggestions,
@@ -1181,6 +1577,9 @@ fun SessionDetailScreen(
                         onReasoningEffortClick = {
                             runtimeSheetTarget = RuntimeControlTarget.ReasoningEffort
                         },
+                        onPermissionModeClick = {
+                            runtimeSheetTarget = RuntimeControlTarget.PermissionMode
+                        },
                         onVoiceClick = {
                             if (voiceUiState.recording) {
                                 voiceController.stop()
@@ -1232,6 +1631,7 @@ fun SessionDetailScreen(
                 }
             }
         }
+        }
     }
 
     if (runtimeSheetTarget != null) {
@@ -1246,11 +1646,15 @@ fun SessionDetailScreen(
                 currentValue = when (target) {
                     RuntimeControlTarget.Model -> uiState.selectedModel
                     RuntimeControlTarget.ReasoningEffort -> uiState.selectedReasoningEffort
+                    RuntimeControlTarget.PermissionMode -> uiState.selectedPermissionMode
                 },
+                runtimeModels = uiState.runtimeModels,
+                selectedModel = uiState.selectedModel,
                 onSelect = { value ->
                     when (target) {
                         RuntimeControlTarget.Model -> viewModel.setSelectedModel(value)
                         RuntimeControlTarget.ReasoningEffort -> viewModel.setSelectedReasoningEffort(value)
+                        RuntimeControlTarget.PermissionMode -> viewModel.setSelectedPermissionMode(value)
                     }
                     runtimeSheetTarget = null
                 },
@@ -1319,6 +1723,31 @@ fun SessionDetailScreen(
         }
     }
 
+    if (showApprovalSheet && activeApprovalItems.isNotEmpty()) {
+        SessionApprovalSheet(
+            approvals = activeApprovalItems,
+            onDismiss = { showApprovalSheet = false },
+            onDecision = { approvalId, decision ->
+                val pendingApproval = uiState.pendingApprovals.firstOrNull { it.id == approvalId }
+                if (pendingApproval != null) {
+                    val mappedDecision = when (decision) {
+                        SessionApprovalDecision.AcceptTurn -> "accept"
+                        SessionApprovalDecision.AcceptSession -> "acceptForSession"
+                        SessionApprovalDecision.Decline -> "decline"
+                    }
+                    viewModel.decidePendingApproval(
+                        serverId = serverId,
+                        sessionId = sessionId,
+                        approval = pendingApproval,
+                        decision = mappedDecision,
+                    )
+                } else {
+                    onApprovalDecision(approvalId, decision)
+                }
+            },
+        )
+    }
+
     if (repoActionDialogTarget != null) {
         val target = repoActionDialogTarget ?: RepoActionDialogTarget.CreateBranch
         AlertDialog(
@@ -1377,6 +1806,13 @@ fun SessionDetailScreen(
     // Dev diagnostics bottom sheet (long-press TopAppBar title)
     if (showDevDiagnostics) {
         val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+        val perfSnapshot = sessionId?.let { SessionPerformanceStore.peek(it) }
+        fun metricLabel(ms: Long?, status: String?): String = when {
+            ms != null && !status.isNullOrBlank() -> "${ms}ms · $status"
+            ms != null -> "${ms}ms"
+            !status.isNullOrBlank() -> status
+            else -> "—"
+        }
         ModalBottomSheet(
             onDismissRequest = { showDevDiagnostics = false },
             sheetState = sheetState,
@@ -1406,10 +1842,62 @@ fun SessionDetailScreen(
                 DiagnosticRow("Run ID", uiState.liveRun?.id ?: "—")
                 DiagnosticRow(stringResource(R.string.session_detail_diag_run_status), uiState.liveRun?.status ?: "—")
                 DiagnosticRow(stringResource(R.string.session_detail_diag_model), uiState.liveRun?.model ?: "—")
+                DiagnosticRow(
+                    stringResource(R.string.session_detail_diag_permission_selected),
+                    runtimeControlLabel(RuntimeControlTarget.PermissionMode, uiState.selectedPermissionMode),
+                )
+                DiagnosticRow(
+                    stringResource(R.string.session_detail_diag_permission_last_sent),
+                    uiState.lastRequestedPermissionMode?.let {
+                        runtimeControlLabel(RuntimeControlTarget.PermissionMode, it)
+                    } ?: "—",
+                )
                 DiagnosticRow(stringResource(R.string.session_detail_diag_message_count), "${uiState.messages.size}")
                 DiagnosticRow(
                     stringResource(R.string.session_detail_diag_output_length),
                     "${uiState.liveRun?.lastOutput?.length ?: 0} chars",
+                )
+                DiagnosticRow(
+                    "Bootstrap load",
+                    metricLabel(
+                        uiState.lastBootstrapLoadMs ?: perfSnapshot?.bootstrapLoadMs,
+                        perfSnapshot?.bootstrapStatus,
+                    ),
+                )
+                DiagnosticRow(
+                    "Summary load",
+                    metricLabel(
+                        uiState.lastSummaryLoadMs ?: perfSnapshot?.summaryLoadMs,
+                        null,
+                    ),
+                )
+                DiagnosticRow(
+                    "Tail load",
+                    metricLabel(
+                        uiState.lastTailLoadMs ?: perfSnapshot?.tailLoadMs,
+                        null,
+                    ),
+                )
+                DiagnosticRow(
+                    "Live refresh",
+                    metricLabel(
+                        uiState.lastLiveRefreshMs ?: perfSnapshot?.liveRefreshMs,
+                        perfSnapshot?.liveStatus,
+                    ),
+                )
+                DiagnosticRow(
+                    "Repo refresh",
+                    metricLabel(
+                        uiState.lastRepoRefreshMs ?: perfSnapshot?.repoRefreshMs,
+                        perfSnapshot?.repoStatus,
+                    ),
+                )
+                DiagnosticRow(
+                    "Approvals refresh",
+                    metricLabel(
+                        uiState.lastApprovalsRefreshMs ?: perfSnapshot?.approvalsRefreshMs,
+                        perfSnapshot?.approvalsStatus,
+                    ),
                 )
                 Spacer(modifier = Modifier.height(24.dp))
             }
@@ -1437,6 +1925,31 @@ private fun ErrorBanner(
             }
         }
     )
+}
+
+@Composable
+private fun SettingsMetaRow(
+    label: String,
+    value: String,
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+        verticalAlignment = Alignment.Top,
+    ) {
+        Text(
+            text = label,
+            style = MaterialTheme.typography.labelMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.weight(0.35f),
+        )
+        Text(
+            text = value,
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurface,
+            modifier = Modifier.weight(0.65f),
+        )
+    }
 }
 
 @Composable

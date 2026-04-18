@@ -1,9 +1,13 @@
 import { execFile } from "node:child_process";
+import { createReadStream } from "node:fs";
 import { readdir, realpath, stat } from "node:fs/promises";
+import { homedir } from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import {
+  FileDownloadMetadata,
+  FileDownloadQuery,
   HostParams,
   ListFilesQuery,
   SearchFilesQuery,
@@ -13,6 +17,7 @@ import {
 } from "@codexremote/shared";
 import { LOCAL_HOST_ID } from "../constants.js";
 import type { CodexAdapter } from "../codex/interface.js";
+import { resolveArtifactFileForDownload } from "../artifacts/store.js";
 
 const execFileAsync = promisify(execFile);
 const FILE_SEARCH_LIMIT_DEFAULT = 25;
@@ -21,6 +26,13 @@ interface FileScope {
   rootPath: string;
   currentPath: string;
   parentPath: string | null;
+}
+
+interface DownloadScope {
+  filePath: string;
+  fileName: string;
+  mimeType: string;
+  sizeBytes: number;
 }
 
 function isWithinRoot(rootPath: string, candidatePath: string): boolean {
@@ -42,6 +54,15 @@ async function realpathIfDirectory(inputPath: string): Promise<string | null> {
   if (!canonical) return null;
   const info = await stat(canonical).catch(() => null);
   if (!info || !info.isDirectory()) return null;
+  return canonical;
+}
+
+async function realpathIfFile(inputPath: string): Promise<string | null> {
+  const resolved = path.resolve(inputPath);
+  const canonical = await realpath(resolved).catch(() => null);
+  if (!canonical) return null;
+  const info = await stat(canonical).catch(() => null);
+  if (!info || !info.isFile()) return null;
   return canonical;
 }
 
@@ -91,6 +112,99 @@ async function resolveFileScope(
       : parentCandidate;
 
   return { rootPath, currentPath, parentPath };
+}
+
+async function resolveSessionFileDownload(
+  adapter: CodexAdapter,
+  sessionId: string,
+  relativePath: string,
+): Promise<DownloadScope | null> {
+  const detail = await adapter.getSessionDetail(sessionId);
+  if (!detail?.cwd?.trim()) return null;
+
+  const rootPath = await realpathIfDirectory(detail.cwd.trim());
+  if (!rootPath) return null;
+
+  const requestedRelative = relativePath.trim();
+  if (!requestedRelative) return null;
+
+  const requestedPath = path.resolve(rootPath, requestedRelative);
+  if (!isWithinRoot(rootPath, requestedPath)) return null;
+
+  const canonicalPath = await realpathIfFile(requestedPath);
+  if (!canonicalPath || !isWithinRoot(rootPath, canonicalPath)) return null;
+
+  const info = await stat(canonicalPath).catch(() => null);
+  if (!info || !info.isFile()) return null;
+
+  return {
+    filePath: canonicalPath,
+    fileName: path.basename(canonicalPath),
+    mimeType: "application/octet-stream",
+    sizeBytes: info.size,
+  };
+}
+
+async function resolveAllowedAbsoluteDownload(
+  absolutePath: string,
+): Promise<DownloadScope | null> {
+  const requested = absolutePath.trim();
+  if (!requested) return null;
+
+  const canonicalPath = await realpathIfFile(requested);
+  if (!canonicalPath) return null;
+
+  const configuredRoots = (
+    process.env["CODEXREMOTE_ALLOWED_ABSOLUTE_DOWNLOAD_ROOTS"] ??
+    path.join(homedir(), "smb")
+  )
+    .split(",")
+    .map((entry) => entry.trim())
+    .filter((entry) => entry.length > 0);
+
+  const allowedRoots: string[] = [];
+  for (const root of configuredRoots) {
+    const canonicalRoot = await realpathIfDirectory(root);
+    if (canonicalRoot) {
+      allowedRoots.push(canonicalRoot);
+    }
+  }
+
+  const withinAllowedRoot = allowedRoots.some((root) =>
+    isWithinRoot(root, canonicalPath),
+  );
+  if (!withinAllowedRoot) return null;
+
+  const info = await stat(canonicalPath).catch(() => null);
+  if (!info || !info.isFile()) return null;
+
+  return {
+    filePath: canonicalPath,
+    fileName: path.basename(canonicalPath),
+    mimeType: "application/octet-stream",
+    sizeBytes: info.size,
+  };
+}
+
+function contentDisposition(fileName: string): string {
+  const safeName = path.basename(fileName).replace(/[\r\n"]/g, "_") || "download";
+  const encoded = encodeURIComponent(safeName);
+  return `attachment; filename="${safeName}"; filename*=UTF-8''${encoded}`;
+}
+
+function applyDownloadHeaders(
+  reply: FastifyReply,
+  metadata: FileDownloadMetadata,
+): void {
+  reply.header("Content-Disposition", contentDisposition(metadata.fileName));
+  reply.header("Content-Length", metadata.sizeBytes.toString());
+  reply.header("X-Codex-Download-Source", metadata.source);
+  reply.header("X-Codex-Session-Id", metadata.sessionId);
+  reply.header("X-Codex-File-Name", metadata.fileName);
+  reply.header("X-Codex-File-Size-Bytes", metadata.sizeBytes.toString());
+  if (metadata.artifactId) {
+    reply.header("X-Codex-Artifact-Id", metadata.artifactId);
+  }
 }
 
 async function listDirectoryEntries(
@@ -198,6 +312,112 @@ function toSearchEntry(currentPath: string, relativePath: string): FileEntry {
 
 export function fileRoutes(adapter: CodexAdapter) {
   return async function register(app: FastifyInstance): Promise<void> {
+    app.get(
+      "/api/hosts/:hostId/files/download",
+      async (request: FastifyRequest, reply: FastifyReply) => {
+        const params = HostParams.safeParse(request.params);
+        if (!params.success) {
+          return reply.status(400).send({ error: "Invalid route params" });
+        }
+        if (params.data.hostId !== LOCAL_HOST_ID) {
+          return reply
+            .status(404)
+            .send({ error: `Host '${params.data.hostId}' not found` });
+        }
+
+        const query = FileDownloadQuery.safeParse(request.query);
+        if (!query.success) {
+          return reply.status(400).send({ error: "Invalid query params" });
+        }
+
+        let download: DownloadScope | null = null;
+        let metadata: FileDownloadMetadata | null = null;
+
+        const downloadQuery = query.data;
+
+        if (downloadQuery.source === "cwd") {
+          download = await resolveSessionFileDownload(
+            adapter,
+            downloadQuery.sessionId,
+            downloadQuery.path,
+          );
+          if (download) {
+            metadata = {
+              source: "cwd",
+              sessionId: downloadQuery.sessionId,
+              artifactId: null,
+              fileName: download.fileName,
+              mimeType: download.mimeType,
+              sizeBytes: download.sizeBytes,
+            };
+          }
+        } else if ("path" in downloadQuery && downloadQuery.source === "absolute") {
+          const detail = await adapter.getSessionDetail(downloadQuery.sessionId);
+          if (!detail) {
+            return reply.status(404).send({
+              error: `Session '${downloadQuery.sessionId}' not found`,
+            });
+          }
+
+          download = await resolveAllowedAbsoluteDownload(downloadQuery.path);
+          if (download) {
+            metadata = {
+              source: "absolute" as const,
+              sessionId: downloadQuery.sessionId,
+              artifactId: null,
+              fileName: download.fileName,
+              mimeType: download.mimeType,
+              sizeBytes: download.sizeBytes,
+            };
+          }
+        } else {
+          const detail = await adapter.getSessionDetail(downloadQuery.sessionId);
+          if (!detail) {
+            return reply.status(404).send({
+              error: `Session '${downloadQuery.sessionId}' not found`,
+            });
+          }
+
+          const resolved = await resolveArtifactFileForDownload({
+            hostId: params.data.hostId,
+            sessionId: downloadQuery.sessionId,
+            artifactId: downloadQuery.artifactId,
+          });
+
+          if (resolved) {
+            download = {
+              filePath: resolved.filePath,
+              fileName: resolved.artifact.originalName,
+              mimeType: resolved.artifact.mimeType,
+              sizeBytes: resolved.artifact.sizeBytes,
+            };
+            metadata = {
+              source: "artifact",
+              sessionId: downloadQuery.sessionId,
+              artifactId: downloadQuery.artifactId,
+              fileName: resolved.artifact.originalName,
+              mimeType: resolved.artifact.mimeType,
+              sizeBytes: resolved.artifact.sizeBytes,
+            };
+          }
+        }
+
+        if (!download || !metadata) {
+          return reply.status(404).send({ error: "File not found" });
+        }
+
+        // Downloads are stream-backed and may outlive the default socket idle
+        // timeout on slower mobile connections.
+        if (typeof request.raw.setTimeout === "function") {
+          request.raw.setTimeout(0);
+        }
+
+        applyDownloadHeaders(reply, metadata);
+        reply.type(metadata.mimeType);
+        return reply.send(createReadStream(download.filePath));
+      },
+    );
+
     app.get(
       "/api/hosts/:hostId/files",
       async (request: FastifyRequest, reply: FastifyReply) => {

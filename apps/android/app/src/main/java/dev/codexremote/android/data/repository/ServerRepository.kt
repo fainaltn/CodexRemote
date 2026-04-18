@@ -228,6 +228,23 @@ class ServerRepository(private val context: Context) {
         }
     }
 
+    suspend fun getRuntimeDefaultPermissionMode(serverId: String): String? {
+        val key = stringPreferencesKey("runtime_default_permission_$serverId")
+        return context.serverDataStore.data.map { prefs -> prefs[key] }.firstOrNull()
+            ?.takeIf { it.isNotBlank() }
+    }
+
+    suspend fun setRuntimeDefaultPermissionMode(serverId: String, permissionMode: String?) {
+        val key = stringPreferencesKey("runtime_default_permission_$serverId")
+        context.serverDataStore.edit { prefs ->
+            if (permissionMode.isNullOrBlank()) {
+                prefs.remove(key)
+            } else {
+                prefs[key] = permissionMode
+            }
+        }
+    }
+
     suspend fun getSessionFolderSortOrder(serverId: String): SessionFolderSortOrder {
         val key = stringPreferencesKey("session_folder_sort_$serverId")
         val raw = context.serverDataStore.data.map { prefs -> prefs[key] }.firstOrNull()

@@ -192,11 +192,15 @@ fun AppNavHost(
             val selectedProjectCwd by backStackEntry.savedStateHandle
                 .getStateFlow("selected_project_cwd", "")
                 .collectAsState()
+            val selectedSessionId by backStackEntry.savedStateHandle
+                .getStateFlow("selected_session_id", "")
+                .collectAsState()
             SessionListScreen(
                 serverId = serverId,
                 themePreference = themePreference,
                 onToggleTheme = onToggleTheme,
                 onSelectSession = { hostId, sessionId ->
+                    backStackEntry.savedStateHandle["selected_session_id"] = sessionId
                     navController.navigate(
                         Screen.SessionDetail.createRoute(serverId, hostId, sessionId)
                     ) {
@@ -239,6 +243,7 @@ fun AppNavHost(
                     }
                 },
                 selectedProjectCwd = selectedProjectCwd.ifBlank { null },
+                selectedSessionId = selectedSessionId.ifBlank { null },
                 onProjectHandled = {
                     backStackEntry.savedStateHandle["selected_project_cwd"] = ""
                 },

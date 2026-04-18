@@ -12,11 +12,14 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.items
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.pluralStringResource
@@ -24,6 +27,9 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import dev.codexremote.android.R
 import dev.codexremote.android.data.model.Run
+
+private const val HISTORY_RENDER_WINDOW_INITIAL_ROUNDS = 3
+private const val HISTORY_RENDER_WINDOW_EXPAND_STEP = 8
 
 private fun isRecoveringStreamStatus(liveStreamStatus: String?): Boolean {
     val status = liveStreamStatus?.lowercase().orEmpty()
@@ -63,8 +69,12 @@ internal fun ConversationTimeline(
     isDraft: Boolean,
     liveStreamConnected: Boolean,
     liveStreamStatus: String?,
+    hasMoreHistory: Boolean,
+    loadingOlderHistory: Boolean,
+    onLoadOlderHistory: () -> Unit,
     onRetry: (String) -> Unit,
     onReusePrompt: (String) -> Unit,
+    onDownloadFile: (OutputFileReference) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val liveRunStatus = liveRun?.status
@@ -115,6 +125,53 @@ internal fun ConversationTimeline(
     // Only show historical rounds in the history section;
     // the current (non-historical) round is rendered separately below.
     val historicalRounds = historyRounds.filter { it.isHistorical }
+    val historyWindowKey = historicalRounds.lastOrNull()?.id ?: "history-window"
+    var revealedHistoricalRoundCount by rememberSaveable(historyWindowKey) {
+        mutableStateOf(HISTORY_RENDER_WINDOW_INITIAL_ROUNDS)
+    }
+    val visibleHistoricalRoundCount = historicalRounds.size.coerceAtMost(
+        revealedHistoricalRoundCount.coerceAtLeast(HISTORY_RENDER_WINDOW_INITIAL_ROUNDS),
+    )
+    val hiddenHistoricalRoundCount = (historicalRounds.size - visibleHistoricalRoundCount).coerceAtLeast(0)
+    val visibleHistoricalRounds = if (hiddenHistoricalRoundCount > 0) {
+        historicalRounds.takeLast(visibleHistoricalRoundCount)
+    } else {
+        historicalRounds
+    }
+    val historyRevealBatchCount = hiddenHistoricalRoundCount.coerceAtMost(HISTORY_RENDER_WINDOW_EXPAND_STEP)
+    val historySubtitle = when {
+        historicalRounds.isEmpty() -> stringResource(R.string.session_timeline_history_subtitle_empty)
+        hiddenHistoricalRoundCount > 0 -> stringResource(R.string.session_timeline_history_windowed_subtitle)
+        hasMoreHistory -> stringResource(R.string.session_timeline_history_partial_subtitle)
+        else -> stringResource(R.string.session_timeline_history_subtitle_with_rounds)
+    }
+    val historyStateLabel = when {
+        historicalRounds.isEmpty() -> stringResource(R.string.session_timeline_history_empty_state_label)
+        hasMoreHistory -> stringResource(R.string.session_timeline_history_partial_state_label)
+        else -> stringResource(R.string.session_timeline_history_complete_state_label)
+    }
+    val historyTone = if (hasMoreHistory) TimelineNoticeTone.Warning else TimelineNoticeTone.Neutral
+    val historySummaryLabel = when {
+        historicalRounds.isEmpty() -> historyStateLabel
+        hiddenHistoricalRoundCount > 0 -> {
+            "${pluralStringResource(
+                R.plurals.session_timeline_history_round_count,
+                historicalRounds.size,
+                historicalRounds.size,
+            )} · ${stringResource(
+                R.string.session_timeline_history_windowed_state_label,
+                visibleHistoricalRoundCount,
+                historicalRounds.size,
+            )}"
+        }
+        else -> {
+            "${pluralStringResource(
+                R.plurals.session_timeline_history_round_count,
+                historicalRounds.size,
+                historicalRounds.size,
+            )} · $historyStateLabel"
+        }
+    }
 
     Box(modifier = modifier.fillMaxSize()) {
         LazyColumn(
@@ -126,26 +183,74 @@ internal fun ConversationTimeline(
             item(key = "history-header") {
                 TimelineSectionHeader(
                     title = stringResource(R.string.session_timeline_history_title),
-                    subtitle = if (historicalRounds.isNotEmpty()) {
-                        stringResource(R.string.session_timeline_history_subtitle_with_rounds)
-                    } else {
-                        stringResource(R.string.session_timeline_history_subtitle_empty)
-                    },
-                    stateLabel = if (historicalRounds.isNotEmpty()) {
-                        pluralStringResource(
-                            R.plurals.session_timeline_history_round_count,
-                            historicalRounds.size,
-                            historicalRounds.size,
-                        )
-                    } else {
-                        stringResource(R.string.session_timeline_history_empty_state_label)
-                    },
+                    subtitle = historySubtitle,
+                    stateLabel = historySummaryLabel,
+                    tone = historyTone,
                 )
             }
 
-            if (historicalRounds.isNotEmpty()) {
+            if (hasMoreHistory) {
+                item(key = "history-load-older") {
+                    Box(
+                        modifier = Modifier.fillMaxWidth(),
+                        contentAlignment = Alignment.CenterStart,
+                    ) {
+                        TextButton(
+                            onClick = onLoadOlderHistory,
+                            enabled = !loadingOlderHistory,
+                        ) {
+                            Text(
+                                if (loadingOlderHistory) {
+                                    stringResource(R.string.session_timeline_history_load_older_loading)
+                                } else {
+                                    stringResource(R.string.session_timeline_history_load_older)
+                                },
+                            )
+                        }
+                    }
+                }
+            }
+
+            if (hiddenHistoricalRoundCount > 0) {
+                item(key = "history-windowed") {
+                    TimelineNoticeCard(
+                        title = stringResource(R.string.session_timeline_history_windowed_title),
+                        message = stringResource(
+                            R.string.session_timeline_history_windowed_message,
+                            hiddenHistoricalRoundCount,
+                        ),
+                        footer = stringResource(R.string.session_timeline_history_windowed_footer),
+                        tone = TimelineNoticeTone.Neutral,
+                        stateLabel = stringResource(
+                            R.string.session_timeline_history_windowed_state_label,
+                            visibleHistoricalRoundCount,
+                            historicalRounds.size,
+                        ),
+                    ) {
+                        Box(
+                            modifier = Modifier.fillMaxWidth(),
+                            contentAlignment = Alignment.CenterStart,
+                        ) {
+                            TextButton(
+                                onClick = {
+                                    revealedHistoricalRoundCount += HISTORY_RENDER_WINDOW_EXPAND_STEP
+                                },
+                            ) {
+                                Text(
+                                    stringResource(
+                                        R.string.session_timeline_history_windowed_expand,
+                                        historyRevealBatchCount,
+                                    ),
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+
+            if (visibleHistoricalRounds.isNotEmpty()) {
                 items(
-                    historicalRounds,
+                    visibleHistoricalRounds,
                     key = { it.id },
                     contentType = { "history-round" },
                 ) { round ->
@@ -249,6 +354,7 @@ internal fun ConversationTimeline(
                                     sending = sending,
                                     onRetry = null,
                                     onReusePrompt = null,
+                                    onDownloadFile = onDownloadFile,
                                 )
                             }
 
@@ -281,6 +387,7 @@ internal fun ConversationTimeline(
                                     } else {
                                         null
                                     },
+                                    onDownloadFile = onDownloadFile,
                                 )
                             }
                         }

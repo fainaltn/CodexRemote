@@ -5,13 +5,19 @@ import {
   useEffect,
   useRef,
   useCallback,
+  useMemo,
   type FormEvent,
 } from "react";
 import { useRouter, useParams } from "next/navigation";
 import { useAuth } from "@/lib/auth";
 import {
   archiveSessions,
-  getSessionDetail,
+  clearSessionTransition,
+  getCachedSessionBootstrap,
+  getSessionTransition,
+  getSessionSummary,
+  getSessionMessages,
+  rememberActiveSession,
   startLiveRun,
   stopLiveRun,
   uploadArtifact,
@@ -287,6 +293,17 @@ interface HistoryGroup {
   isHistorical: boolean;
 }
 
+interface HistorySegment {
+  id: string;
+  groups: HistoryGroup[];
+  preview: string;
+  label: string;
+  messageCount: number;
+}
+
+const HISTORY_SEGMENT_SIZE = 10;
+const HISTORY_VISIBLE_SEGMENTS = 2;
+
 function summarizeGroupTitle(text: string | undefined): string {
   const raw = (text ?? "").replace(/\s+/g, " ").trim();
   if (!raw) return "历史对话";
@@ -402,6 +419,71 @@ function buildHistoryGroups(messages: SessionMessage[]): HistoryGroup[] {
   return groups;
 }
 
+function buildHistorySegments(groups: HistoryGroup[]): HistorySegment[] {
+  const historicalGroups = groups.filter((group) => group.isHistorical);
+  if (historicalGroups.length === 0) {
+    return [];
+  }
+
+  const segments: HistorySegment[] = [];
+  for (
+    let end = historicalGroups.length;
+    end > 0;
+    end -= HISTORY_SEGMENT_SIZE
+  ) {
+    const start = Math.max(0, end - HISTORY_SEGMENT_SIZE);
+    const slice = historicalGroups.slice(start, end);
+    const firstGroup = slice[0];
+    const lastGroup = slice.at(-1);
+    if (!firstGroup || !lastGroup) {
+      continue;
+    }
+
+    const messageCount = slice.reduce(
+      (total, group) => total + group.messages.length,
+      0,
+    );
+    const firstTitle = firstGroup.title;
+    const lastTitle = lastGroup.title;
+
+    segments.unshift({
+      id: `${firstGroup.id}:${lastGroup.id}`,
+      groups: slice,
+      preview: lastGroup.preview || firstGroup.preview,
+      label:
+        firstTitle === lastTitle
+          ? firstTitle
+          : `${firstTitle} → ${lastTitle}`,
+      messageCount,
+    });
+  }
+
+  return segments;
+}
+
+function mergeSessionMessages(
+  previous: SessionMessage[],
+  incoming: SessionMessage[],
+): SessionMessage[] {
+  if (previous.length === 0) {
+    return incoming;
+  }
+  if (incoming.length === 0) {
+    return previous;
+  }
+
+  const byId = new Map(previous.map((message) => [message.id, message]));
+  for (const message of incoming) {
+    byId.set(message.id, message);
+  }
+
+  return [...byId.values()].sort((a, b) => {
+    const createdCompare = a.createdAt.localeCompare(b.createdAt);
+    if (createdCompare !== 0) return createdCompare;
+    return a.id.localeCompare(b.id);
+  });
+}
+
 export default function SessionDetailPage() {
   const { isAuthenticated, isLoading: authLoading } = useAuth();
   const router = useRouter();
@@ -418,6 +500,9 @@ export default function SessionDetailPage() {
   const [prompt, setPrompt] = useState("");
   const [sending, setSending] = useState(false);
   const [expandedGroups, setExpandedGroups] = useState<Record<string, boolean>>(
+    {},
+  );
+  const [expandedSegments, setExpandedSegments] = useState<Record<string, boolean>>(
     {},
   );
   const outputRef = useRef<HTMLDivElement>(null);
@@ -438,6 +523,9 @@ export default function SessionDetailPage() {
     null,
   );
   const [editingText, setEditingText] = useState("");
+  const [hasMoreHistory, setHasMoreHistory] = useState(false);
+  const [olderHistoryCursor, setOlderHistoryCursor] = useState<number | null>(null);
+  const [loadingOlderHistory, setLoadingOlderHistory] = useState(false);
   const lastRefreshedRunIdRef = useRef<string | null>(null);
   const previousRunStatusRef = useRef<string | null>(null);
   const previousTransportStateRef =
@@ -447,15 +535,23 @@ export default function SessionDetailPage() {
   const [selectedReasoningEffort, setSelectedReasoningEffort] = useState<string | null>(null);
   const prefillAppliedRef = useRef(false);
 
-  const loadSession = useCallback(async () => {
-    const data = await getSessionDetail(sessionId);
-    setSession(data.session);
-    setMessages(data.messages);
-  }, [sessionId]);
+  const loadSessionMessagesTail = useCallback(
+    async (limit = 40) => {
+      const data = await getSessionMessages(sessionId, { limit });
+      setMessages((previous) => mergeSessionMessages(previous, data.messages));
+      return data.messages;
+    },
+    [sessionId],
+  );
+
+  const sessionMatchesRoute = session?.id === sessionId;
+  const activeSession = sessionMatchesRoute ? session : null;
+  const activeMessages = sessionMatchesRoute ? messages : [];
+  const pendingTransition = getSessionTransition(sessionId);
 
   // Only subscribe to SSE after the session has been validated by getSession().
   // This prevents endless reconnect loops for unknown session IDs.
-  const liveRunState = useLiveRun(session ? sessionId : null);
+  const liveRunState = useLiveRun(activeSession ? sessionId : null);
   const liveRun = liveRunState.run;
   const transportState = liveRunState.transportState;
   const effectiveModel = selectedModel ?? liveRun?.model ?? null;
@@ -463,7 +559,18 @@ export default function SessionDetailPage() {
     selectedReasoningEffort ?? liveRun?.reasoningEffort ?? null;
   const isRunning =
     liveRun?.status === "running" || liveRun?.status === "pending";
-  const historyGroups = buildHistoryGroups(messages);
+  const historyGroups = useMemo(
+    () => buildHistoryGroups(activeMessages),
+    [activeMessages],
+  );
+  const historySegments = useMemo(
+    () => buildHistorySegments(historyGroups),
+    [historyGroups],
+  );
+  const currentHistoryGroups = useMemo(
+    () => historyGroups.filter((group) => !group.isHistorical),
+    [historyGroups],
+  );
   const liveOutput = cleanLiveOutput(liveRun?.lastOutput ?? null);
   const latestPrompt = liveRun?.prompt.trim() ?? "";
   const reusablePrompt = sanitizePromptDisplay(liveRun?.prompt ?? "");
@@ -478,58 +585,130 @@ export default function SessionDetailPage() {
     : "";
   const promptPreview = summarizeInlineText(prompt, 96);
   const activeRunPrompt = summarizeInlineText(reusablePrompt || latestPrompt, 120);
-  const composerModeLabel = isRunning
-    ? "运行中"
-    : sending
-      ? "排队中"
-      : prompt.trim()
-        ? "准备发送"
-        : "等待输入";
-  const composerModeHint = isRunning
-    ? activeRunPrompt
-      ? `当前运行：${activeRunPrompt}`
-      : "当前运行仍在持续，停止后可以发起下一轮 follow-up。"
-    : sending
-      ? promptPreview
-        ? `正在提交：${promptPreview}`
-        : "提示词正在进入队列。"
-      : pendingArtifacts.length > 0
-        ? "附件已挂载到下一次提交，输入后即可一并发送。"
-        : "输入 follow-up 命令，直接作为下一轮指令发送。";
-  const composerInlineHint = isRunning
-    ? "停止后可继续提交新的 follow-up。"
-    : sending
-      ? "当前指令正在发送队列中。"
-      : pendingArtifacts.length > 0
-        ? "附件会自动随下一次请求一起发送。"
-        : "输入完成后可以直接提交。";
-  const composerQueueHint = sending
-    ? `队列：${promptPreview || "正在提交当前命令"}`
-    : prompt.trim()
-      ? `预览：${promptPreview || "当前输入"}`
-      : pendingArtifacts.length > 0
-        ? "附件已挂载，等待指令"
-        : "可直接发送";
   const composerRuntimeSummary = runtimeSelectionSummary(
     effectiveModel,
     effectiveReasoningEffort,
   );
-  const composerActionKicker = isRunning
-    ? "保持控制"
+  const routeTransitioning = Boolean(session) && !sessionMatchesRoute;
+  const showShellLoading = authLoading || loading || routeTransitioning;
+  const sessionReady = Boolean(activeSession);
+  const composerLocked = !sessionReady || authLoading;
+  const shellLoadingTitle = authLoading
+    ? "正在确认登录状态"
+    : pendingTransition
+      ? "正在切换到目标会话"
+      : "正在同步会话上下文";
+  const shellLoadingCopy = authLoading
+    ? "页面壳体已经就绪，鉴权完成后会自动填充当前会话。"
+    : pendingTransition
+      ? `正在把工作区切到 ${pendingTransition.session.title || sessionId}，历史上下文和运行状态会在这一块继续补齐。`
+      : "页面壳体已经就绪，历史上下文和运行状态会在这一块补齐。";
+  const composerModeLabel = composerLocked
+    ? authLoading
+      ? "鉴权中"
+      : "同步中"
+    : isRunning
+      ? "运行中"
+      : sending
+        ? "排队中"
+        : prompt.trim()
+          ? "准备发送"
+          : "等待输入";
+  const composerModeHint = composerLocked
+    ? shellLoadingCopy
+    : isRunning
+      ? activeRunPrompt
+        ? `当前运行：${activeRunPrompt}`
+        : "当前运行仍在持续，停止后可以发起下一轮 follow-up。"
+      : sending
+        ? promptPreview
+          ? `正在提交：${promptPreview}`
+          : "提示词正在进入队列。"
+        : pendingArtifacts.length > 0
+          ? "附件已挂载到下一次提交，输入后即可一并发送。"
+          : "输入 follow-up 命令，直接作为下一轮指令发送。";
+  const composerInlineHint = composerLocked
+    ? "会话准备好后即可继续提交 follow-up。"
+    : isRunning
+      ? "停止后可继续提交新的 follow-up。"
+      : sending
+        ? "当前指令正在发送队列中。"
+        : pendingArtifacts.length > 0
+          ? "附件会自动随下一次请求一起发送。"
+          : "输入完成后可以直接提交。";
+  const composerQueueHint = composerLocked
+    ? "正在同步会话"
     : sending
-      ? "提交队列"
+      ? `队列：${promptPreview || "正在提交当前命令"}`
       : prompt.trim()
-        ? "准备执行"
-        : "等待输入";
-  const composerActionLabel = isRunning
-    ? "停止运行"
-    : sending
-      ? "提交中…"
-      : "发送命令";
+        ? `预览：${promptPreview || "当前输入"}`
+        : pendingArtifacts.length > 0
+          ? "附件已挂载，等待指令"
+          : "可直接发送";
+  const composerActionKicker = composerLocked
+    ? authLoading
+      ? "鉴权同步"
+      : "会话同步"
+    : isRunning
+      ? "保持控制"
+      : sending
+        ? "提交队列"
+        : prompt.trim()
+          ? "准备执行"
+          : "等待输入";
+  const composerActionLabel = composerLocked
+    ? "请稍候"
+    : isRunning
+      ? "停止运行"
+      : sending
+        ? "提交中…"
+        : "发送命令";
   const historyRoundCount = historyGroups.length;
   const historicalRoundCount = historyGroups.filter(
     (group) => group.isHistorical,
   ).length;
+  const collapsedSegmentCount = Math.max(
+    0,
+    historySegments.length - HISTORY_VISIBLE_SEGMENTS,
+  );
+  const sessionTitle = activeSession?.title || pendingTransition?.session.title || sessionId;
+  const sessionSubtitle = activeSession?.cwd ||
+    pendingTransition?.session.cwd ||
+    (showShellLoading
+      ? "正在同步当前会话的工作目录信息"
+      : "当前没有可用的工作目录信息");
+  const sessionMessageCountLabel = showShellLoading
+    ? "同步中"
+    : String(activeMessages.length);
+  const sessionRoundCountLabel = showShellLoading
+    ? "同步中"
+    : String(historyRoundCount);
+  const sessionVisibleCountLabel = showShellLoading
+    ? "同步中"
+    : String(
+        currentHistoryGroups.length +
+          historySegments.reduce((total, segment, index) => {
+            const pinnedByDefault =
+              index >= historySegments.length - HISTORY_VISIBLE_SEGMENTS;
+            const expanded =
+              expandedSegments[segment.id] ?? pinnedByDefault;
+            return total + (expanded ? segment.groups.length : 1);
+          }, 0),
+      );
+  const historyStateLabel = showShellLoading
+    ? "同步中"
+    : hasMoreHistory
+      ? "部分历史"
+      : activeMessages.length > 0
+        ? "完整历史"
+        : "历史为空";
+  const historyStateTone = showShellLoading
+    ? "muted"
+    : hasMoreHistory
+      ? "warning"
+      : activeMessages.length > 0
+        ? "primary"
+        : "muted";
 
   useEffect(() => {
     const previousState = previousTransportStateRef.current;
@@ -582,6 +761,10 @@ export default function SessionDetailPage() {
             ? "run-terminal-card-terminal"
             : "";
   const transportBadge = transportStateLabel(transportState);
+  const transitionShellClass =
+    pendingTransition && showShellLoading
+      ? "detail-shell-transitioning"
+      : "";
 
   useEffect(() => {
     if (prefillAppliedRef.current) return;
@@ -589,6 +772,11 @@ export default function SessionDetailPage() {
     setPrompt(prefill);
     prefillAppliedRef.current = true;
   }, [prefill]);
+
+  useEffect(() => {
+    setExpandedGroups({});
+    setExpandedSegments({});
+  }, [sessionId]);
 
   useEffect(() => {
     if (selectedModel === null && liveRun?.model) {
@@ -602,6 +790,11 @@ export default function SessionDetailPage() {
     }
   }, [liveRun?.reasoningEffort, selectedReasoningEffort]);
 
+  useEffect(() => {
+    if (!activeSession) return;
+    rememberActiveSession(activeSession);
+  }, [activeSession]);
+
   // Fetch session metadata.
   useEffect(() => {
     if (authLoading) return;
@@ -610,20 +803,43 @@ export default function SessionDetailPage() {
       return;
     }
 
+    const cachedBootstrap = getCachedSessionBootstrap(sessionId);
     let cancelled = false;
+    setLoading(!cachedBootstrap);
+    setError("");
+    if (cachedBootstrap) {
+      setSession(cachedBootstrap.session);
+      setMessages(cachedBootstrap.messages);
+      setHasMoreHistory(cachedBootstrap.hasMore);
+      setOlderHistoryCursor(cachedBootstrap.nextBeforeOrderIndex);
+      clearSessionTransition(sessionId);
+    }
+
     (async () => {
       try {
-        setLoading(true);
-        const data = await getSessionDetail(sessionId);
+        const [summary, tail] = await Promise.all([
+          getSessionSummary(sessionId),
+          getSessionMessages(sessionId, { limit: 40 }),
+        ]);
         if (!cancelled) {
-          setSession(data.session);
-          setMessages(data.messages);
+          setSession(summary.session);
+          setMessages(tail.messages);
+          setHasMoreHistory(tail.hasMore);
+          setOlderHistoryCursor(tail.nextBeforeOrderIndex);
+          clearSessionTransition(sessionId);
         }
       } catch (err) {
-        if (!cancelled)
+        if (!cancelled) {
           setError(
             err instanceof Error ? err.message : "加载会话失败",
           );
+          if (!cachedBootstrap) {
+            setSession(null);
+            setMessages([]);
+            setHasMoreHistory(false);
+            setOlderHistoryCursor(null);
+          }
+        }
       } finally {
         if (!cancelled) setLoading(false);
       }
@@ -632,6 +848,25 @@ export default function SessionDetailPage() {
       cancelled = true;
     };
   }, [sessionId, isAuthenticated, authLoading, router]);
+
+  async function handleLoadOlderHistory() {
+    if (loadingOlderHistory || !hasMoreHistory || olderHistoryCursor === null) return;
+
+    try {
+      setLoadingOlderHistory(true);
+      const payload = await getSessionMessages(sessionId, {
+        limit: 40,
+        beforeOrderIndex: olderHistoryCursor,
+      });
+      setMessages((previous) => mergeSessionMessages(previous, payload.messages));
+      setHasMoreHistory(payload.hasMore);
+      setOlderHistoryCursor(payload.nextBeforeOrderIndex);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "加载更早消息失败");
+    } finally {
+      setLoadingOlderHistory(false);
+    }
+  }
 
   useEffect(() => {
     if (!liveRun) {
@@ -655,10 +890,10 @@ export default function SessionDetailPage() {
     }
 
     lastRefreshedRunIdRef.current = liveRun.id;
-    void loadSession().catch(() => {
+    void loadSessionMessagesTail().catch(() => {
       // Keep the last visible state if the refresh fails transiently.
     });
-  }, [liveRun, loadSession]);
+  }, [liveRun, loadSessionMessagesTail]);
 
   // Auto-scroll output when new content arrives.
   useEffect(() => {
@@ -739,7 +974,7 @@ export default function SessionDetailPage() {
       });
       setPrompt("");
       setPendingArtifacts([]);
-      await loadSession();
+      await loadSessionMessagesTail();
     } catch (err) {
       setError(err instanceof Error ? err.message : "启动运行失败");
     } finally {
@@ -772,7 +1007,7 @@ export default function SessionDetailPage() {
         model: liveRun?.model ?? effectiveModel,
         reasoningEffort: liveRun?.reasoningEffort ?? effectiveReasoningEffort,
       });
-      await loadSession();
+      await loadSessionMessagesTail();
     } catch (err) {
       setError(err instanceof Error ? err.message : "重试运行失败");
     } finally {
@@ -812,7 +1047,7 @@ export default function SessionDetailPage() {
         reasoningEffort: effectiveReasoningEffort,
       });
       handleCancelEditingMessage();
-      await loadSession();
+      await loadSessionMessagesTail();
     } catch (err) {
       setError(err instanceof Error ? err.message : "启动运行失败");
     } finally {
@@ -835,17 +1070,205 @@ export default function SessionDetailPage() {
     }));
   }
 
-  // ── Loading / error guards ──────────────────────────────────────
+  function toggleHistorySegment(
+    segmentId: string,
+    defaultExpanded = false,
+  ) {
+    setExpandedSegments((prev) => ({
+      ...prev,
+      [segmentId]: !(prev[segmentId] ?? defaultExpanded),
+    }));
+  }
 
-  if (authLoading || loading) {
+  function renderHistoryGroup(group: HistoryGroup) {
+    const expanded = !group.folded || expandedGroups[group.id];
+    if (!expanded) {
+      return (
+        <button
+          key={group.id}
+          type="button"
+          className={`history-folded-card ${
+            group.isHistorical
+              ? "history-folded-card-historical"
+              : "history-folded-card-current"
+          }`}
+          onClick={() => toggleHistoryGroup(group.id)}
+        >
+          <div className="history-folded-top">
+            <span>{group.title}</span>
+            <span>{group.messages.length} 条</span>
+          </div>
+          <div className="history-folded-preview">
+            {group.preview}
+          </div>
+        </button>
+      );
+    }
+
     return (
-      <div className="loading-screen">
-        <div className="spinner" />
+      <div
+        key={group.id}
+        className={`history-group-expanded ${
+          group.isHistorical
+            ? "history-group-expanded-historical"
+            : "history-group-expanded-current"
+        }`}
+      >
+        {group.folded && (
+          <button
+            type="button"
+            className="history-collapse-btn"
+            onClick={() => toggleHistoryGroup(group.id)}
+          >
+            收起这轮历史
+          </button>
+        )}
+        {group.primaryMessages.map((message, index) => {
+          const isLastPrimary =
+            index === group.primaryMessages.length - 1;
+          const shouldInsertProcessCard =
+            group.foldedMessages.length > 0 &&
+            isLastPrimary &&
+            message.role === "assistant";
+          const isHistoricalUserMessage =
+            group.isHistorical &&
+            message.role === "user" &&
+            message.kind === "message";
+          const isEditingThisMessage =
+            editingMessageId === message.id;
+
+          return (
+            <div key={message.id}>
+              {shouldInsertProcessCard && (
+                <>
+                  <button
+                    type="button"
+                    className="history-folded-card history-folded-card-current"
+                    onClick={() =>
+                      toggleHistoryGroup(`${group.id}-process`)
+                    }
+                    style={{ marginBottom: 12 }}
+                  >
+                    <div className="history-folded-top">
+                      <span>Codex 过程</span>
+                      <span>{group.foldedMessages.length} 条</span>
+                    </div>
+                    <div className="history-folded-preview">
+                      {expandedGroups[`${group.id}-process`]
+                        ? "点击收起过程"
+                        : summarizeGroupTitle(
+                            group.foldedMessages[0]?.text,
+                          )}
+                    </div>
+                  </button>
+                  {expandedGroups[`${group.id}-process`] &&
+                    group.foldedMessages.map((foldedMessage) => (
+                      <div
+                        key={foldedMessage.id}
+                        className="history-message history-message-process"
+                        style={{ marginBottom: 10 }}
+                      >
+                        <div className="history-message-top">
+                          <span className="history-role">
+                            Codex 过程
+                          </span>
+                          <span className="history-time">
+                            {formatDate(foldedMessage.createdAt)}
+                          </span>
+                        </div>
+                        <div className="history-text">
+                          {foldedMessage.text}
+                        </div>
+                      </div>
+                    ))}
+                </>
+              )}
+              <div
+                className={`${messageClassName(message)} ${
+                  isEditingThisMessage
+                    ? " history-message-editing"
+                    : ""
+                }`}
+              >
+                <div className="history-message-top">
+                  <span className="history-role">
+                    {messageRoleLabel(message)}
+                  </span>
+                  <span className="history-time">
+                    {formatDate(message.createdAt)}
+                  </span>
+                </div>
+                {isEditingThisMessage ? (
+                  <>
+                    <textarea
+                      className="history-edit-textarea"
+                      value={editingText}
+                      onChange={(event) =>
+                        setEditingText(event.target.value)
+                      }
+                      rows={4}
+                      autoFocus
+                      disabled={sending || isRunning}
+                    />
+                    <div className="history-message-actions">
+                      <button
+                        type="button"
+                        className="history-message-secondary-btn"
+                        onClick={handleCancelEditingMessage}
+                        disabled={sending || isRunning}
+                      >
+                        取消
+                      </button>
+                      <button
+                        type="button"
+                        className="history-message-primary-btn"
+                        onClick={() =>
+                          void handleSubmitEditedPrompt(
+                            editingText,
+                          )
+                        }
+                        disabled={
+                          sending ||
+                          isRunning ||
+                          !editingText.trim()
+                        }
+                      >
+                        {sending ? "发送中…" : "重新发送"}
+                      </button>
+                    </div>
+                  </>
+                ) : (
+                  <>
+                    <div className="history-text">
+                      {message.text}
+                    </div>
+                    {isHistoricalUserMessage && (
+                      <div className="history-message-actions">
+                        <button
+                          type="button"
+                          className="history-message-secondary-btn"
+                          onClick={() =>
+                            handleStartEditingMessage(message)
+                          }
+                          disabled={sending || isRunning}
+                        >
+                          编辑并重发
+                        </button>
+                      </div>
+                    )}
+                  </>
+                )}
+              </div>
+            </div>
+          );
+        })}
       </div>
     );
   }
 
-  if (error && !session) {
+  // ── Loading / error guards ──────────────────────────────────────
+
+  if (error && !activeSession && !showShellLoading) {
     return (
       <div className="screen">
         <div className="header">
@@ -891,14 +1314,14 @@ export default function SessionDetailPage() {
                 textOverflow: "ellipsis",
               }}
             >
-              {session?.title || sessionId}
-              </h1>
-            </div>
+              {sessionTitle}
+            </h1>
+          </div>
           <div
             className="detail-header-actions"
             style={{ display: "flex", alignItems: "center", gap: 6 }}
           >
-            {session && !session.archivedAt && (
+            {activeSession && !activeSession.archivedAt && (
               <button
                 className="icon-btn"
                 type="button"
@@ -919,19 +1342,19 @@ export default function SessionDetailPage() {
         className={`detail-content ${embedded ? "detail-content-embedded" : ""}`}
       >
         <div className="detail-workspace detail-workspace-single">
-          {embedded && session && (
+          {embedded && (
             <div className="session-shell-header">
               <div>
-                <div className="session-shell-title">{session.title || sessionId}</div>
+                <div className="session-shell-title">{sessionTitle}</div>
                 <div className="session-shell-subtitle">
-                  {session.cwd || "Codex 会话"}
+                  {sessionSubtitle}
                 </div>
               </div>
               <div
                 className="session-shell-actions"
                 style={{ display: "flex", alignItems: "center", gap: 6 }}
               >
-                {session && !session.archivedAt && (
+                {activeSession && !activeSession.archivedAt && (
                   <button
                     className="icon-btn"
                     type="button"
@@ -948,238 +1371,150 @@ export default function SessionDetailPage() {
           )}
 
           <main className="detail-main detail-main-single" aria-label="会话详情">
-            <section className="detail-overview panel">
+            <section className={`detail-overview panel ${transitionShellClass}`}>
               <div className="detail-overview-top">
                 <div className="detail-overview-copy">
                   <div className="detail-overview-eyebrow">Session detail</div>
-                  <h2>{session?.title || sessionId}</h2>
-                  <p>{session?.cwd || "当前没有可用的工作目录信息"}</p>
+                  <h2>{sessionTitle}</h2>
+                  <p>{sessionSubtitle}</p>
                 </div>
                 <div className="detail-overview-badges">
                   <span className="pill pill-muted">
-                    {historyRoundCount} 轮历史
+                    {showShellLoading
+                      ? "同步上下文"
+                      : hasMoreHistory
+                        ? `部分历史 · ${historyRoundCount} 轮`
+                        : `${historyRoundCount} 轮历史`}
                   </span>
                   <span className="pill">
-                    {session?.archivedAt ? "已归档" : "活跃中"}
+                    {showShellLoading
+                      ? "会话壳已就绪"
+                      : activeSession?.archivedAt
+                        ? "已归档"
+                        : "活跃中"}
                   </span>
                   <span className="pill pill-accent">
-                    {liveRun ? statusLabel(liveRun.status) : "无运行中任务"}
+                    {showShellLoading
+                      ? shellLoadingTitle
+                      : liveRun
+                        ? statusLabel(liveRun.status)
+                        : "无运行中任务"}
                   </span>
                 </div>
               </div>
               <div className="detail-overview-stats">
                 <div className="detail-overview-stat">
                   <span>消息</span>
-                  <strong>{messages.length}</strong>
+                  <strong>{sessionMessageCountLabel}</strong>
                 </div>
                 <div className="detail-overview-stat">
                   <span>历史轮次</span>
-                  <strong>{historyRoundCount}</strong>
+                  <strong>{sessionRoundCountLabel}</strong>
                 </div>
                 <div className="detail-overview-stat">
                   <span>当前可见</span>
-                  <strong>{historyRoundCount - historicalRoundCount}</strong>
+                  <strong>{sessionVisibleCountLabel}</strong>
                 </div>
               </div>
             </section>
 
             <section className="detail-conversation-shell">
               <div className="detail-run-grid">
-                <div className="detail-history-panel">
+                <div className={`detail-history-panel ${transitionShellClass}`}>
                   <div className="history-section">
                     <div className="history-header">
                       <span>历史上下文</span>
-                      <span className="history-count">
-                        {historyGroups.length} 轮 / {messages.length} 条
-                      </span>
+                      <div className="history-header-meta">
+                        <span className={`history-status-badge status-chip status-chip-${historyStateTone}`}>{historyStateLabel}</span>
+                        <span className="history-count">
+                          {showShellLoading
+                            ? "同步中"
+                            : collapsedSegmentCount > 0
+                              ? `${historyGroups.length} 轮 / ${activeMessages.length} 条 · ${collapsedSegmentCount} 段折叠窗口`
+                              : `${historyGroups.length} 轮 / ${activeMessages.length} 条`}
+                        </span>
+                      </div>
                     </div>
-                    {historyGroups.length > 0 ? (
+                    {!showShellLoading && hasMoreHistory && (
+                      <div className="history-actions" style={{ marginBottom: 12 }}>
+                        <button
+                          type="button"
+                          className="history-message-secondary-btn"
+                          onClick={() => void handleLoadOlderHistory()}
+                          disabled={loadingOlderHistory}
+                        >
+                          {loadingOlderHistory ? "加载中…" : "加载更早回合"}
+                        </button>
+                      </div>
+                    )}
+                    {showShellLoading ? (
+                      <div
+                        className="history-empty detail-history-empty"
+                        role="status"
+                        aria-live="polite"
+                      >
+                        <div className="history-empty-title">{shellLoadingTitle}</div>
+                        <div className="history-empty-copy">{shellLoadingCopy}</div>
+                      </div>
+                    ) : historyGroups.length > 0 ? (
                       <div className="history-list">
-                        {historyGroups.map((group) => {
-                          const expanded = !group.folded || expandedGroups[group.id];
+                        {historySegments.map((segment, index) => {
+                          const pinnedByDefault =
+                            index >= historySegments.length - HISTORY_VISIBLE_SEGMENTS;
+                          const expanded =
+                            expandedSegments[segment.id] ?? pinnedByDefault;
+
                           if (!expanded) {
                             return (
                               <button
-                                key={group.id}
+                                key={segment.id}
                                 type="button"
-                                className={`history-folded-card ${
-                                  group.isHistorical
-                                    ? "history-folded-card-historical"
-                                    : "history-folded-card-current"
-                                }`}
-                                onClick={() => toggleHistoryGroup(group.id)}
+                                className="history-segment-card"
+                                onClick={() =>
+                                  toggleHistorySegment(segment.id, pinnedByDefault)
+                                }
                               >
                                 <div className="history-folded-top">
-                                  <span>{group.title}</span>
-                                  <span>{group.messages.length} 条</span>
+                                  <span>{segment.label}</span>
+                                  <span>{segment.groups.length} 轮</span>
+                                </div>
+                                <div className="history-segment-meta">
+                                  <span>{segment.messageCount} 条消息</span>
+                                  <span>按段展开</span>
                                 </div>
                                 <div className="history-folded-preview">
-                                  {group.preview}
+                                  {segment.preview}
                                 </div>
                               </button>
                             );
                           }
 
                           return (
-                            <div
-                              key={group.id}
-                              className={`history-group-expanded ${
-                                group.isHistorical
-                                  ? "history-group-expanded-historical"
-                                  : "history-group-expanded-current"
-                              }`}
-                            >
-                              {group.folded && (
+                            <section key={segment.id} className="history-segment-expanded">
+                              <div className="history-segment-header">
+                                <div>
+                                  <div className="history-segment-title">
+                                    {segment.label}
+                                  </div>
+                                  <div className="history-segment-copy">
+                                    {segment.groups.length} 轮 / {segment.messageCount} 条消息
+                                  </div>
+                                </div>
                                 <button
                                   type="button"
                                   className="history-collapse-btn"
-                                  onClick={() => toggleHistoryGroup(group.id)}
+                                  onClick={() =>
+                                    toggleHistorySegment(segment.id, pinnedByDefault)
+                                  }
                                 >
-                                  收起这轮历史
+                                  收起这段历史
                                 </button>
-                              )}
-                              {group.primaryMessages.map((message, index) => {
-                                const isLastPrimary =
-                                  index === group.primaryMessages.length - 1;
-                                const shouldInsertProcessCard =
-                                  group.foldedMessages.length > 0 &&
-                                  isLastPrimary &&
-                                  message.role === "assistant";
-                                const isHistoricalUserMessage =
-                                  group.isHistorical &&
-                                  message.role === "user" &&
-                                  message.kind === "message";
-                                const isEditingThisMessage =
-                                  editingMessageId === message.id;
-
-                                return (
-                                  <div key={message.id}>
-                                    {shouldInsertProcessCard && (
-                                      <>
-                                        <button
-                                          type="button"
-                                          className="history-folded-card history-folded-card-current"
-                                          onClick={() =>
-                                            toggleHistoryGroup(`${group.id}-process`)
-                                          }
-                                          style={{ marginBottom: 12 }}
-                                        >
-                                          <div className="history-folded-top">
-                                            <span>Codex 过程</span>
-                                            <span>{group.foldedMessages.length} 条</span>
-                                          </div>
-                                          <div className="history-folded-preview">
-                                            {expandedGroups[`${group.id}-process`]
-                                              ? "点击收起过程"
-                                              : summarizeGroupTitle(
-                                                  group.foldedMessages[0]?.text,
-                                                )}
-                                          </div>
-                                        </button>
-                                        {expandedGroups[`${group.id}-process`] &&
-                                          group.foldedMessages.map((foldedMessage) => (
-                                            <div
-                                              key={foldedMessage.id}
-                                              className="history-message history-message-process"
-                                              style={{ marginBottom: 10 }}
-                                            >
-                                              <div className="history-message-top">
-                                                <span className="history-role">
-                                                  Codex 过程
-                                                </span>
-                                                <span className="history-time">
-                                                  {formatDate(foldedMessage.createdAt)}
-                                                </span>
-                                              </div>
-                                              <div className="history-text">
-                                                {foldedMessage.text}
-                                              </div>
-                                            </div>
-                                          ))}
-                                      </>
-                                    )}
-                                    <div
-                                      className={`${messageClassName(message)} ${
-                                        isEditingThisMessage
-                                          ? " history-message-editing"
-                                          : ""
-                                      }`}
-                                    >
-                                      <div className="history-message-top">
-                                        <span className="history-role">
-                                          {messageRoleLabel(message)}
-                                        </span>
-                                        <span className="history-time">
-                                          {formatDate(message.createdAt)}
-                                        </span>
-                                      </div>
-                                      {isEditingThisMessage ? (
-                                        <>
-                                          <textarea
-                                            className="history-edit-textarea"
-                                            value={editingText}
-                                            onChange={(event) =>
-                                              setEditingText(event.target.value)
-                                            }
-                                            rows={4}
-                                            autoFocus
-                                            disabled={sending || isRunning}
-                                          />
-                                          <div className="history-message-actions">
-                                            <button
-                                              type="button"
-                                              className="history-message-secondary-btn"
-                                              onClick={handleCancelEditingMessage}
-                                              disabled={sending || isRunning}
-                                            >
-                                              取消
-                                            </button>
-                                            <button
-                                              type="button"
-                                              className="history-message-primary-btn"
-                                              onClick={() =>
-                                                void handleSubmitEditedPrompt(
-                                                  editingText,
-                                                )
-                                              }
-                                              disabled={
-                                                sending ||
-                                                isRunning ||
-                                                !editingText.trim()
-                                              }
-                                            >
-                                              {sending ? "发送中…" : "重新发送"}
-                                            </button>
-                                          </div>
-                                        </>
-                                      ) : (
-                                        <>
-                                          <div className="history-text">
-                                            {message.text}
-                                          </div>
-                                          {isHistoricalUserMessage && (
-                                            <div className="history-message-actions">
-                                              <button
-                                                type="button"
-                                                className="history-message-secondary-btn"
-                                                onClick={() =>
-                                                  handleStartEditingMessage(message)
-                                                }
-                                                disabled={sending || isRunning}
-                                              >
-                                                编辑并重发
-                                              </button>
-                                            </div>
-                                          )}
-                                        </>
-                                      )}
-                                    </div>
-                                  </div>
-                                );
-                              })}
-                            </div>
+                              </div>
+                              {segment.groups.map((group) => renderHistoryGroup(group))}
+                            </section>
                           );
                         })}
+                        {currentHistoryGroups.map((group) => renderHistoryGroup(group))}
                       </div>
                     ) : (
                       <div className="history-empty detail-history-empty">
@@ -1192,17 +1527,27 @@ export default function SessionDetailPage() {
                   </div>
                 </div>
 
-                <div className={`detail-run-panel ${runPanelStateClass}`}>
-                  {liveRun ? (
+                <div className={`detail-run-panel ${runPanelStateClass} ${transitionShellClass}`}>
+                  {showShellLoading ? (
+                    <div
+                      className="empty-state detail-run-empty"
+                      role="status"
+                      aria-live="polite"
+                    >
+                      <div className="empty-state-icon">↻</div>
+                      <div className="empty-state-text">{shellLoadingTitle}</div>
+                      <div className="empty-state-sub">{shellLoadingCopy}</div>
+                    </div>
+                  ) : liveRun ? (
                     <>
                       <div className="run-header">
-                        <span className={`status-badge status-${liveRun.status}`}>
+                        <span className={`status-badge status-chip status-${liveRun.status}`}>
                           {isRunning && "● "}
                           {statusLabel(liveRun.status)}
                         </span>
                         {transportState !== "live" && (
                           <span
-                            className={`transport-badge transport-badge-${transportState}`}
+                            className={`transport-badge status-chip transport-badge-${transportState}`}
                           >
                             {transportBadge}
                           </span>
@@ -1376,7 +1721,7 @@ export default function SessionDetailPage() {
               </div>
             </section>
 
-            {error && session && (
+            {error && activeSession && (
               <div className="error-message detail-inline-error" role="alert">{error}</div>
             )}
           </main>
@@ -1398,7 +1743,9 @@ export default function SessionDetailPage() {
           <div className="composer-copy-block">
             <div className="composer-eyebrow">Command center</div>
             <h2>
-              {isRunning
+              {composerLocked
+                ? "保持会话壳并等待同步完成"
+                : isRunning
                 ? "停止、检查或发起下一条 follow-up"
                 : "准备下一条命令"}
             </h2>
@@ -1406,19 +1753,23 @@ export default function SessionDetailPage() {
           </div>
           <div className="composer-badges">
             <span
-              className={`composer-pill composer-pill-${
+              className={`composer-pill status-chip composer-pill-${
                 isRunning ? "primary" : sending ? "accent" : "muted"
               }`}
             >
               {composerModeLabel}
             </span>
-            <span className="composer-pill composer-pill-muted">
+            <span className="composer-pill status-chip composer-pill-muted">
               {pendingArtifacts.length > 0
                 ? `${pendingArtifacts.length} 个附件`
                 : "无附件"}
             </span>
-            <span className="composer-pill composer-pill-muted">
-              {isRunning ? "Live run" : "Ready for follow-up"}
+            <span className="composer-pill status-chip composer-pill-muted">
+              {composerLocked
+                ? "Session syncing"
+                : isRunning
+                  ? "Live run"
+                  : "Ready for follow-up"}
             </span>
           </div>
         </div>
@@ -1441,7 +1792,7 @@ export default function SessionDetailPage() {
                 onChange={(e) =>
                   setSelectedModel(e.target.value.trim() ? e.target.value : null)
                 }
-                disabled={sending}
+                disabled={sending || composerLocked}
               >
                 <option value="">Auto</option>
                 <option value="gpt-5.4">gpt-5.4</option>
@@ -1457,7 +1808,7 @@ export default function SessionDetailPage() {
                     e.target.value.trim() ? e.target.value : null,
                   )
                 }
-                disabled={sending}
+                disabled={sending || composerLocked}
               >
                 <option value="">Auto</option>
                 <option value="low">low</option>
@@ -1513,7 +1864,7 @@ export default function SessionDetailPage() {
             type="button"
             className="upload-btn composer-upload-btn"
             onClick={handleUploadClick}
-            disabled={uploading}
+            disabled={uploading || composerLocked}
             title="上传文件或图片"
           >
             📎
@@ -1522,10 +1873,16 @@ export default function SessionDetailPage() {
             <input
               className="prompt-input composer-input"
               type="text"
-              placeholder={isRunning ? "运行中，停止后继续…" : "输入下一条 follow-up 命令…"}
+              placeholder={
+                composerLocked
+                  ? "会话同步中…"
+                  : isRunning
+                    ? "运行中，停止后继续…"
+                    : "输入下一条 follow-up 命令…"
+              }
               value={prompt}
               onChange={(e) => setPrompt(e.target.value)}
-              disabled={isRunning || sending}
+              disabled={composerLocked || isRunning || sending}
             />
             <div className="prompt-support-row">
               <div className="prompt-support-copy">
@@ -1549,7 +1906,7 @@ export default function SessionDetailPage() {
             <button
               type="submit"
               className="send-btn composer-action-btn"
-              disabled={!prompt.trim() || sending}
+              disabled={composerLocked || !prompt.trim() || sending}
               title="继续处理"
             >
               <span className="composer-action-kicker">{composerActionKicker}</span>

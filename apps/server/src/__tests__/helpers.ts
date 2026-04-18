@@ -146,6 +146,10 @@ export class MockCodexAdapter implements CodexAdapter {
 
   async getSessionMessages(
     codexSessionId: string,
+    _options?: {
+      limit?: number;
+      beforeOrderIndex?: number;
+    },
   ): Promise<CodexSessionMessage[]> {
     return this.messages.get(codexSessionId) ?? [];
   }

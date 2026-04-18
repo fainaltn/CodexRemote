@@ -25,9 +25,11 @@ import dev.codexremote.android.R
 @Composable
 internal fun RepoStatusSurface(
     repoStatus: RepoStatus?,
+    expanded: Boolean,
     actionsEnabled: Boolean,
     actionBusy: Boolean,
     actionSummary: String?,
+    onToggleExpanded: () -> Unit,
     onCreateBranch: () -> Unit,
     onCheckoutBranch: () -> Unit,
     onCommit: () -> Unit,
@@ -77,36 +79,87 @@ internal fun RepoStatusSurface(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
             ) {
+                Column(
+                    modifier = Modifier.weight(1f),
+                    verticalArrangement = Arrangement.spacedBy(6.dp),
+                ) {
+                    Text(
+                        text = stringResource(R.string.session_controls_repo_status_title),
+                        style = MaterialTheme.typography.titleSmall,
+                        color = contentColor,
+                    )
+                    FlowRow(
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        verticalArrangement = Arrangement.spacedBy(6.dp),
+                    ) {
+                        RepoStateBadge(
+                            text = when {
+                                isClean -> stringResource(R.string.session_controls_repo_status_clean)
+                                !dirtyLabel.isNullOrBlank() -> stringResource(R.string.session_controls_repo_status_dirty)
+                                else -> stringResource(R.string.session_controls_repo_status_connected)
+                            },
+                            containerColor = accentColor.copy(alpha = 0.14f),
+                            contentColor = contentColor,
+                        )
+                        repoBranchLabel(repoStatus)?.let { branch ->
+                            RepoStateBadge(
+                                text = stringResource(
+                                    R.string.session_controls_repo_branch_format,
+                                    branch,
+                                ),
+                                containerColor = contentColor.copy(alpha = 0.08f),
+                                contentColor = contentColor,
+                            )
+                        }
+                    }
+                }
                 Text(
-                    text = stringResource(R.string.session_controls_repo_status_title),
-                    style = MaterialTheme.typography.titleSmall,
-                    color = contentColor,
+                    text = stringResource(
+                        if (expanded) {
+                            R.string.session_controls_repo_status_collapse
+                        } else {
+                            R.string.session_controls_repo_status_expand
+                        },
+                    ),
+                    modifier = Modifier.clickable(onClick = onToggleExpanded),
+                    style = MaterialTheme.typography.labelLarge,
+                    color = accentColor,
                 )
-                RepoStateBadge(
-                    text = when {
-                        isClean -> stringResource(R.string.session_controls_repo_status_clean)
-                        !dirtyLabel.isNullOrBlank() -> stringResource(R.string.session_controls_repo_status_dirty)
-                        else -> stringResource(R.string.session_controls_repo_status_connected)
-                    },
-                    containerColor = accentColor.copy(alpha = 0.14f),
-                    contentColor = contentColor,
-                )
+            }
+
+            if (!expanded) {
+                dirtyLabel?.let { dirtyState ->
+                    Text(
+                        text = dirtyState,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = contentColor.copy(alpha = 0.84f),
+                        maxLines = 2,
+                    )
+                }
+
+                actionSummary?.takeIf { it.isNotBlank() }?.let { summary ->
+                    Surface(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable(onClick = onDismissSummary),
+                        shape = RoundedCornerShape(12.dp),
+                        color = accentColor.copy(alpha = 0.12f),
+                    ) {
+                        Text(
+                            text = summary,
+                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = contentColor,
+                        )
+                    }
+                }
+                return@Column
             }
 
             FlowRow(
                 horizontalArrangement = Arrangement.spacedBy(6.dp),
                 verticalArrangement = Arrangement.spacedBy(6.dp),
             ) {
-                repoBranchLabel(repoStatus)?.let { branch ->
-                    RepoStateBadge(
-                        text = stringResource(
-                            R.string.session_controls_repo_branch_format,
-                            branch,
-                        ),
-                        containerColor = contentColor.copy(alpha = 0.08f),
-                        contentColor = contentColor,
-                    )
-                }
                 repoRootLabel(repoStatus)?.let { root ->
                     RepoStateBadge(
                         text = stringResource(

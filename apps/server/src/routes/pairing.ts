@@ -1,3 +1,4 @@
+import { networkInterfaces } from "node:os";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import {
   PairingCodeResponse,
@@ -22,13 +23,54 @@ function isLoopbackAddress(address: string | undefined): boolean {
   );
 }
 
+function normalizeAddress(address: string | undefined): string | null {
+  if (!address) return null;
+  return address.toLowerCase().replace(/^::ffff:/, "");
+}
+
+function getLocalInterfaceAddresses(): Set<string> {
+  const interfaces = networkInterfaces();
+  const addresses = new Set<string>();
+
+  for (const entries of Object.values(interfaces)) {
+    for (const entry of entries ?? []) {
+      const candidate = normalizeAddress(entry.address);
+      if (candidate) addresses.add(candidate);
+    }
+  }
+
+  return addresses;
+}
+
+function isLocalInterfaceAddress(
+  address: string | undefined,
+  localInterfaceAddresses: ReadonlySet<string> = getLocalInterfaceAddresses(),
+): boolean {
+  const normalized = normalizeAddress(address);
+  if (!normalized) return false;
+  return localInterfaceAddresses.has(normalized);
+}
+
+export function isLocalOperatorAddress(
+  localIp: string | undefined,
+  socketIp: string | undefined,
+  localInterfaceAddresses: ReadonlySet<string> = getLocalInterfaceAddresses(),
+): boolean {
+  return (
+    isLoopbackAddress(localIp) ||
+    isLoopbackAddress(socketIp) ||
+    isLocalInterfaceAddress(localIp, localInterfaceAddresses) ||
+    isLocalInterfaceAddress(socketIp, localInterfaceAddresses)
+  );
+}
+
 function requireLocalOperator(
   request: FastifyRequest,
   reply: FastifyReply,
 ): boolean {
   const localIp = request.ip;
   const socketIp = request.raw.socket.remoteAddress;
-  if (isLoopbackAddress(localIp) || isLoopbackAddress(socketIp)) {
+  if (isLocalOperatorAddress(localIp, socketIp)) {
     return true;
   }
 

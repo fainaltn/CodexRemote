@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import type { FastifyInstance } from "fastify";
 import { createTestApp, cleanTables } from "./helpers.js";
+import { isLocalOperatorAddress } from "../routes/pairing.js";
 
 let app: FastifyInstance;
 
@@ -35,6 +36,23 @@ describe("Pairing routes", () => {
     });
 
     expect(res.statusCode).toBe(403);
+  });
+
+  it("treats the machine's own LAN address as a local operator", () => {
+    expect(
+      isLocalOperatorAddress(
+        "192.168.2.146",
+        "192.168.2.146",
+        new Set(["192.168.2.146"]),
+      ),
+    ).toBe(true);
+    expect(
+      isLocalOperatorAddress(
+        "192.168.2.158",
+        "192.168.2.158",
+        new Set(["192.168.2.146"]),
+      ),
+    ).toBe(false);
   });
 
   it("claiming a pairing code issues a trusted auth token", async () => {

@@ -196,6 +196,8 @@ export interface CodexThreadStartCapability {
 const ATTACHMENT_WRAPPER_PREFIX =
   "You have access to these uploaded session artifacts";
 const ATTACHMENT_WRAPPER_REQUEST_MARKER = "User request:";
+const HIDDEN_VOICE_NOTE_INSTRUCTION =
+  "A voice-note attachment is included. First transcribe it quietly in the same language, then directly execute or answer the spoken user request. Do not lead with a transcript unless the audio is unclear or the user explicitly asked for one. Do not emit commentary, progress updates, or setup notes before the final answer.";
 
 /**
  * Scan the local Codex session directory and return one entry per
@@ -807,7 +809,10 @@ async function readSessionFile(filePath: string): Promise<ParsedSessionFile> {
         record.type === "response_item" &&
         record.payload?.["role"] === "assistant"
       ) {
-        result.lastPreview = text;
+        const displayText = normalizeDisplayMessage("assistant", text);
+        if (displayText) {
+          result.lastPreview = displayText;
+        }
       }
     } catch {
       // Ignore malformed lines and keep scanning the rest of the file.
@@ -1068,9 +1073,36 @@ function normalizeDisplayMessage(
     role === "user" &&
     trimmed.startsWith(ATTACHMENT_WRAPPER_PREFIX)
   ) {
-    return extractAttachmentUserRequest(trimmed);
+    const request = extractAttachmentUserRequest(trimmed);
+    if (request && isInternalVoiceNotePrompt(request)) {
+      return null;
+    }
+    return request;
+  }
+  if (role === "user" && isInternalVoiceNotePrompt(trimmed)) {
+    return null;
+  }
+  if (role === "assistant" && isInternalVoiceNoteCommentary(trimmed)) {
+    return null;
   }
   return trimmed;
+}
+
+function isInternalVoiceNotePrompt(text: string): boolean {
+  return normalizeMessageText(text) === normalizeMessageText(HIDDEN_VOICE_NOTE_INSTRUCTION);
+}
+
+function isInternalVoiceNoteCommentary(text: string): boolean {
+  const normalized = normalizeMessageText(text).toLowerCase();
+  return (
+    normalized.startsWith("i'm checking the attached audio at the exact path you provided") ||
+    normalized.startsWith("i’m checking the attached audio at the exact path you provided") ||
+    normalized.startsWith("i'm transcribing the new attached audio directly from the exact path you provided") ||
+    normalized.startsWith("i’m transcribing the new attached audio directly from the exact path you provided") ||
+    normalized.startsWith("i'm transcribing the attached voice note from the exact path first") ||
+    normalized.startsWith("i’m transcribing the attached voice note from the exact path first") ||
+    normalized.startsWith("the transcription job is running locally now")
+  );
 }
 
 function extractAttachmentUserRequest(text: string): string | null {

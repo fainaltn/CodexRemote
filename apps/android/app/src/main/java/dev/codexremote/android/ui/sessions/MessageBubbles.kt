@@ -37,6 +37,8 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.GraphicEq
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.ExpandLess
@@ -71,6 +73,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import dev.codexremote.android.R
+import java.util.Locale
 
 data class OutputFileReference(
     val label: String,
@@ -202,6 +205,89 @@ internal fun UserMessageBubble(
                 }
             },
         )
+    }
+}
+
+@Composable
+internal fun VoiceUserMessageBubble(
+    durationMs: Long?,
+    timestamp: String? = null,
+    playing: Boolean = false,
+    onPlay: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Row(
+        modifier = modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.End,
+    ) {
+        Surface(
+            modifier = Modifier
+                .fillMaxWidth(0.85f)
+                .clickable(onClick = onPlay),
+            shape = RoundedCornerShape(20.dp, 20.dp, 4.dp, 20.dp),
+            color = MaterialTheme.colorScheme.secondaryContainer,
+        ) {
+            Row(
+                modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Surface(
+                    shape = RoundedCornerShape(999.dp),
+                    color = MaterialTheme.colorScheme.primary.copy(alpha = 0.14f),
+                ) {
+                    Box(
+                        modifier = Modifier.size(34.dp),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Icon(
+                            imageVector = if (playing) Icons.Filled.GraphicEq else Icons.Filled.PlayArrow,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.size(18.dp),
+                        )
+                    }
+                }
+                Column(
+                    modifier = Modifier.weight(1f),
+                    verticalArrangement = Arrangement.spacedBy(2.dp),
+                ) {
+                    Text(
+                        text = formatVoiceNoteBubbleLabel(durationMs),
+                        style = MaterialTheme.typography.bodyLarge,
+                        color = MaterialTheme.colorScheme.onSecondaryContainer,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                    Text(
+                        text = if (playing) {
+                            stringResource(R.string.session_timeline_voice_playing)
+                        } else {
+                            stringResource(R.string.session_timeline_voice_play)
+                        },
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSecondaryContainer.copy(alpha = 0.76f),
+                    )
+                    timestamp?.let {
+                        Text(
+                            text = formatDate(it),
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSecondaryContainer.copy(alpha = 0.62f),
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun formatVoiceNoteBubbleLabel(durationMs: Long?): String {
+    val roundedSeconds = (((durationMs ?: 0L) + 500L) / 1000L).coerceAtLeast(1L)
+    return if (Locale.getDefault().language.startsWith("zh")) {
+        "${roundedSeconds}秒语音信息"
+    } else {
+        "${roundedSeconds}s voice note"
     }
 }
 

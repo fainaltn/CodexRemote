@@ -658,6 +658,38 @@ class ApiClient(baseUrl: String) {
         )
     }
 
+    suspend fun downloadArtifactFile(
+        token: String,
+        hostId: String,
+        sessionId: String,
+        artifactId: String,
+    ): DownloadedFilePayload {
+        val response = http.get("$baseUrl/api/hosts/$hostId/files/download") {
+            bearerAuth(token)
+            url {
+                parameters.append("source", "artifact")
+                parameters.append("sessionId", sessionId)
+                parameters.append("artifactId", artifactId)
+            }
+        }
+        if (!response.status.isSuccess()) {
+            throw IllegalStateException(
+                extractErrorMessage(response.bodyAsText(), response.status.value),
+            )
+        }
+        val bytes = response.body<ByteArray>()
+        val fileName = response.headers["X-Codex-File-Name"] ?: artifactId
+        val mimeType = response.headers[HttpHeaders.ContentType] ?: "application/octet-stream"
+        val sizeBytes = response.headers["X-Codex-File-Size-Bytes"]?.toLongOrNull()
+            ?: bytes.size.toLong()
+        return DownloadedFilePayload(
+            fileName = fileName,
+            mimeType = mimeType,
+            sizeBytes = sizeBytes,
+            bytes = bytes,
+        )
+    }
+
     suspend fun decidePendingApproval(
         token: String,
         hostId: String,
@@ -978,7 +1010,7 @@ class ApiClient(baseUrl: String) {
         mimeType: String,
         bytes: ByteArray,
     ): Artifact {
-        return http.post("$baseUrl/api/hosts/$hostId/uploads") {
+        val response = http.post("$baseUrl/api/hosts/$hostId/uploads") {
             bearerAuth(token)
             setBody(
                 MultiPartFormDataContent(
@@ -998,7 +1030,8 @@ class ApiClient(baseUrl: String) {
                     }
                 )
             )
-        }.body()
+        }
+        return decodeResponse(response)
     }
 
     fun close() {

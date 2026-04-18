@@ -123,6 +123,13 @@ data class DownloadedSessionFile(
     val mimeType: String,
 )
 
+data class RecordedVoiceInput(
+    val fileName: String,
+    val mimeType: String,
+    val bytes: ByteArray,
+    val durationMs: Long,
+)
+
 data class SessionDetailUiState(
     val loading: Boolean = false,
     val refreshing: Boolean = false,
@@ -180,6 +187,7 @@ data class PendingLocalAttachment(
     val mimeType: String,
     val sizeBytes: Long,
     val bytes: ByteArray,
+    val durationMs: Long? = null,
 )
 
 private data class RuntimeControls(
@@ -207,17 +215,35 @@ private data class SessionRef(
     val sessionId: String,
 )
 
-private fun buildAttachmentPrompt(prompt: String, artifacts: List<Artifact>): String {
+private fun buildAttachmentPrompt(
+    prompt: String,
+    artifacts: List<Artifact>,
+    audioDurationsMs: Map<String, Long> = emptyMap(),
+): String {
     if (artifacts.isEmpty()) return prompt.trim()
+    val hasAudioAttachment = artifacts.any { it.mimeType.startsWith("audio/", ignoreCase = true) }
     return buildString {
         appendLine("You have access to these uploaded session artifacts on the local filesystem.")
         appendLine("Use the exact absolute file paths below directly before answering.")
         appendLine("Do not search the workspace for alternate copies unless a listed path is missing.")
+        if (hasAudioAttachment) {
+            appendLine("If an attachment is audio, transcribe it locally before answering.")
+            appendLine("Use `/opt/homebrew/bin/whisper` directly and use `/opt/homebrew/bin/ffmpeg` only if format inspection or conversion is needed.")
+            appendLine("Do not probe tool availability first with shell fallback chains like `command -v ... || ...`.")
+            if (prompt.trim() == hiddenVoiceNoteInstruction) {
+                appendLine("Treat the voice note as the user's actual instruction.")
+                appendLine("Quietly transcribe it first, then execute or answer the spoken request directly.")
+                appendLine("Only include the transcript when the speech is ambiguous or when the user explicitly asks for it.")
+            }
+        }
         appendLine()
         artifacts.forEachIndexed { index, artifact ->
             appendLine(
                 "[Attachment ${index + 1}] id=${artifact.id} ${artifact.originalName} (${artifact.mimeType})",
             )
+            audioDurationsMs[artifact.id]?.let { durationMs ->
+                appendLine("Duration ms: $durationMs")
+            }
             appendLine("Absolute path: ${artifact.storedPath}")
         }
         appendLine()
@@ -228,14 +254,9 @@ private fun buildAttachmentPrompt(prompt: String, artifacts: List<Artifact>): St
 private fun sanitizePromptDisplay(prompt: String?): String? {
     val trimmed = prompt?.trim().orEmpty()
     if (trimmed.isBlank()) return null
-    if (trimmed.startsWith("You have access to these uploaded session artifacts")) {
-        val marker = "User request:"
-        val idx = trimmed.indexOf(marker)
-        if (idx != -1) {
-            return trimmed.substring(idx + marker.length).trim().ifBlank { null }
-        }
-    }
-    return trimmed
+    return dev.codexremote.android.ui.sessions
+        .sanitizePromptDisplay(trimmed)
+        .ifBlank { null }
 }
 
 private fun normalizeRuntimeControl(value: String?): String? =
@@ -247,6 +268,15 @@ private fun normalizePermissionMode(value: String?): String =
         "full", "full-access", "fullAccess" -> "full-access"
         else -> "on-request"
     }
+
+private fun buildComposedPrompt(
+    prompt: String,
+    artifacts: List<Artifact> = emptyList(),
+    audioDurationsMs: Map<String, Long> = emptyMap(),
+): String {
+    val skillAwarePrompt = augmentPromptWithSkillMentions(prompt)
+    return buildAttachmentPrompt(skillAwarePrompt, artifacts, audioDurationsMs)
+}
 
 private fun mergeApprovalEvent(
     current: List<PendingApproval>,
@@ -1289,7 +1319,7 @@ class SessionDetailViewModel(application: Application) : AndroidViewModel(applic
             val snapshot = _uiState.value
             val promptToResend = snapshot.lastSubmittedPromptWithAttachments
                 ?: sanitizePromptDisplay(fallbackPrompt)
-                ?: buildAttachmentPrompt(
+                ?: buildComposedPrompt(
                     snapshot.lastSubmittedPrompt ?: snapshot.prompt,
                     snapshot.pendingArtifacts,
                 )
@@ -1319,7 +1349,7 @@ class SessionDetailViewModel(application: Application) : AndroidViewModel(applic
             val editedPrompt = prompt.trim()
             if (editedPrompt.isBlank()) return@launch
 
-            val composedPrompt = buildAttachmentPrompt(editedPrompt, artifacts)
+            val composedPrompt = buildComposedPrompt(editedPrompt, artifacts)
             submitPrompt(
                 serverId = serverId,
                 sessionId = sessionId,
@@ -1405,6 +1435,79 @@ class SessionDetailViewModel(application: Application) : AndroidViewModel(applic
             state.copy(
                 pendingLocalAttachments = state.pendingLocalAttachments.filterNot { it.id == attachmentId },
             )
+        }
+    }
+
+    suspend fun sendRecordedVoiceNote(
+        serverId: String,
+        sessionId: String?,
+        draftCwd: String?,
+        audio: RecordedVoiceInput,
+    ) {
+        val hiddenPrompt = hiddenVoiceNoteInstruction
+        val runtimeControls = currentRuntimeControls(_uiState.value)
+        if (sessionId.isNullOrBlank()) {
+            val cwd = draftCwd?.takeIf { it.isNotBlank() } ?: run {
+                _uiState.update { it.copy(error = string(R.string.session_detail_error_missing_cwd)) }
+                return
+            }
+            createDraftSessionWithQueuedAttachments(
+                serverId = serverId,
+                cwd = cwd,
+                rawPrompt = hiddenPrompt,
+                localAttachments = listOf(
+                    PendingLocalAttachment(
+                        id = java.util.UUID.randomUUID().toString(),
+                        originalName = audio.fileName,
+                        mimeType = audio.mimeType,
+                        sizeBytes = audio.bytes.size.toLong(),
+                        bytes = audio.bytes,
+                        durationMs = audio.durationMs,
+                    ),
+                ),
+                runtimeControls = runtimeControls,
+            )
+            return
+        }
+
+        _uiState.update { it.copy(uploading = true, error = null) }
+        try {
+            val artifact = withServerClient(serverId) { handle ->
+                withContext(Dispatchers.IO) {
+                    handle.client.uploadSessionArtifact(
+                        token = handle.token,
+                        hostId = SESSION_HOST_ID,
+                        sessionId = sessionId,
+                        fileName = audio.fileName,
+                        mimeType = audio.mimeType,
+                        bytes = audio.bytes,
+                    )
+                }
+            }
+            val success = submitPrompt(
+                serverId = serverId,
+                sessionId = sessionId,
+                rawPrompt = hiddenPrompt,
+                composedPrompt = buildComposedPrompt(
+                    hiddenPrompt,
+                    listOf(artifact),
+                    audioDurationsMs = mapOf(artifact.id to audio.durationMs),
+                ),
+                clearComposer = false,
+                runtimeControls = runtimeControls,
+            )
+            if (!success) {
+                _uiState.update {
+                    it.copy(error = string(R.string.session_detail_error_start_run))
+                }
+            }
+        } catch (e: Exception) {
+            _uiState.update {
+                it.copy(error = userFacingMessage(e, string(R.string.session_detail_error_upload)))
+            }
+            throw e
+        } finally {
+            _uiState.update { it.copy(uploading = false) }
         }
     }
 
@@ -1572,7 +1675,7 @@ class SessionDetailViewModel(application: Application) : AndroidViewModel(applic
                 serverId = serverId,
                 sessionId = resolvedSessionId,
                 rawPrompt = rawPrompt,
-                composedPrompt = buildAttachmentPrompt(rawPrompt, snapshot.pendingArtifacts),
+                composedPrompt = buildComposedPrompt(rawPrompt, snapshot.pendingArtifacts),
                 clearComposer = true,
                 runtimeControls = runtimeControls,
             )
@@ -1711,6 +1814,34 @@ class SessionDetailViewModel(application: Application) : AndroidViewModel(applic
                 hostId = SESSION_HOST_ID,
                 sessionId = sessionId,
                 absolutePath = absolutePath,
+            )
+        }
+
+        val downloadsDir = File(getApplication<Application>().cacheDir, "downloads").apply {
+            mkdirs()
+        }
+        val outputFile = File(downloadsDir, payload.fileName)
+        withContext(Dispatchers.IO) {
+            outputFile.writeBytes(payload.bytes)
+        }
+        return DownloadedSessionFile(
+            file = outputFile,
+            fileName = payload.fileName,
+            mimeType = payload.mimeType,
+        )
+    }
+
+    suspend fun downloadArtifactFile(
+        serverId: String,
+        sessionId: String,
+        artifactId: String,
+    ): DownloadedSessionFile {
+        val payload = withServerClient(serverId) { handle ->
+            handle.client.downloadArtifactFile(
+                token = handle.token,
+                hostId = SESSION_HOST_ID,
+                sessionId = sessionId,
+                artifactId = artifactId,
             )
         }
 
@@ -1924,7 +2055,7 @@ class SessionDetailViewModel(application: Application) : AndroidViewModel(applic
                 serverId = serverId,
                 sessionId = sessionId,
                 rawPrompt = nextQueuedPrompt.rawPrompt,
-                composedPrompt = buildAttachmentPrompt(
+                composedPrompt = buildComposedPrompt(
                     nextQueuedPrompt.rawPrompt,
                     nextQueuedPrompt.artifacts,
                 ),
@@ -1974,7 +2105,7 @@ class SessionDetailViewModel(application: Application) : AndroidViewModel(applic
         return try {
             val snapshot = _uiState.value
             val effectiveRuntimeControls = runtimeControls ?: currentRuntimeControls(snapshot)
-            val composedPrompt = buildAttachmentPrompt(prompt, snapshot.pendingArtifacts)
+            val composedPrompt = buildComposedPrompt(prompt, snapshot.pendingArtifacts)
             val inlineCreate = runtimeControls == null
             val createdSessionId = if (inlineCreate) {
                 withServerClient(serverId) { handle ->
@@ -2065,7 +2196,18 @@ class SessionDetailViewModel(application: Application) : AndroidViewModel(applic
                 }
             }
 
-            val composedPrompt = buildAttachmentPrompt(rawPrompt, uploadedArtifacts)
+            val audioDurationsMs = buildMap {
+                uploadedArtifacts.forEachIndexed { index, artifact ->
+                    localAttachments.getOrNull(index)?.durationMs?.let { durationMs ->
+                        put(artifact.id, durationMs)
+                    }
+                }
+            }
+            val composedPrompt = buildComposedPrompt(
+                rawPrompt,
+                uploadedArtifacts,
+                audioDurationsMs = audioDurationsMs,
+            )
             val effectiveRuntimeControls = runtimeControls ?: currentRuntimeControls(_uiState.value)
             sendPromptInternal(
                 serverId = serverId,

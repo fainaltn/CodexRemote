@@ -97,6 +97,8 @@ export const JSON_BODY_LIMIT_BYTES = 512 * 1024; // 512 KB
 export const DEFAULT_ALLOWED_UPLOAD_MIME_PATTERNS: readonly string[] = [
   // Images — primary APK upload use case (screenshots, photos)
   "image/*",
+  // Audio — voice-note attachments for Codex processing
+  "audio/*",
   // Text and code — logs, source files, configs
   "text/*",
   // Documents

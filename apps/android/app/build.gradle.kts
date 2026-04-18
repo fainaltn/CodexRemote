@@ -13,8 +13,8 @@ android {
         applicationId = "dev.codexremote.android"
         minSdk = 28
         targetSdk = 35
-        versionCode = 12
-        versionName = "0.4.5"
+        versionCode = 18
+        versionName = "0.4.11"
 
         vectorDrawables {
             useSupportLibrary = true

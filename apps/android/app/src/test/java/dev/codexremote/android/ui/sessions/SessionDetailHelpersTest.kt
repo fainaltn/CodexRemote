@@ -8,6 +8,47 @@ import org.junit.Test
 class SessionDetailHelpersTest {
 
     @Test
+    fun `extract skill mentions keeps unique tokens in order`() {
+        val mentions = extractSkillMentions(
+            "先用 \$agent-reach 看最新信息，再配合 \$agent-reach 和 \$imagegen 出图",
+        )
+
+        assertEquals(listOf("\$agent-reach", "\$imagegen"), mentions)
+    }
+
+    @Test
+    fun `augment prompt with skill mentions adds a stable preamble`() {
+        val augmented = augmentPromptWithSkillMentions(
+            "请用 \$agent-reach 查一下这个仓库最新 release",
+        )
+
+        assertTrue(
+            augmented.startsWith(
+                "Use the explicitly mentioned Codex skills for this request when relevant:",
+            ),
+        )
+        assertTrue(augmented.contains("User request: 请用 \$agent-reach 查一下这个仓库最新 release"))
+    }
+
+    @Test
+    fun `sanitize prompt display unwraps nested attachment and skill wrappers`() {
+        val wrapped = """
+            You have access to these uploaded session artifacts on the local filesystem.
+            Use the exact absolute file paths below directly before answering.
+            Do not search the workspace for alternate copies unless a listed path is missing.
+
+            [Attachment 1] id=a report.txt (text/plain)
+            Absolute path: /tmp/report.txt
+
+            User request: Use the explicitly mentioned Codex skills for this request when relevant: ${'$'}agent-reach
+
+            User request: 请查一下最新发布说明
+        """.trimIndent()
+
+        assertEquals("请查一下最新发布说明", sanitizePromptDisplay(wrapped))
+    }
+
+    @Test
     fun `latest canonical assistant reply prefers highest order item in latest turn`() {
         val messages = listOf(
             message(

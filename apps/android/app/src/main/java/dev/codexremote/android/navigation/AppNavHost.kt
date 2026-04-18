@@ -4,6 +4,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.collectAsState
+import androidx.navigation.NavBackStackEntry
 import androidx.navigation.NavHostController
 import androidx.navigation.NavType
 import androidx.navigation.compose.NavHost
@@ -25,6 +26,40 @@ import dev.codexremote.android.ui.sessions.ArchivedSessionsScreen
 import dev.codexremote.android.ui.sessions.SessionDetailScreen
 import dev.codexremote.android.ui.sessions.SessionListScreen
 import dev.codexremote.android.ui.splash.SplashScreen
+
+private const val DRAFT_RETURN_ROUTE_KEY = "draft_return_route"
+
+internal data class DraftReturnTarget(
+    val route: String,
+    val inclusive: Boolean,
+)
+
+internal fun resolveDraftReturnTarget(parentRoute: String?): DraftReturnTarget =
+    parentRoute
+        ?.takeIf { it.isNotBlank() }
+        ?.let { DraftReturnTarget(route = it, inclusive = false) }
+        ?: DraftReturnTarget(route = Screen.DraftSessionDetail.route, inclusive = true)
+
+private fun NavBackStackEntry.resolveConcreteRoute(): String? {
+    val route = destination.route ?: return null
+    return when (route) {
+        Screen.SessionList.route ->
+            arguments?.getString(Screen.ARG_SERVER_ID)?.let(Screen.SessionList::createRoute)
+
+        Screen.SessionDetail.route -> {
+            val serverId = arguments?.getString(Screen.ARG_SERVER_ID)
+            val hostId = arguments?.getString(Screen.ARG_HOST_ID)
+            val sessionId = arguments?.getString(Screen.ARG_SESSION_ID)
+            if (serverId != null && hostId != null && sessionId != null) {
+                Screen.SessionDetail.createRoute(serverId, hostId, sessionId)
+            } else {
+                null
+            }
+        }
+
+        else -> route
+    }
+}
 
 private fun NavHostController.navigateToServerScopedTopLevel(
     serverId: String,
@@ -293,6 +328,15 @@ fun AppNavHost(
             val cwd =
                 backStackEntry.arguments?.getString(Screen.ARG_CWD)?.ifBlank { null }
                     ?: return@composable
+            val draftParentRoute = navController.previousBackStackEntry?.resolveConcreteRoute()
+            LaunchedEffect(backStackEntry, draftParentRoute) {
+                if (draftParentRoute.isNullOrBlank()) return@LaunchedEffect
+                val existingRoute = backStackEntry.savedStateHandle
+                    .get<String>(DRAFT_RETURN_ROUTE_KEY)
+                if (existingRoute.isNullOrBlank()) {
+                    backStackEntry.savedStateHandle[DRAFT_RETURN_ROUTE_KEY] = draftParentRoute
+                }
+            }
             SessionDetailScreen(
                 serverId = serverId,
                 hostId = "local",
@@ -301,10 +345,13 @@ fun AppNavHost(
                 themePreference = themePreference,
                 onToggleTheme = onToggleTheme,
                 onSessionCreated = { hostId, sessionId ->
+                    val returnTarget = resolveDraftReturnTarget(
+                        backStackEntry.savedStateHandle.get<String>(DRAFT_RETURN_ROUTE_KEY)
+                    )
                     navController.navigate(
                         Screen.SessionDetail.createRoute(serverId, hostId, sessionId)
                     ) {
-                        popUpTo(Screen.DraftSessionDetail.route) { inclusive = true }
+                        popUpTo(returnTarget.route) { inclusive = returnTarget.inclusive }
                         launchSingleTop = true
                     }
                 },

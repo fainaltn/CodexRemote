@@ -5,6 +5,8 @@ import android.app.Activity
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.media.MediaPlayer
+import android.media.MediaMetadataRetriever
 import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -538,23 +540,50 @@ fun SessionDetailScreen(
     var pendingCameraCaptureUri by remember(stableDetailKey) { mutableStateOf<Uri?>(null) }
     var transientBannerMessage by remember(stableDetailKey) { mutableStateOf<String?>(null) }
     var transientBannerTone by remember(stableDetailKey) { mutableStateOf(TimelineNoticeTone.Neutral) }
+    var voiceModeEnabled by rememberSaveable(stableDetailKey) { mutableStateOf(false) }
+    var pendingVoiceHoldStart by remember(stableDetailKey) { mutableStateOf(false) }
+    var playingVoiceNotePath by remember(stableDetailKey) { mutableStateOf<String?>(null) }
+    var resolvedVoiceNoteDurationMs by remember(stableDetailKey) { mutableStateOf<Long?>(null) }
+    val voiceNotePlayer = remember(stableDetailKey) { MediaPlayer() }
     val voiceController = remember(stableDetailKey) {
         SessionVoiceInputController(
             context = context.applicationContext,
             scope = coroutineScope,
-            onTranscript = { transcript -> viewModel.appendPrompt(transcript) },
             onError = { error ->
                 val message = when (error) {
                     SessionVoiceInputError.PermissionDenied ->
                         context.getString(R.string.session_detail_voice_permission_denied)
                     SessionVoiceInputError.Unavailable ->
                         context.getString(R.string.session_detail_voice_unavailable)
+                    SessionVoiceInputError.TooShort -> null
                     SessionVoiceInputError.NoMatch ->
                         context.getString(R.string.session_detail_voice_no_match)
                     SessionVoiceInputError.Failed ->
                         context.getString(R.string.session_detail_voice_failed)
                 }
-                viewModel.showError(message)
+                if (error == SessionVoiceInputError.TooShort) {
+                    transientBannerMessage = localizedSessionText(
+                        "按住时间太短，至少说满 2 秒。",
+                        "Hold to talk for at least 2 seconds.",
+                    )
+                    transientBannerTone = TimelineNoticeTone.Warning
+                } else if (!message.isNullOrBlank()) {
+                    viewModel.showError(message)
+                }
+            },
+            onVoiceNoteReady = { audio ->
+                viewModel.sendRecordedVoiceNote(
+                    serverId = serverId,
+                    sessionId = sessionId,
+                    draftCwd = initialCwd,
+                    audio = audio,
+                )
+                voiceModeEnabled = false
+                transientBannerMessage = localizedSessionText(
+                    "语音已发送，正在处理。",
+                    "Voice note sent and processing started.",
+                )
+                transientBannerTone = TimelineNoticeTone.Neutral
             },
         )
     }
@@ -823,40 +852,65 @@ fun SessionDetailScreen(
             attachPickedUri(captureUri)
         }
     }
-    val externalVoiceLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.StartActivityForResult(),
-    ) { result ->
-        if (result.resultCode == Activity.RESULT_OK) {
-            voiceController.handleExternalResult(result.data)
-        } else {
-            voiceController.cancel()
-        }
-    }
     val voicePermissionLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.RequestPermission(),
     ) { granted ->
+        val shouldStart = pendingVoiceHoldStart
+        pendingVoiceHoldStart = false
         if (!granted) {
             viewModel.showError(context.getString(R.string.session_detail_voice_permission_denied))
             return@rememberLauncherForActivityResult
         }
         if (!voiceController.isAvailable()) {
-            viewModel.showError(context.getString(R.string.session_detail_voice_unavailable))
+            viewModel.showError(voiceController.readinessLabel(context))
             return@rememberLauncherForActivityResult
         }
-        if (voiceController.usesExternalRecognizer()) {
-            voiceController.startExternal(context.getString(R.string.session_detail_voice_prompt))
-            runCatching {
-                externalVoiceLauncher.launch(
-                    voiceController.buildRecognitionIntent(
-                        context.getString(R.string.session_detail_voice_prompt),
-                    ),
-                )
-            }.onFailure { _: Throwable ->
-                voiceController.cancel()
-                viewModel.showError(context.getString(R.string.session_detail_voice_unavailable))
-            }
-        } else {
+        if (shouldStart) {
             voiceController.start(context.getString(R.string.session_detail_voice_prompt))
+        }
+    }
+    val startVoiceRecording = remember(
+        context,
+        voiceController,
+        voiceUiState.recording,
+        voiceUiState.transcribing,
+        voicePermissionLauncher
+    ) {
+        {
+            if (voiceUiState.recording) {
+            } else if (voiceUiState.transcribing) {
+                Unit
+            } else if (!voiceController.isAvailable()) {
+                viewModel.showError(voiceController.readinessLabel(context))
+            } else {
+                val permissionGranted = ContextCompat.checkSelfPermission(
+                    context,
+                    Manifest.permission.RECORD_AUDIO,
+                ) == PackageManager.PERMISSION_GRANTED
+                if (permissionGranted) {
+                    voiceController.start(context.getString(R.string.session_detail_voice_prompt))
+                } else {
+                    pendingVoiceHoldStart = true
+                    voicePermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
+                }
+            }
+        }
+    }
+    val finishVoiceRecording = remember(voiceController, voiceUiState.recording) {
+        {
+            if (voiceUiState.recording) {
+                voiceController.stop()
+            } else {
+                pendingVoiceHoldStart = false
+            }
+        }
+    }
+    val cancelVoiceRecording = remember(voiceController, voiceUiState.recording, voiceUiState.transcribing) {
+        {
+            pendingVoiceHoldStart = false
+            if (voiceUiState.recording || voiceUiState.transcribing) {
+                voiceController.cancel()
+            }
         }
     }
     val notificationPermissionLauncher = rememberLauncherForActivityResult(
@@ -864,6 +918,10 @@ fun SessionDetailScreen(
     ) { }
     val isRunning = uiState.liveRun?.status in activeRunStatuses
     val cleanedOutput by viewModel.cleanedOutputFlow.collectAsState(initial = null)
+    val latestVoiceNote = remember(uiState.liveRun?.prompt, uiState.currentTurnPromptOverride) {
+        extractLatestVoiceNoteReference(uiState.liveRun?.prompt)
+            ?: extractLatestVoiceNoteReference(uiState.currentTurnPromptOverride)
+    }
     val loadingStage = when {
         uiState.session == null && uiState.liveStreamStatus.isNullOrBlank() -> SessionLoadingStage.Host
         uiState.liveStreamStatus == context.getString(R.string.session_detail_stream_connecting) -> SessionLoadingStage.Stream
@@ -977,6 +1035,16 @@ fun SessionDetailScreen(
     DisposableEffect(voiceController) {
         onDispose {
             voiceController.release()
+        }
+    }
+
+    DisposableEffect(voiceNotePlayer) {
+        voiceNotePlayer.setOnCompletionListener {
+            playingVoiceNotePath = null
+        }
+        onDispose {
+            runCatching { voiceNotePlayer.stop() }
+            voiceNotePlayer.release()
         }
     }
 
@@ -1096,6 +1164,40 @@ fun SessionDetailScreen(
             delay(8_000L)
             transientBannerMessage = null
             transientBannerTone = TimelineNoticeTone.Neutral
+        }
+    }
+
+    LaunchedEffect(latestVoiceNote?.absolutePath, latestVoiceNote?.durationMs, sessionId) {
+        resolvedVoiceNoteDurationMs = latestVoiceNote?.durationMs
+        val voiceNote = latestVoiceNote ?: return@LaunchedEffect
+        if (voiceNote.durationMs != null) return@LaunchedEffect
+        val currentSessionId = sessionId ?: return@LaunchedEffect
+        runCatching {
+            if (!voiceNote.artifactId.isNullOrBlank()) {
+                viewModel.downloadArtifactFile(
+                    serverId = serverId,
+                    sessionId = currentSessionId,
+                    artifactId = voiceNote.artifactId,
+                )
+            } else {
+                viewModel.downloadAbsoluteFile(
+                    serverId = serverId,
+                    sessionId = currentSessionId,
+                    absolutePath = voiceNote.absolutePath,
+                )
+            }
+        }.onSuccess { downloaded ->
+            runCatching {
+                MediaMetadataRetriever().use { retriever ->
+                    retriever.setDataSource(downloaded.file.absolutePath)
+                    retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)
+                        ?.toLongOrNull()
+                }
+            }.onSuccess { durationMs ->
+                if (durationMs != null) {
+                    resolvedVoiceNoteDurationMs = durationMs
+                }
+            }
         }
     }
 
@@ -1420,6 +1522,65 @@ fun SessionDetailScreen(
                                         ),
                                     )
                                 },
+                                onPlayVoiceNote = { voiceNote ->
+                                    val currentSessionId = sessionId
+                                    if (currentSessionId.isNullOrBlank()) return@ConversationTimeline
+                                    coroutineScope.launch {
+                                        runCatching {
+                                            if (!voiceNote.artifactId.isNullOrBlank()) {
+                                                viewModel.downloadArtifactFile(
+                                                    serverId = serverId,
+                                                    sessionId = currentSessionId,
+                                                    artifactId = voiceNote.artifactId,
+                                                )
+                                            } else {
+                                                viewModel.downloadAbsoluteFile(
+                                                    serverId = serverId,
+                                                    sessionId = currentSessionId,
+                                                    absolutePath = voiceNote.absolutePath,
+                                                )
+                                            }
+                                        }.onSuccess { downloaded ->
+                                            runCatching {
+                                                MediaMetadataRetriever().use { retriever ->
+                                                    retriever.setDataSource(downloaded.file.absolutePath)
+                                                    retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)
+                                                        ?.toLongOrNull()
+                                                }
+                                            }.onSuccess { durationMs ->
+                                                if (durationMs != null) {
+                                                    resolvedVoiceNoteDurationMs = durationMs
+                                                }
+                                            }
+                                            runCatching {
+                                                if (playingVoiceNotePath == voiceNote.absolutePath &&
+                                                    voiceNotePlayer.isPlaying
+                                                ) {
+                                                    voiceNotePlayer.pause()
+                                                    playingVoiceNotePath = null
+                                                } else {
+                                                    voiceNotePlayer.reset()
+                                                    voiceNotePlayer.setDataSource(downloaded.file.absolutePath)
+                                                    voiceNotePlayer.prepare()
+                                                    voiceNotePlayer.start()
+                                                    playingVoiceNotePath = voiceNote.absolutePath
+                                                }
+                                            }.onFailure {
+                                                playingVoiceNotePath = null
+                                                viewModel.showError(
+                                                    context.getString(R.string.session_detail_error_file_read),
+                                                )
+                                            }
+                                        }.onFailure {
+                                            playingVoiceNotePath = null
+                                            viewModel.showError(
+                                                context.getString(R.string.session_detail_error_file_read),
+                                            )
+                                        }
+                                    }
+                                },
+                                playingVoiceNotePath = playingVoiceNotePath,
+                                resolvedVoiceNoteDurationMs = resolvedVoiceNoteDurationMs,
                             )
 
                             // Scroll-to-bottom FAB
@@ -1486,11 +1647,21 @@ fun SessionDetailScreen(
                         skillSuggestions = skillSuggestions,
                         suggestionFilters = skillFilterOptions,
                         selectedSuggestionFilterId = skillSourceFilter,
+                        voiceModeEnabled = voiceModeEnabled,
+                        voiceRecording = voiceUiState.recording,
+                        voicePreparing = voiceUiState.transcribing,
                         onPromptValueChange = { nextValue ->
                             composerPromptValue = nextValue
                             viewModel.setPrompt(nextValue.text)
                         },
                         onSuggestionAction = { suggestion ->
+                            if (suggestion.kind == ComposerSuggestionKind.Skill) {
+                                transientBannerMessage = localizedSessionText(
+                                    "已插入技能 ${suggestion.label}，发送时会优先触发。",
+                                    "Inserted ${suggestion.label}; it will be prioritized when you send.",
+                                )
+                                transientBannerTone = TimelineNoticeTone.Neutral
+                            }
                             val slashHandled = when (suggestion.id) {
                                 "slash-status" -> {
                                     showDevDiagnostics = true
@@ -1581,37 +1752,27 @@ fun SessionDetailScreen(
                             runtimeSheetTarget = RuntimeControlTarget.PermissionMode
                         },
                         onVoiceClick = {
-                            if (voiceUiState.recording) {
-                                voiceController.stop()
-                            } else if (voiceUiState.transcribing) {
-                                // Keep current transcription running.
-                            } else if (!voiceController.isAvailable()) {
-                                viewModel.showError(context.getString(R.string.session_detail_voice_unavailable))
+                            if (voiceUiState.recording || voiceUiState.transcribing) {
+                                cancelVoiceRecording()
                             } else {
-                                if (voiceController.usesExternalRecognizer()) {
-                                    voiceController.startExternal(context.getString(R.string.session_detail_voice_prompt))
-                                    runCatching {
-                                        externalVoiceLauncher.launch(
-                                            voiceController.buildRecognitionIntent(
-                                                context.getString(R.string.session_detail_voice_prompt),
-                                            ),
-                                        )
-                                    }.onFailure { _: Throwable ->
-                                        voiceController.cancel()
-                                        viewModel.showError(context.getString(R.string.session_detail_voice_unavailable))
-                                    }
-                                } else {
-                                    val permissionGranted = ContextCompat.checkSelfPermission(
-                                        context,
-                                        Manifest.permission.RECORD_AUDIO,
-                                    ) == PackageManager.PERMISSION_GRANTED
-                                    if (permissionGranted) {
-                                        voiceController.start(context.getString(R.string.session_detail_voice_prompt))
-                                    } else {
-                                        voicePermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
-                                    }
+                                voiceModeEnabled = !voiceModeEnabled
+                                if (voiceModeEnabled) {
+                                    transientBannerMessage = localizedSessionText(
+                                        "按住语音按钮说话，松开后自动发送，最长 90 秒。",
+                                        "Hold the voice button to talk and release to send automatically. Max 90 seconds.",
+                                    )
+                                    transientBannerTone = TimelineNoticeTone.Neutral
                                 }
                             }
+                        },
+                        onVoiceHoldStart = {
+                            startVoiceRecording()
+                        },
+                        onVoiceHoldEnd = {
+                            finishVoiceRecording()
+                        },
+                        onVoiceHoldCancel = {
+                            cancelVoiceRecording()
                         },
                         onSend = {
                             viewModel.sendPrompt(serverId, sessionId, initialCwd)

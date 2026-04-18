@@ -14,6 +14,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.input.TextFieldValue
+import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.unit.dp
 
 internal enum class ComposerSuggestionKind {
@@ -71,11 +72,17 @@ internal fun applyComposerSuggestion(
     context: ComposerTokenContext,
     suggestion: ComposerSuggestion,
 ): String {
+    val replacementText = normalizedComposerSuggestionInsertText(suggestion)
     val tail = text.substring(context.replaceEnd)
-    val adjustedTail = if (
-        suggestion.insertText.lastOrNull()?.isWhitespace() == true &&
-        tail.firstOrNull()?.isWhitespace() == true
-    ) {
+    val replacementEndsWithWhitespace = replacementText.lastOrNull()?.isWhitespace() == true
+    val tailStartsWhitespace = tail.firstOrNull()?.isWhitespace() == true
+    val tailStartsPunctuation = tail.firstOrNull()?.let(::isComposerTrailingPunctuation) == true
+    val adjustedReplacement = if (replacementEndsWithWhitespace && tailStartsPunctuation) {
+        replacementText.trimEnd()
+    } else {
+        replacementText
+    }
+    val adjustedTail = if (replacementEndsWithWhitespace && tailStartsWhitespace) {
         tail.dropWhile { it.isWhitespace() }
     } else {
         tail
@@ -83,7 +90,7 @@ internal fun applyComposerSuggestion(
 
     return buildString {
         append(text.substring(0, context.replaceStart))
-        append(suggestion.insertText)
+        append(adjustedReplacement)
         append(adjustedTail)
     }
 }
@@ -93,15 +100,20 @@ internal fun filterComposerSuggestions(
     context: ComposerTokenContext,
 ): List<ComposerSuggestion> {
     val query = context.query.trim()
-    if (query.isBlank()) return suggestions.take(8)
+    val normalizedQuery = normalizeComposerSearchKey(query)
+    if (normalizedQuery.isBlank()) return suggestions.take(8)
 
     return suggestions.mapNotNull { suggestion ->
-        val normalized = suggestion.label.removePrefix(context.prefix.toString()).trim()
+        val normalizedLabel = suggestion.label
+            .removePrefix(context.prefix.toString())
+            .trim()
+        val normalizedLabelKey = normalizeComposerSearchKey(normalizedLabel)
+        val normalizedDetailKey = normalizeComposerSearchKey(suggestion.detail.orEmpty())
         val score = when {
-            normalized.equals(query, ignoreCase = true) -> 0
-            normalized.startsWith(query, ignoreCase = true) -> 1
-            normalized.contains(query, ignoreCase = true) -> 2
-            suggestion.detail?.contains(query, ignoreCase = true) == true -> 3
+            normalizedLabelKey == normalizedQuery -> 0
+            normalizedLabelKey.startsWith(normalizedQuery) -> 1
+            normalizedLabelKey.contains(normalizedQuery) -> 2
+            normalizedDetailKey.contains(normalizedQuery) -> 3
             else -> null
         }
         score?.let { suggestion to it }
@@ -118,18 +130,19 @@ internal fun replaceComposerSelection(
     value: TextFieldValue,
     suggestion: ComposerSuggestion,
 ): TextFieldValue {
+    val replacementText = normalizedComposerSuggestionInsertText(suggestion)
     val context = detectComposerTokenContext(
         text = value.text,
         cursorPosition = value.selection.end,
     ) ?: return value.copy(
-        text = suggestion.insertText,
-        selection = androidx.compose.ui.text.TextRange(suggestion.insertText.length),
+        text = replacementText,
+        selection = TextRange(replacementText.length),
     )
 
     val nextText = applyComposerSuggestion(value.text, context, suggestion)
     return value.copy(
         text = nextText,
-        selection = androidx.compose.ui.text.TextRange(nextText.length),
+        selection = TextRange(nextText.length),
     )
 }
 
@@ -227,7 +240,7 @@ private fun SuggestionFilterChip(
 
 private fun findTokenBoundaryBackward(text: String, cursor: Int): Int {
     var index = cursor
-    while (index > 0 && !text[index - 1].isWhitespace()) {
+    while (index > 0 && !isComposerTokenDelimiter(text[index - 1])) {
         index -= 1
     }
     return index
@@ -235,8 +248,95 @@ private fun findTokenBoundaryBackward(text: String, cursor: Int): Int {
 
 private fun findTokenBoundaryForward(text: String, cursor: Int): Int {
     var index = cursor
-    while (index < text.length && !text[index].isWhitespace()) {
+    while (index < text.length && !isComposerTokenDelimiter(text[index])) {
         index += 1
     }
     return index
+}
+
+internal fun normalizeComposerSearchKey(value: String): String =
+    value.lowercase().filter(Char::isLetterOrDigit)
+
+internal fun normalizedComposerSuggestionInsertText(suggestion: ComposerSuggestion): String {
+    if (suggestion.kind != ComposerSuggestionKind.Skill) {
+        return suggestion.insertText
+    }
+
+    val fallbackSkillToken = suggestion.label.removePrefix("$").trim()
+    val skillToken = normalizeComposerSkillMentionToken(
+        suggestion.id.substringAfter(':', fallbackSkillToken)
+            .ifBlank { fallbackSkillToken },
+    )
+    if (skillToken.isBlank()) {
+        return suggestion.insertText
+    }
+
+    return "$" + skillToken + " "
+}
+
+private fun normalizeComposerSkillMentionToken(value: String): String {
+    val trimmed = value.trim().removePrefix("$").trim()
+    if (trimmed.isBlank()) return ""
+
+    val normalized = buildString {
+        var pendingHyphen = false
+        trimmed.forEach { char ->
+            when {
+                char.isLetterOrDigit() -> {
+                    if (pendingHyphen && isNotEmpty() && last() != '-') {
+                        append('-')
+                    }
+                    append(char.lowercaseChar())
+                    pendingHyphen = false
+                }
+                char == '/' || char == '_' || char == '-' || char == '.' -> {
+                    if (isNotEmpty() && last() != char) {
+                        append(char)
+                    }
+                    pendingHyphen = false
+                }
+                char.isWhitespace() -> pendingHyphen = true
+                else -> pendingHyphen = true
+            }
+        }
+    }
+
+    return normalized.trim('-', '_', '.', '/')
+}
+
+private fun isComposerTokenDelimiter(char: Char): Boolean {
+    return char.isWhitespace() || char in setOf(
+        '(',
+        ')',
+        '[',
+        ']',
+        '{',
+        '}',
+        '<',
+        '>',
+        '"',
+        '\'',
+        '`',
+        ',',
+        ';',
+        '!',
+        '?',
+    )
+}
+
+private fun isComposerTrailingPunctuation(char: Char): Boolean {
+    return char in setOf(
+        ',',
+        '.',
+        ';',
+        ':',
+        '!',
+        '?',
+        ')',
+        ']',
+        '}',
+        '>',
+        '"',
+        '\'',
+    )
 }

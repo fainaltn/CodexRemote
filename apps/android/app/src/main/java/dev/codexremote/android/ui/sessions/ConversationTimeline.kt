@@ -75,6 +75,9 @@ internal fun ConversationTimeline(
     onRetry: (String) -> Unit,
     onReusePrompt: (String) -> Unit,
     onDownloadFile: (OutputFileReference) -> Unit,
+    onPlayVoiceNote: (VoiceNoteReference) -> Unit,
+    playingVoiceNotePath: String? = null,
+    resolvedVoiceNoteDurationMs: Long? = null,
     modifier: Modifier = Modifier,
 ) {
     val liveRunStatus = liveRun?.status
@@ -273,7 +276,16 @@ internal fun ConversationTimeline(
             }
 
             // ② Current-turn user message
-            if (!projection.userPrompt.isNullOrBlank()) {
+            if (projection.voiceNote != null) {
+                item(key = "current-voice-note") {
+                    VoiceUserMessageBubble(
+                        durationMs = resolvedVoiceNoteDurationMs ?: projection.voiceNote.durationMs,
+                        timestamp = liveRun?.startedAt,
+                        playing = projection.voiceNote.absolutePath == playingVoiceNotePath,
+                        onPlay = { onPlayVoiceNote(projection.voiceNote) },
+                    )
+                }
+            } else if (!projection.userPrompt.isNullOrBlank()) {
                 item(key = "current-user") {
                     UserMessageBubble(text = projection.userPrompt)
                 }

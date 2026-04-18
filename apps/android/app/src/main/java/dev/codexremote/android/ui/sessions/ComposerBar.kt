@@ -10,6 +10,7 @@ import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.background
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -21,6 +22,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -55,13 +57,18 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.ExperimentalComposeUiApi
+import androidx.compose.ui.input.pointer.pointerInteropFilter
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import dev.codexremote.android.R
+import android.view.MotionEvent
 
 internal data class ComposerAttachmentItem(
     val id: String,
@@ -101,6 +108,9 @@ internal fun ComposerBar(
     skillSuggestions: List<ComposerSuggestion>,
     suggestionFilters: List<ComposerSuggestionFilterOption> = emptyList(),
     selectedSuggestionFilterId: String? = null,
+    voiceModeEnabled: Boolean = false,
+    voiceRecording: Boolean = false,
+    voicePreparing: Boolean = false,
     onPromptValueChange: (TextFieldValue) -> Unit,
     onSuggestionAction: (ComposerSuggestion) -> Boolean,
     onSuggestionFilterSelect: (String?) -> Unit = {},
@@ -113,6 +123,9 @@ internal fun ComposerBar(
     onReasoningEffortClick: () -> Unit,
     onPermissionModeClick: () -> Unit,
     onVoiceClick: () -> Unit,
+    onVoiceHoldStart: () -> Unit,
+    onVoiceHoldEnd: () -> Unit,
+    onVoiceHoldCancel: () -> Unit,
     onSend: () -> Unit,
     onQueue: () -> Unit,
     onStop: () -> Unit,
@@ -242,36 +255,51 @@ internal fun ComposerBar(
                         verticalArrangement = Arrangement.spacedBy(6.dp),
                     ) {
                         Box(modifier = Modifier.fillMaxWidth()) {
-                            BasicTextField(
-                                value = promptValue,
-                                onValueChange = onPromptValueChange,
-                                enabled = !sending && !stopping,
-                                minLines = 1,
-                                maxLines = 4,
-                                textStyle = MaterialTheme.typography.bodyLarge.copy(
-                                    color = MaterialTheme.colorScheme.onSurface,
-                                ),
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .heightIn(min = 38.dp)
-                                    .padding(end = 72.dp),
-                                decorationBox = { innerTextField ->
-                                    if (promptText.isBlank()) {
-                                        Text(
-                                            text = stringResource(
-                                                if (isRunning) {
-                                                    R.string.composer_placeholder_running
-                                                } else {
-                                                    R.string.composer_placeholder_idle
-                                                },
-                                            ),
-                                            style = MaterialTheme.typography.bodyLarge,
-                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                        )
-                                    }
-                                    innerTextField()
-                                },
-                            )
+                            if (voiceModeEnabled) {
+                                HoldToTalkSurface(
+                                    recording = voiceRecording,
+                                    preparing = voicePreparing,
+                                    enabled = !sending && !stopping && !uploading && !isRunning,
+                                    onHoldStart = onVoiceHoldStart,
+                                    onHoldEnd = onVoiceHoldEnd,
+                                    onHoldCancel = onVoiceHoldCancel,
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .heightIn(min = 64.dp)
+                                        .padding(end = 72.dp),
+                                )
+                            } else {
+                                BasicTextField(
+                                    value = promptValue,
+                                    onValueChange = onPromptValueChange,
+                                    enabled = !sending && !stopping,
+                                    minLines = 1,
+                                    maxLines = 4,
+                                    textStyle = MaterialTheme.typography.bodyLarge.copy(
+                                        color = MaterialTheme.colorScheme.onSurface,
+                                    ),
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .heightIn(min = 38.dp)
+                                        .padding(end = 72.dp),
+                                    decorationBox = { innerTextField ->
+                                        if (promptText.isBlank()) {
+                                            Text(
+                                                text = stringResource(
+                                                    if (isRunning) {
+                                                        R.string.composer_placeholder_running
+                                                    } else {
+                                                        R.string.composer_placeholder_idle
+                                                    },
+                                                ),
+                                                style = MaterialTheme.typography.bodyLarge,
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                            )
+                                        }
+                                        innerTextField()
+                                    },
+                                )
+                            }
 
                             StatusDot(
                                 color = statusColor,
@@ -281,7 +309,7 @@ internal fun ComposerBar(
                         }
 
                         AnimatedVisibility(
-                            visible = matchingSuggestions.isNotEmpty(),
+                            visible = !voiceModeEnabled && matchingSuggestions.isNotEmpty(),
                             enter = fadeIn() + expandVertically(),
                             exit = fadeOut() + shrinkVertically(),
                         ) {
@@ -352,15 +380,6 @@ internal fun ComposerBar(
                                                 onCameraClick()
                                             },
                                         )
-                                        ComposerToolAction(
-                                            icon = Icons.Filled.Mic,
-                                            label = stringResource(R.string.session_detail_voice_content_description),
-                                            enabled = !sending && !stopping,
-                                            onClick = {
-                                                toolsExpanded = false
-                                                onVoiceClick()
-                                            },
-                                        )
                                     }
                                 }
                             }
@@ -414,6 +433,13 @@ internal fun ComposerBar(
                                 enabled = !sending && !stopping,
                                 onClick = onPermissionModeClick,
                             )
+                            CompactIconButton(
+                                icon = Icons.Filled.Mic,
+                                contentDescription = stringResource(R.string.session_detail_voice_content_description),
+                                enabled = !sending && !stopping && !uploading && !isRunning,
+                                selected = voiceModeEnabled || voiceRecording || voicePreparing,
+                                onClick = onVoiceClick,
+                            )
                             if (isRunning) {
                                 CompactActionButton(
                                     onClick = onQueue,
@@ -452,7 +478,7 @@ internal fun ComposerBar(
                             } else {
                                 CompactActionButton(
                                     onClick = onSend,
-                                    enabled = promptText.trim().isNotEmpty() && !sending && !uploading,
+                                    enabled = !voiceModeEnabled && promptText.trim().isNotEmpty() && !sending && !uploading,
                                     containerColor = MaterialTheme.colorScheme.primary,
                                     contentColor = MaterialTheme.colorScheme.onPrimary,
                                     contentDescription = sendContentDescription,
@@ -494,12 +520,16 @@ private fun CompactIconButton(
     icon: ImageVector,
     contentDescription: String,
     enabled: Boolean,
+    selected: Boolean = false,
     iconModifier: Modifier = Modifier,
     onClick: () -> Unit,
 ) {
     Surface(
         shape = RoundedCornerShape(14.dp),
-        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = if (enabled) 1f else 0.65f),
+        color = when {
+            selected -> MaterialTheme.colorScheme.secondaryContainer
+            else -> MaterialTheme.colorScheme.surfaceVariant.copy(alpha = if (enabled) 1f else 0.65f)
+        },
     ) {
         IconButton(
             onClick = onClick,
@@ -510,8 +540,144 @@ private fun CompactIconButton(
                 imageVector = icon,
                 contentDescription = contentDescription,
                 modifier = iconModifier.size(16.dp),
-                tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = if (enabled) 1f else 0.4f),
+                tint = when {
+                    selected -> MaterialTheme.colorScheme.onSecondaryContainer.copy(alpha = if (enabled) 1f else 0.4f)
+                    else -> MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = if (enabled) 1f else 0.4f)
+                },
             )
+        }
+    }
+}
+
+@OptIn(ExperimentalComposeUiApi::class)
+@Composable
+private fun HoldToTalkSurface(
+    recording: Boolean,
+    preparing: Boolean,
+    enabled: Boolean,
+    onHoldStart: () -> Unit,
+    onHoldEnd: () -> Unit,
+    onHoldCancel: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val label = when {
+        recording -> stringResource(R.string.composer_voice_hold_release)
+        preparing -> stringResource(R.string.composer_voice_hold_preparing)
+        else -> stringResource(R.string.composer_voice_hold_idle)
+    }
+    val hint = when {
+        recording -> stringResource(R.string.composer_voice_hold_hint_release)
+        preparing -> stringResource(R.string.composer_voice_hold_hint_preparing)
+        else -> stringResource(R.string.composer_voice_hold_hint_press)
+    }
+    val contentColor = if (recording) {
+        MaterialTheme.colorScheme.onPrimaryContainer
+    } else {
+        MaterialTheme.colorScheme.onSurface
+    }
+    val iconContainerColor = if (recording) {
+        MaterialTheme.colorScheme.primary
+    } else {
+        MaterialTheme.colorScheme.secondaryContainer
+    }
+
+    Surface(
+        modifier = modifier
+            .clip(RoundedCornerShape(18.dp))
+            .background(
+                brush = if (recording) {
+                    Brush.linearGradient(
+                        colors = listOf(
+                            MaterialTheme.colorScheme.primaryContainer,
+                            MaterialTheme.colorScheme.secondaryContainer,
+                        ),
+                    )
+                } else {
+                    Brush.linearGradient(
+                        colors = listOf(
+                            MaterialTheme.colorScheme.surface,
+                            MaterialTheme.colorScheme.surfaceContainerHigh,
+                        ),
+                    )
+                },
+            )
+            .pointerInteropFilter { event ->
+                if (!enabled || preparing) return@pointerInteropFilter false
+                when (event.actionMasked) {
+                    MotionEvent.ACTION_DOWN -> {
+                        onHoldStart()
+                        true
+                    }
+                    MotionEvent.ACTION_UP -> {
+                        onHoldEnd()
+                        true
+                    }
+                    MotionEvent.ACTION_CANCEL -> {
+                        onHoldCancel()
+                        true
+                    }
+                    else -> true
+                }
+            },
+        shape = RoundedCornerShape(18.dp),
+        color = Color.Transparent,
+        tonalElevation = 0.dp,
+        shadowElevation = 0.dp,
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 14.dp, vertical = 12.dp),
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Surface(
+                shape = RoundedCornerShape(999.dp),
+                color = iconContainerColor.copy(alpha = if (enabled) 1f else 0.4f),
+            ) {
+                Box(
+                    modifier = Modifier
+                        .size(38.dp),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(
+                        imageVector = Icons.Filled.Mic,
+                        contentDescription = null,
+                        modifier = Modifier.size(18.dp),
+                        tint = if (recording) {
+                            MaterialTheme.colorScheme.onPrimary
+                        } else {
+                            MaterialTheme.colorScheme.onSecondaryContainer
+                        },
+                    )
+                }
+            }
+            Column(
+                modifier = Modifier.weight(1f),
+                verticalArrangement = Arrangement.spacedBy(2.dp),
+            ) {
+                Text(
+                    text = label,
+                    style = MaterialTheme.typography.labelLarge,
+                    color = contentColor.copy(alpha = if (enabled) 1f else 0.45f),
+                )
+                Text(
+                    text = hint,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = contentColor.copy(alpha = if (enabled) 0.82f else 0.38f),
+                )
+            }
+            if (recording) {
+                Box(
+                    modifier = Modifier
+                        .size(10.dp)
+                        .background(
+                            color = MaterialTheme.colorScheme.primary,
+                            shape = RoundedCornerShape(999.dp),
+                        )
+                        .offset(x = (-2).dp),
+                )
+            }
         }
     }
 }

@@ -20,6 +20,14 @@ internal fun localizedSessionText(
 
 internal val activeRunStatuses = setOf("pending", "running")
 internal val terminalRunStatuses = setOf("completed", "failed", "stopped")
+private const val skillPromptPreamble = "Use the explicitly mentioned Codex skills for this request when relevant:"
+private const val wrappedPromptMarker = "User request:"
+internal const val hiddenVoiceNoteInstruction =
+    "A voice-note attachment is included. First transcribe it quietly in the same language, then directly execute or answer the spoken user request. Do not lead with a transcript unless the audio is unclear or the user explicitly asked for one. Do not emit commentary, progress updates, or setup notes before the final answer."
+private val skillMentionRegex = Regex("(?<!\\S)\\$([A-Za-z0-9][A-Za-z0-9_./-]*)")
+private val attachmentHeaderRegex = Regex("""^\[Attachment \d+\] id=([^\s]+) (.+) \(([^)]+)\)$""")
+private val attachmentDurationRegex = Regex("""^Duration ms:\s*(\d+)$""")
+private const val absolutePathPrefix = "Absolute path:"
 
 internal fun formatDate(dateStr: String): String {
     return runCatching {
@@ -199,15 +207,59 @@ private fun stripAnsiArtifacts(text: String): String {
 }
 
 internal fun sanitizePromptDisplay(prompt: String): String {
-    val trimmed = prompt.trim()
-    if (trimmed.startsWith("You have access to these uploaded session artifacts")) {
-        val marker = "User request:"
-        val idx = trimmed.indexOf(marker)
-        if (idx != -1) {
-            return trimmed.substring(idx + marker.length).trim()
+    var trimmed = prompt.trim()
+    var changed = true
+    while (changed) {
+        changed = false
+        if (trimmed.startsWith("You have access to these uploaded session artifacts")) {
+            val idx = trimmed.indexOf(wrappedPromptMarker)
+            if (idx != -1) {
+                trimmed = trimmed.substring(idx + wrappedPromptMarker.length).trim()
+                changed = true
+                continue
+            }
+        }
+        if (trimmed.startsWith(skillPromptPreamble)) {
+            val idx = trimmed.indexOf(wrappedPromptMarker)
+            if (idx != -1) {
+                trimmed = trimmed.substring(idx + wrappedPromptMarker.length).trim()
+                changed = true
+            }
         }
     }
+    if (trimmed == hiddenVoiceNoteInstruction) {
+        return ""
+    }
     return trimmed
+}
+
+internal fun extractSkillMentions(prompt: String): List<String> =
+    skillMentionRegex
+        .findAll(prompt)
+        .map { match -> match.value }
+        .distinct()
+        .toList()
+
+internal fun augmentPromptWithSkillMentions(prompt: String): String {
+    val trimmed = prompt.trim()
+    if (trimmed.isBlank()) return ""
+    if (trimmed.startsWith(skillPromptPreamble)) {
+        return trimmed
+    }
+
+    val mentionedSkills = extractSkillMentions(trimmed)
+    if (mentionedSkills.isEmpty()) return trimmed
+
+    return buildString {
+        append(skillPromptPreamble)
+        append(' ')
+        append(mentionedSkills.joinToString(", "))
+        appendLine()
+        appendLine()
+        append(wrappedPromptMarker)
+        append(' ')
+        append(trimmed)
+    }
 }
 
 private fun sanitizeLiveOutputPayload(
@@ -218,20 +270,14 @@ private fun sanitizeLiveOutputPayload(
     val rawPromptTrimmed = rawPrompt?.trim().orEmpty()
     val displayPrompt = rawPrompt?.let(::sanitizePromptDisplay)
 
-    if (sanitized.startsWith("You have access to these uploaded session artifacts")) {
-        val marker = "User request:"
-        val idx = sanitized.indexOf(marker)
-        if (idx != -1) {
-            sanitized = sanitized.substring(idx + marker.length).trim()
-        }
-    }
+    sanitized = sanitizePromptDisplay(sanitized)
 
     if (rawPromptTrimmed.isNotBlank()) {
         sanitized = stripLeadingBlock(sanitized, rawPromptTrimmed)
     }
 
     if (!displayPrompt.isNullOrBlank()) {
-        sanitized = stripLeadingBlock(sanitized, "User request: $displayPrompt")
+        sanitized = stripLeadingBlock(sanitized, "$wrappedPromptMarker $displayPrompt")
         sanitized = stripLeadingBlock(sanitized, displayPrompt)
     }
 
@@ -424,6 +470,7 @@ internal fun latestCanonicalAssistantReply(messages: List<SessionMessage>): Stri
 
 internal data class CurrentTurnProjection(
     val userPrompt: String?,
+    val voiceNote: VoiceNoteReference?,
     val settledAssistantMessages: List<SessionMessage>,
     val collapsedAssistantMessages: List<SessionMessage>,
     val visibleSettledAssistantMessages: List<SessionMessage>,
@@ -432,6 +479,54 @@ internal data class CurrentTurnProjection(
     val showThinkingState: Boolean,
     val showWaitingPlaceholder: Boolean,
 )
+
+internal data class VoiceNoteReference(
+    val artifactId: String?,
+    val fileName: String,
+    val absolutePath: String,
+    val mimeType: String,
+    val durationMs: Long?,
+)
+
+internal fun extractLatestVoiceNoteReference(prompt: String?): VoiceNoteReference? {
+    val raw = prompt?.trim().orEmpty()
+    if (!raw.startsWith("You have access to these uploaded session artifacts")) return null
+
+    var pendingHeader: MatchResult? = null
+    var pendingDurationMs: Long? = null
+    raw.lineSequence().forEach { line ->
+        val trimmed = line.trim()
+        val header = attachmentHeaderRegex.matchEntire(trimmed)
+        if (header != null) {
+            pendingHeader = header
+            pendingDurationMs = null
+            return@forEach
+        }
+        val duration = attachmentDurationRegex.matchEntire(trimmed)
+        if (pendingHeader != null && duration != null) {
+            pendingDurationMs = duration.groupValues[1].toLongOrNull()
+            return@forEach
+        }
+        if (pendingHeader != null && trimmed.startsWith(absolutePathPrefix)) {
+            val absolutePath = trimmed.removePrefix(absolutePathPrefix).trim()
+            val artifactId = pendingHeader?.groupValues?.getOrNull(1)
+            val fileName = pendingHeader?.groupValues?.getOrNull(2).orEmpty()
+            val mimeType = pendingHeader?.groupValues?.getOrNull(3).orEmpty()
+            if (absolutePath.startsWith("/") && mimeType.startsWith("audio/")) {
+                return VoiceNoteReference(
+                    artifactId = artifactId?.ifBlank { null },
+                    fileName = fileName.ifBlank { absolutePath.substringAfterLast('/') },
+                    absolutePath = absolutePath,
+                    mimeType = mimeType,
+                    durationMs = pendingDurationMs,
+                )
+            }
+            pendingHeader = null
+            pendingDurationMs = null
+        }
+    }
+    return null
+}
 
 internal fun buildCurrentTurnProjection(
     messages: List<SessionMessage>,
@@ -450,6 +545,11 @@ internal fun buildCurrentTurnProjection(
             ?: sanitizePromptDisplay(liveRun.prompt)
         !pendingTurnPrompt.isNullOrBlank() -> pendingTurnPrompt.trim()
         else -> latestTimelineUserDisplay
+    }
+    val voiceNoteReference = when {
+        liveRun != null -> extractLatestVoiceNoteReference(liveRun.prompt)
+        !pendingTurnPrompt.isNullOrBlank() -> extractLatestVoiceNoteReference(pendingTurnPrompt)
+        else -> null
     }
 
     val currentRoundMessages = currentTurnMessages(messages, currentUserText)
@@ -505,6 +605,7 @@ internal fun buildCurrentTurnProjection(
 
     return CurrentTurnProjection(
         userPrompt = currentUserText,
+        voiceNote = voiceNoteReference,
         settledAssistantMessages = settledAssistantMessages,
         collapsedAssistantMessages = collapsedAssistantMessages,
         visibleSettledAssistantMessages = visibleSettledAssistantMessages,

@@ -59,11 +59,11 @@ The current-turn UI is assembled from two partially independent sources:
 
 The main files involved today are:
 
-- [SessionDetailViewModel.kt](/Users/fainal/Documents/GitHub/findeck/apps/android/app/src/main/java/dev/findeck/android/ui/sessions/SessionDetailViewModel.kt)
-- [SessionDetailHelpers.kt](/Users/fainal/Documents/GitHub/findeck/apps/android/app/src/main/java/dev/findeck/android/ui/sessions/SessionDetailHelpers.kt)
-- [ConversationTimeline.kt](/Users/fainal/Documents/GitHub/findeck/apps/android/app/src/main/java/dev/findeck/android/ui/sessions/ConversationTimeline.kt)
-- [MessageBubbles.kt](/Users/fainal/Documents/GitHub/findeck/apps/android/app/src/main/java/dev/findeck/android/ui/sessions/MessageBubbles.kt)
-- [HistoryRoundItem.kt](/Users/fainal/Documents/GitHub/findeck/apps/android/app/src/main/java/dev/findeck/android/ui/sessions/HistoryRoundItem.kt)
+- [SessionDetailViewModel.kt](/Users/fainal/Documents/GitHub/findeck/apps/android/app/src/main/java/app/findeck/mobile/ui/sessions/SessionDetailViewModel.kt)
+- [SessionDetailHelpers.kt](/Users/fainal/Documents/GitHub/findeck/apps/android/app/src/main/java/app/findeck/mobile/ui/sessions/SessionDetailHelpers.kt)
+- [ConversationTimeline.kt](/Users/fainal/Documents/GitHub/findeck/apps/android/app/src/main/java/app/findeck/mobile/ui/sessions/ConversationTimeline.kt)
+- [MessageBubbles.kt](/Users/fainal/Documents/GitHub/findeck/apps/android/app/src/main/java/app/findeck/mobile/ui/sessions/MessageBubbles.kt)
+- [HistoryRoundItem.kt](/Users/fainal/Documents/GitHub/findeck/apps/android/app/src/main/java/app/findeck/mobile/ui/sessions/HistoryRoundItem.kt)
 
 The historical current-turn render path depended on a chain like:
 
@@ -218,7 +218,7 @@ We do not have enough of that on Android yet.
 
 ## Phase 1: Introduce `CurrentTurnProjection`
 
-Create a dedicated projection model in [SessionDetailHelpers.kt](/Users/fainal/Documents/GitHub/findeck/apps/android/app/src/main/java/dev/findeck/android/ui/sessions/SessionDetailHelpers.kt).
+Create a dedicated projection model in [SessionDetailHelpers.kt](/Users/fainal/Documents/GitHub/findeck/apps/android/app/src/main/java/app/findeck/mobile/ui/sessions/SessionDetailHelpers.kt).
 
 Suggested model:
 
@@ -327,16 +327,16 @@ This should happen only if frontend-only projection still leaves ambiguity.
 
 ### Android First Pass
 
-- [SessionDetailHelpers.kt](/Users/fainal/Documents/GitHub/findeck/apps/android/app/src/main/java/dev/findeck/android/ui/sessions/SessionDetailHelpers.kt)
-- [ConversationTimeline.kt](/Users/fainal/Documents/GitHub/findeck/apps/android/app/src/main/java/dev/findeck/android/ui/sessions/ConversationTimeline.kt)
-- [MessageBubbles.kt](/Users/fainal/Documents/GitHub/findeck/apps/android/app/src/main/java/dev/findeck/android/ui/sessions/MessageBubbles.kt)
-- [SessionDetailViewModel.kt](/Users/fainal/Documents/GitHub/findeck/apps/android/app/src/main/java/dev/findeck/android/ui/sessions/SessionDetailViewModel.kt)
+- [SessionDetailHelpers.kt](/Users/fainal/Documents/GitHub/findeck/apps/android/app/src/main/java/app/findeck/mobile/ui/sessions/SessionDetailHelpers.kt)
+- [ConversationTimeline.kt](/Users/fainal/Documents/GitHub/findeck/apps/android/app/src/main/java/app/findeck/mobile/ui/sessions/ConversationTimeline.kt)
+- [MessageBubbles.kt](/Users/fainal/Documents/GitHub/findeck/apps/android/app/src/main/java/app/findeck/mobile/ui/sessions/MessageBubbles.kt)
+- [SessionDetailViewModel.kt](/Users/fainal/Documents/GitHub/findeck/apps/android/app/src/main/java/app/findeck/mobile/ui/sessions/SessionDetailViewModel.kt)
 - [strings_session_timeline.xml](/Users/fainal/Documents/GitHub/findeck/apps/android/app/src/main/res/values/strings_session_timeline.xml)
 - [strings_session_timeline.xml](/Users/fainal/Documents/GitHub/findeck/apps/android/app/src/main/res/values-en/strings_session_timeline.xml)
 
 ### Secondary Follow-Up
 
-- [HistoryRoundItem.kt](/Users/fainal/Documents/GitHub/findeck/apps/android/app/src/main/java/dev/findeck/android/ui/sessions/HistoryRoundItem.kt)
+- [HistoryRoundItem.kt](/Users/fainal/Documents/GitHub/findeck/apps/android/app/src/main/java/app/findeck/mobile/ui/sessions/HistoryRoundItem.kt)
 
 ### Possible Backend Follow-Up
 

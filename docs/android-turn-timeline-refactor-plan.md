@@ -315,7 +315,7 @@ internal data class CurrentTurnProjection(
 
 Suggested file location:
 
-- `apps/android/app/src/main/java/dev/findeck/android/ui/sessions/SessionDetailHelpers.kt`
+- `apps/android/app/src/main/java/app/findeck/mobile/ui/sessions/SessionDetailHelpers.kt`
 
 Acceptance criteria:
 
@@ -333,7 +333,7 @@ Split assistant rendering into distinct components:
 
 Suggested file location:
 
-- `apps/android/app/src/main/java/dev/findeck/android/ui/sessions/MessageBubbles.kt`
+- `apps/android/app/src/main/java/app/findeck/mobile/ui/sessions/MessageBubbles.kt`
 
 Acceptance criteria:
 
@@ -356,7 +356,7 @@ Use processed-duration only if it adds clarity without creating noise.
 
 Suggested file location:
 
-- `apps/android/app/src/main/java/dev/findeck/android/ui/sessions/ConversationTimeline.kt`
+- `apps/android/app/src/main/java/app/findeck/mobile/ui/sessions/ConversationTimeline.kt`
 - string resources in `strings_session_timeline.xml`
 
 Acceptance criteria:
@@ -377,8 +377,8 @@ Recommended changes:
 
 Implemented in:
 
-- `apps/android/app/src/main/java/dev/findeck/android/ui/sessions/MessageBubbles.kt`
-- `apps/android/app/src/main/java/dev/findeck/android/ui/sessions/SessionDetailHelpers.kt`
+- `apps/android/app/src/main/java/app/findeck/mobile/ui/sessions/MessageBubbles.kt`
+- `apps/android/app/src/main/java/app/findeck/mobile/ui/sessions/SessionDetailHelpers.kt`
 
 Result:
 
@@ -412,11 +412,11 @@ Acceptance criteria:
 
 Primary Android files:
 
-- `apps/android/app/src/main/java/dev/findeck/android/ui/sessions/SessionDetailViewModel.kt`
-- `apps/android/app/src/main/java/dev/findeck/android/ui/sessions/SessionDetailHelpers.kt`
-- `apps/android/app/src/main/java/dev/findeck/android/ui/sessions/ConversationTimeline.kt`
-- `apps/android/app/src/main/java/dev/findeck/android/ui/sessions/MessageBubbles.kt`
-- `apps/android/app/src/main/java/dev/findeck/android/ui/sessions/HistoryRoundItem.kt`
+- `apps/android/app/src/main/java/app/findeck/mobile/ui/sessions/SessionDetailViewModel.kt`
+- `apps/android/app/src/main/java/app/findeck/mobile/ui/sessions/SessionDetailHelpers.kt`
+- `apps/android/app/src/main/java/app/findeck/mobile/ui/sessions/ConversationTimeline.kt`
+- `apps/android/app/src/main/java/app/findeck/mobile/ui/sessions/MessageBubbles.kt`
+- `apps/android/app/src/main/java/app/findeck/mobile/ui/sessions/HistoryRoundItem.kt`
 - `apps/android/app/src/main/res/values/strings_session_timeline.xml`
 - `apps/android/app/src/main/res/values-en/strings_session_timeline.xml`
 

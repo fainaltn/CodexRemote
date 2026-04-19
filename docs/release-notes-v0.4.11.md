@@ -48,7 +48,7 @@ This release closes the current `P0` batch from the Android next-phase plan:
 
 - `npm --workspace packages/shared run build`
 - `npm --workspace apps/server run build`
-- `cd apps/android && ./gradlew :app:testDebugUnitTest --tests "dev.findeck.android.ui.sessions.SessionVoiceInputControllerTest" --tests "dev.findeck.android.ui.sessions.SessionDetailHelpersTest"`
+- `cd apps/android && ./gradlew :app:testDebugUnitTest --tests "app.findeck.mobile.ui.sessions.SessionVoiceInputControllerTest" --tests "app.findeck.mobile.ui.sessions.SessionDetailHelpersTest"`
 - `cd apps/android && ./gradlew :app:compileDebugKotlin`
 - `cd apps/android && ./gradlew :app:assembleDebug`
 

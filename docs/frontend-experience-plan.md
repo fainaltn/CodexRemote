@@ -220,8 +220,8 @@ Scope:
 Primary files:
 
 - `apps/web/src/app/globals.css`
-- `apps/android/app/src/main/java/dev/findeck/android/ui/theme/Color.kt`
-- `apps/android/app/src/main/java/dev/findeck/android/ui/theme/Theme.kt`
+- `apps/android/app/src/main/java/app/findeck/mobile/ui/theme/Color.kt`
+- `apps/android/app/src/main/java/app/findeck/mobile/ui/theme/Theme.kt`
 - related shared UI components that represent app-wide states
 
 Acceptance criteria:
@@ -247,7 +247,7 @@ Primary files:
 
 - `apps/web/src/app/login/page.tsx`
 - `apps/web/src/app/page.tsx`
-- `apps/android/app/src/main/java/dev/findeck/android/ui/login/LoginScreen.kt`
+- `apps/android/app/src/main/java/app/findeck/mobile/ui/login/LoginScreen.kt`
 - splash or entry-state components if needed
 
 Acceptance criteria:
@@ -274,7 +274,7 @@ Primary files:
 
 - `apps/web/src/app/app-shell-client.tsx`
 - `apps/web/src/app/sessions/page.tsx`
-- `apps/android/app/src/main/java/dev/findeck/android/ui/sessions/SessionListScreen.kt`
+- `apps/android/app/src/main/java/app/findeck/mobile/ui/sessions/SessionListScreen.kt`
 
 Acceptance criteria:
 
@@ -299,8 +299,8 @@ Scope:
 Primary files:
 
 - `apps/web/src/app/sessions/[sessionId]/page.tsx`
-- `apps/android/app/src/main/java/dev/findeck/android/ui/sessions/SessionDetailScreen.kt`
-- `apps/android/app/src/main/java/dev/findeck/android/ui/sessions/MessageBubbles.kt`
+- `apps/android/app/src/main/java/app/findeck/mobile/ui/sessions/SessionDetailScreen.kt`
+- `apps/android/app/src/main/java/app/findeck/mobile/ui/sessions/MessageBubbles.kt`
 - related timeline and helper components
 
 Acceptance criteria:

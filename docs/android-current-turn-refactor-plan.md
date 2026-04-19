@@ -401,11 +401,11 @@ This phase should happen only if Phase 1-4 still leave ambiguity.
 
 ### Primary Android Files
 
-- `apps/android/app/src/main/java/dev/findeck/android/ui/sessions/SessionDetailViewModel.kt`
-- `apps/android/app/src/main/java/dev/findeck/android/ui/sessions/SessionDetailHelpers.kt`
-- `apps/android/app/src/main/java/dev/findeck/android/ui/sessions/ConversationTimeline.kt`
-- `apps/android/app/src/main/java/dev/findeck/android/ui/sessions/MessageBubbles.kt`
-- `apps/android/app/src/main/java/dev/findeck/android/ui/sessions/HistoryRoundItem.kt`
+- `apps/android/app/src/main/java/app/findeck/mobile/ui/sessions/SessionDetailViewModel.kt`
+- `apps/android/app/src/main/java/app/findeck/mobile/ui/sessions/SessionDetailHelpers.kt`
+- `apps/android/app/src/main/java/app/findeck/mobile/ui/sessions/ConversationTimeline.kt`
+- `apps/android/app/src/main/java/app/findeck/mobile/ui/sessions/MessageBubbles.kt`
+- `apps/android/app/src/main/java/app/findeck/mobile/ui/sessions/HistoryRoundItem.kt`
 - `apps/android/app/src/main/res/values/strings_session_timeline.xml`
 - `apps/android/app/src/main/res/values-en/strings_session_timeline.xml`
 

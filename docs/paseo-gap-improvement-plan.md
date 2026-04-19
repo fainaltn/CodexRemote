@@ -100,10 +100,10 @@ findeck 当前的问题，不是“功能明显不够”，而是“重路径过
   - 先 `getSessionDetail()`，再进入主内容
   - 页面在 `loading` 时走整页 loading screen
   - 仅在 session 校验成功后才开始订阅 live SSE
-- `apps/android/app/src/main/java/dev/findeck/android/ui/sessions/SessionDetailViewModel.kt`
+- `apps/android/app/src/main/java/app/findeck/mobile/ui/sessions/SessionDetailViewModel.kt`
   - 初次进入详情页时会并行拉 `detail + live + approvals + repo`
   - 活跃运行期间还会周期性补拉 `getSessionDetail()`
-- `apps/android/app/src/main/java/dev/findeck/android/ui/sessions/SessionDetailScreen.kt`
+- `apps/android/app/src/main/java/app/findeck/mobile/ui/sessions/SessionDetailScreen.kt`
   - 初始态仍然会走 full-screen loading card
 
 ### Paseo 对照观察
@@ -202,8 +202,8 @@ Paseo 的“自然切换感”主要来自下面几种策略：
 
 - `apps/web/src/app/sessions/[sessionId]/page.tsx`
 - `apps/web/src/app/app-shell-client.tsx`
-- `apps/android/app/src/main/java/dev/findeck/android/ui/sessions/SessionDetailScreen.kt`
-- `apps/android/app/src/main/java/dev/findeck/android/ui/sessions/SessionDetailViewModel.kt`
+- `apps/android/app/src/main/java/app/findeck/mobile/ui/sessions/SessionDetailScreen.kt`
+- `apps/android/app/src/main/java/app/findeck/mobile/ui/sessions/SessionDetailViewModel.kt`
 
 ### 验收标准
 
@@ -241,7 +241,7 @@ Paseo 的“自然切换感”主要来自下面几种策略：
 - `apps/server/src/routes/live-runs.ts`
 - `apps/server/src/runs/manager.ts`
 - `apps/web/src/lib/use-sse.ts`
-- `apps/android/app/src/main/java/dev/findeck/android/ui/sessions/SessionDetailViewModel.kt`
+- `apps/android/app/src/main/java/app/findeck/mobile/ui/sessions/SessionDetailViewModel.kt`
 
 ### 验收标准
 
@@ -265,9 +265,9 @@ Paseo 的“自然切换感”主要来自下面几种策略：
 ### 主要文件
 
 - `apps/web/src/app/sessions/[sessionId]/page.tsx`
-- `apps/android/app/src/main/java/dev/findeck/android/ui/sessions/ConversationTimeline.kt`
-- `apps/android/app/src/main/java/dev/findeck/android/ui/sessions/RichBlockList.kt`
-- `apps/android/app/src/main/java/dev/findeck/android/ui/sessions/MessageBubbles.kt`
+- `apps/android/app/src/main/java/app/findeck/mobile/ui/sessions/ConversationTimeline.kt`
+- `apps/android/app/src/main/java/app/findeck/mobile/ui/sessions/RichBlockList.kt`
+- `apps/android/app/src/main/java/app/findeck/mobile/ui/sessions/MessageBubbles.kt`
 
 ### 验收标准
 
@@ -299,10 +299,10 @@ Paseo 的“自然切换感”主要来自下面几种策略：
 
 - `docs/frontend-experience-plan.md`
 - `apps/web/src/app/globals.css`
-- `apps/android/app/src/main/java/dev/findeck/android/ui/theme/Color.kt`
-- `apps/android/app/src/main/java/dev/findeck/android/ui/theme/Theme.kt`
-- `apps/android/app/src/main/java/dev/findeck/android/ui/sessions/SessionListScreen.kt`
-- `apps/android/app/src/main/java/dev/findeck/android/ui/sessions/SessionDetailScreen.kt`
+- `apps/android/app/src/main/java/app/findeck/mobile/ui/theme/Color.kt`
+- `apps/android/app/src/main/java/app/findeck/mobile/ui/theme/Theme.kt`
+- `apps/android/app/src/main/java/app/findeck/mobile/ui/sessions/SessionListScreen.kt`
+- `apps/android/app/src/main/java/app/findeck/mobile/ui/sessions/SessionDetailScreen.kt`
 
 ### 验收标准
 

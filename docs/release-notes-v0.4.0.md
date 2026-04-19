@@ -27,7 +27,7 @@
 - `npm run build --workspace @findeck/server`
 - `npm run test --workspace @findeck/server -- src/__tests__/pairing-store.test.ts src/__tests__/pairing.test.ts src/__tests__/session-archive.test.ts src/__tests__/composer-ux.test.ts`
 - `cd apps/android && ./gradlew :app:compileDebugKotlin`
-- `cd apps/android && ./gradlew :app:testDebugUnitTest --tests dev.findeck.android.ui.sessions.ComposerSuggestionsTest`
+- `cd apps/android && ./gradlew :app:testDebugUnitTest --tests app.findeck.mobile.ui.sessions.ComposerSuggestionsTest`
 - `cd apps/android && ./gradlew :app:assembleDebug`
 
 ## Known Follow-up

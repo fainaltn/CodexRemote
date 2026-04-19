@@ -98,12 +98,12 @@ This document is the execution plan for the next Android-focused milestone after
 
 #### Android 文件范围
 
-- `apps/android/app/src/main/java/dev/findeck/android/ui/splash/SplashScreen.kt`
-- `apps/android/app/src/main/java/dev/findeck/android/ui/servers/ServerListScreen.kt`
-- `apps/android/app/src/main/java/dev/findeck/android/ui/servers/AddServerScreen.kt`
-- `apps/android/app/src/main/java/dev/findeck/android/ui/login/LoginScreen.kt`
-- `apps/android/app/src/main/java/dev/findeck/android/ui/settings/ServerSettingsScreen.kt`
-- `apps/android/app/src/main/java/dev/findeck/android/navigation/AppNavHost.kt`
+- `apps/android/app/src/main/java/app/findeck/mobile/ui/splash/SplashScreen.kt`
+- `apps/android/app/src/main/java/app/findeck/mobile/ui/servers/ServerListScreen.kt`
+- `apps/android/app/src/main/java/app/findeck/mobile/ui/servers/AddServerScreen.kt`
+- `apps/android/app/src/main/java/app/findeck/mobile/ui/login/LoginScreen.kt`
+- `apps/android/app/src/main/java/app/findeck/mobile/ui/settings/ServerSettingsScreen.kt`
+- `apps/android/app/src/main/java/app/findeck/mobile/navigation/AppNavHost.kt`
 - 新增 `pairing` 相关 viewmodel / screen / scanner
 
 #### 服务端文件范围
@@ -149,8 +149,8 @@ This document is the execution plan for the next Android-focused milestone after
 
 #### Android 文件范围
 
-- `apps/android/app/src/main/java/dev/findeck/android/ui/sessions/SessionListScreen.kt`
-- `apps/android/app/src/main/java/dev/findeck/android/navigation/AppNavHost.kt`
+- `apps/android/app/src/main/java/app/findeck/mobile/ui/sessions/SessionListScreen.kt`
+- `apps/android/app/src/main/java/app/findeck/mobile/navigation/AppNavHost.kt`
 - 新增 `ArchivedSessionsScreen.kt`
 - 可能拆分新的 `SessionListToolbar` / `SessionSearchField`
 
@@ -158,7 +158,7 @@ This document is the execution plan for the next Android-focused milestone after
 
 - `apps/server/src/routes/sessions.ts`
 - `packages/shared/src/api/sessions.ts`
-- `apps/android/app/src/main/java/dev/findeck/android/data/network/ApiClient.kt`
+- `apps/android/app/src/main/java/app/findeck/mobile/data/network/ApiClient.kt`
 
 #### 验收标准
 
@@ -220,11 +220,11 @@ This document is the execution plan for the next Android-focused milestone after
 
 #### Android 文件范围
 
-- `apps/android/app/src/main/java/dev/findeck/android/ui/sessions/ComposerBar.kt`
-- `apps/android/app/src/main/java/dev/findeck/android/ui/sessions/SessionDetailScreen.kt`
-- `apps/android/app/src/main/java/dev/findeck/android/ui/sessions/SessionDetailViewModel.kt`
-- `apps/android/app/src/main/java/dev/findeck/android/data/network/ApiClient.kt`
-- `apps/android/app/src/main/java/dev/findeck/android/data/model/*`
+- `apps/android/app/src/main/java/app/findeck/mobile/ui/sessions/ComposerBar.kt`
+- `apps/android/app/src/main/java/app/findeck/mobile/ui/sessions/SessionDetailScreen.kt`
+- `apps/android/app/src/main/java/app/findeck/mobile/ui/sessions/SessionDetailViewModel.kt`
+- `apps/android/app/src/main/java/app/findeck/mobile/data/network/ApiClient.kt`
+- `apps/android/app/src/main/java/app/findeck/mobile/data/model/*`
 - 新增 `ComposerCommandPanel` / `ComposerMentionPanel` / `RuntimeSheet`
 
 #### 服务端文件范围
@@ -280,11 +280,11 @@ This document is the execution plan for the next Android-focused milestone after
 
 #### Android 文件范围
 
-- `apps/android/app/src/main/java/dev/findeck/android/ui/sessions/SessionDetailViewModel.kt`
-- `apps/android/app/src/main/java/dev/findeck/android/ui/sessions/SessionDetailScreen.kt`
-- `apps/android/app/src/main/java/dev/findeck/android/ui/sessions/SessionControlStrip.kt`
-- `apps/android/app/src/main/java/dev/findeck/android/ui/sessions/MicroStatusRow.kt`
-- `apps/android/app/src/main/java/dev/findeck/android/ui/sessions/TimelineStatusCards.kt`
+- `apps/android/app/src/main/java/app/findeck/mobile/ui/sessions/SessionDetailViewModel.kt`
+- `apps/android/app/src/main/java/app/findeck/mobile/ui/sessions/SessionDetailScreen.kt`
+- `apps/android/app/src/main/java/app/findeck/mobile/ui/sessions/SessionControlStrip.kt`
+- `apps/android/app/src/main/java/app/findeck/mobile/ui/sessions/MicroStatusRow.kt`
+- `apps/android/app/src/main/java/app/findeck/mobile/ui/sessions/TimelineStatusCards.kt`
 - `apps/android/app/src/main/res/values/strings_session_detail.xml`
 - `apps/android/app/src/main/res/values-en/strings_session_detail.xml`
 
@@ -316,10 +316,10 @@ This document is the execution plan for the next Android-focused milestone after
 
 #### Android 文件范围
 
-- `apps/android/app/src/main/java/dev/findeck/android/ui/sessions/SessionListScreen.kt`
-- `apps/android/app/src/main/java/dev/findeck/android/ui/sessions/SessionDetailScreen.kt`
-- `apps/android/app/src/main/java/dev/findeck/android/ui/inbox/InboxScreen.kt`
-- `apps/android/app/src/main/java/dev/findeck/android/ui/settings/ServerSettingsScreen.kt`
+- `apps/android/app/src/main/java/app/findeck/mobile/ui/sessions/SessionListScreen.kt`
+- `apps/android/app/src/main/java/app/findeck/mobile/ui/sessions/SessionDetailScreen.kt`
+- `apps/android/app/src/main/java/app/findeck/mobile/ui/inbox/InboxScreen.kt`
+- `apps/android/app/src/main/java/app/findeck/mobile/ui/settings/ServerSettingsScreen.kt`
 - 可能新增 `ui/feedback/*`
 
 #### 验收标准
@@ -356,10 +356,10 @@ This document is the execution plan for the next Android-focused milestone after
 
 #### Android 文件范围
 
-- `apps/android/app/src/main/java/dev/findeck/android/ui/settings/ServerSettingsScreen.kt`
+- `apps/android/app/src/main/java/app/findeck/mobile/ui/settings/ServerSettingsScreen.kt`
 - 新增 `SettingsScreen` 或将当前 server settings 升级为更完整的设置页
-- `apps/android/app/src/main/java/dev/findeck/android/navigation/AppNavHost.kt`
-- `apps/android/app/src/main/java/dev/findeck/android/ui/theme/*`
+- `apps/android/app/src/main/java/app/findeck/mobile/navigation/AppNavHost.kt`
+- `apps/android/app/src/main/java/app/findeck/mobile/ui/theme/*`
 
 #### 后端联动
 

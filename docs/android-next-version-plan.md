@@ -252,8 +252,8 @@ Android 改动：
 重点文件：
 
 - `apps/android/app/src/main/res/values/strings.xml`
-- `apps/android/app/src/main/java/dev/findeck/android/ui/...`
-- `apps/android/app/src/main/java/dev/findeck/android/ui/sessions/SessionDetailHelpers.kt`
+- `apps/android/app/src/main/java/app/findeck/mobile/ui/...`
+- `apps/android/app/src/main/java/app/findeck/mobile/ui/sessions/SessionDetailHelpers.kt`
 
 验收标准：
 
@@ -276,10 +276,10 @@ Android 改动：
 
 重点文件：
 
-- `apps/android/app/src/main/java/dev/findeck/android/MainActivity.kt`
-- `apps/android/app/src/main/java/dev/findeck/android/ui/sessions/SessionDetailScreen.kt`
-- `apps/android/app/src/main/java/dev/findeck/android/ui/sessions/SessionDetailViewModel.kt`
-- `apps/android/app/src/main/java/dev/findeck/android/data/network/ApiClient.kt`
+- `apps/android/app/src/main/java/app/findeck/mobile/MainActivity.kt`
+- `apps/android/app/src/main/java/app/findeck/mobile/ui/sessions/SessionDetailScreen.kt`
+- `apps/android/app/src/main/java/app/findeck/mobile/ui/sessions/SessionDetailViewModel.kt`
+- `apps/android/app/src/main/java/app/findeck/mobile/data/network/ApiClient.kt`
 
 验收标准：
 
@@ -310,9 +310,9 @@ Android 改动：
 重点文件：
 
 - `apps/android/app/src/main/AndroidManifest.xml`
-- `apps/android/app/src/main/java/dev/findeck/android/ui/sessions/ComposerBar.kt`
-- `apps/android/app/src/main/java/dev/findeck/android/ui/sessions/SessionDetailScreen.kt`
-- `apps/android/app/src/main/java/dev/findeck/android/ui/sessions/SessionDetailViewModel.kt`
+- `apps/android/app/src/main/java/app/findeck/mobile/ui/sessions/ComposerBar.kt`
+- `apps/android/app/src/main/java/app/findeck/mobile/ui/sessions/SessionDetailScreen.kt`
+- `apps/android/app/src/main/java/app/findeck/mobile/ui/sessions/SessionDetailViewModel.kt`
 
 验收标准：
 
@@ -337,9 +337,9 @@ Android 改动：
 
 重点文件：
 
-- `apps/android/app/src/main/java/dev/findeck/android/ui/splash/SplashScreen.kt`
-- `apps/android/app/src/main/java/dev/findeck/android/ui/sessions/SessionDetailScreen.kt`
-- `apps/android/app/src/main/java/dev/findeck/android/ui/sessions/MessageBubbles.kt`
+- `apps/android/app/src/main/java/app/findeck/mobile/ui/splash/SplashScreen.kt`
+- `apps/android/app/src/main/java/app/findeck/mobile/ui/sessions/SessionDetailScreen.kt`
+- `apps/android/app/src/main/java/app/findeck/mobile/ui/sessions/MessageBubbles.kt`
 
 验收标准：
 

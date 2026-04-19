@@ -37,6 +37,7 @@ import app.findeck.mobile.data.model.StartLiveRunResponse
 import app.findeck.mobile.data.model.StopLiveRunResponse
 import app.findeck.mobile.data.model.SubmitInboxLinkRequest
 import app.findeck.mobile.data.model.TrustedReconnectRequest
+import app.findeck.mobile.data.model.TrustedReconnectFailureResponse
 import app.findeck.mobile.data.model.TrustedReconnectResponse
 import app.findeck.mobile.data.model.UnarchiveSessionsResponse
 import io.ktor.client.HttpClient
@@ -160,6 +161,13 @@ class ApiClient(baseUrl: String) {
         val body = response.bodyAsText()
         if (!response.status.isSuccess()) {
             if (response.status.value == 401) {
+                decodeReconnectFailure(body)?.let { failure ->
+                    throw ReconnectRecoveryException(
+                        reason = failure.reason,
+                        recoveryAction = failure.recoveryAction,
+                        message = failure.error,
+                    )
+                }
                 throw UnauthorizedException(extractErrorMessage(body, response.status.value))
             }
             if (response.status.value == 429) {
@@ -184,6 +192,12 @@ class ApiClient(baseUrl: String) {
         }.getOrElse {
             body.ifBlank { fallback }
         }
+    }
+
+    private fun decodeReconnectFailure(body: String): TrustedReconnectFailureResponse? {
+        return runCatching {
+            json.decodeFromString<TrustedReconnectFailureResponse>(body)
+        }.getOrNull()
     }
 
     // ── Auth ────────────────────────────────────────────────────────────
@@ -1153,9 +1167,15 @@ class ApiClient(baseUrl: String) {
     }
 }
 
-class UnauthorizedException(
+open class UnauthorizedException(
     override val message: String = "登录已失效，请重新登录",
 ) : IllegalStateException(message)
+
+class ReconnectRecoveryException(
+    val reason: String,
+    val recoveryAction: String,
+    override val message: String,
+) : UnauthorizedException(message)
 
 class RateLimitException(
     override val message: String = "登录尝试过于频繁，请稍后再试",

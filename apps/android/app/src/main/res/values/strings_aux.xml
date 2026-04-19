@@ -86,10 +86,12 @@
     <string name="server_settings_trust_message">这里可以查看当前信任状态、切换自动重连，或清除本地信任记录。</string>
     <string name="server_settings_trust_badge_trusted">已配对</string>
     <string name="server_settings_trust_badge_unpaired">未配对</string>
+    <string name="server_settings_trust_badge_paused">自动重连已暂停</string>
     <string name="server_settings_trust_auto_reconnect">自动重连</string>
     <string name="server_settings_trust_clear">清除信任</string>
     <string name="server_settings_trust_enabled">自动重连已开启</string>
     <string name="server_settings_trust_disabled">自动重连已关闭</string>
+    <string name="server_settings_trust_startup_hint">当前主机在冷启动时不会自动重连，需要先去服务器列表手动进入。</string>
     <string name="server_settings_trust_cleared">已清除信任记录</string>
     <string name="server_settings_trust_pair_button">去配对</string>
     <string name="server_settings_appearance_title">外观</string>
@@ -150,4 +152,5 @@
     <string name="server_settings_trust_method_title">配对方式</string>
     <string name="server_settings_trust_paired_at_title">首次配对</string>
     <string name="server_settings_trust_last_reconnect_title">最近自动重连</string>
+    <string name="server_settings_trust_restore_readiness_title">冷启动恢复</string>
 </resources>

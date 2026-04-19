@@ -74,3 +74,10 @@ data class TrustedReconnectResponse(
     val expiresAt: String,
     val trustedClient: TrustedClient,
 )
+
+@Serializable
+data class TrustedReconnectFailureResponse(
+    val error: String,
+    val reason: String,
+    val recoveryAction: String,
+)

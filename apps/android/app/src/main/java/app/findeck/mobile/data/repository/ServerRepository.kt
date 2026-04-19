@@ -5,7 +5,9 @@ import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import app.findeck.mobile.data.model.TrustedHostMetadata
+import app.findeck.mobile.data.model.ColdLaunchRestoreCandidate
 import app.findeck.mobile.data.model.Server
+import app.findeck.mobile.data.model.selectColdLaunchRestoreCandidate
 import app.findeck.mobile.ui.theme.ThemePreference
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.firstOrNull
@@ -126,6 +128,16 @@ class ServerRepository(private val context: Context) {
             .filter { it.isTrustedReconnectEligible }
             .sortedByDescending { it.trustedHost?.pairedAt ?: "" }
             .firstOrNull()
+    }
+
+    suspend fun getColdLaunchRestoreCandidate(preferActiveServer: Boolean = true): ColdLaunchRestoreCandidate? {
+        val currentServers = servers.firstOrNull().orEmpty()
+        val activeId = activeServerId.firstOrNull()
+        return selectColdLaunchRestoreCandidate(
+            servers = currentServers,
+            activeServerId = activeId,
+            preferActiveServer = preferActiveServer,
+        )
     }
 
     suspend fun setTrustedHostMetadata(serverId: String, metadata: TrustedHostMetadata?) {

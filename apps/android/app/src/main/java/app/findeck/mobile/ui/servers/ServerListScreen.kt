@@ -63,6 +63,8 @@ import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.compose.viewModel
 import app.findeck.mobile.R
 import app.findeck.mobile.data.model.Server
+import app.findeck.mobile.data.model.ServerRestoreReadiness
+import app.findeck.mobile.data.model.restoreReadiness
 import app.findeck.mobile.data.network.ApiClient
 import app.findeck.mobile.data.repository.ServerRepository
 import app.findeck.mobile.ui.sessions.TimelineNoticeCard
@@ -392,6 +394,10 @@ private fun ServerCard(
                         text = serverConnectionLabel(server, connectionState),
                         tint = serverConnectionTint(server, connectionState),
                     )
+                    ConnectionStatePill(
+                        text = serverRestoreLabel(server),
+                        tint = serverRestoreTint(server),
+                    )
                     if (isActive) {
                         ConnectionStatePill(
                             text = stringResource(R.string.server_status_active),
@@ -491,10 +497,10 @@ private fun serverConnectionLabel(
     connectionState: ServerConnectionUiState?,
 ): String = when {
     connectionState?.checking == true -> stringResource(R.string.server_status_reconnecting)
-    server.hasTrustedPairing && connectionState?.reachable != false ->
+    connectionState?.reachable == false ->
+        stringResource(R.string.server_status_unreachable)
+    server.hasTrustedPairing ->
         stringResource(R.string.server_status_trusted)
-    connectionState?.reachable == false && server.trustedHost != null ->
-        stringResource(R.string.server_status_repair_required)
     connectionState?.reachable == true ->
         stringResource(R.string.server_status_ready)
     server.token != null ->
@@ -509,10 +515,34 @@ private fun serverConnectionTint(
     connectionState: ServerConnectionUiState?,
 ): Color = when {
     connectionState?.checking == true -> MaterialTheme.colorScheme.primary
-    server.hasTrustedPairing && connectionState?.reachable != false -> CodexOnline
-    connectionState?.reachable == false && server.trustedHost != null ->
-        MaterialTheme.colorScheme.error
+    connectionState?.reachable == false -> MaterialTheme.colorScheme.error
+    server.hasTrustedPairing -> CodexOnline
     connectionState?.reachable == true -> CodexOnline
     server.token != null -> MaterialTheme.colorScheme.secondary
     else -> MaterialTheme.colorScheme.tertiary
 }
+
+@Composable
+private fun serverRestoreLabel(server: Server): String =
+    when (server.restoreReadiness()) {
+        ServerRestoreReadiness.TRUSTED_RECONNECT_READY ->
+            stringResource(R.string.server_restore_trusted)
+
+        ServerRestoreReadiness.SAVED_PASSWORD_READY ->
+            stringResource(R.string.server_restore_saved_password)
+
+        ServerRestoreReadiness.MANUAL_SIGN_IN_ONLY ->
+            stringResource(R.string.server_restore_manual)
+
+        ServerRestoreReadiness.NEEDS_PAIRING ->
+            stringResource(R.string.server_restore_pair_first)
+    }
+
+@Composable
+private fun serverRestoreTint(server: Server): Color =
+    when (server.restoreReadiness()) {
+        ServerRestoreReadiness.TRUSTED_RECONNECT_READY -> CodexOnline
+        ServerRestoreReadiness.SAVED_PASSWORD_READY -> MaterialTheme.colorScheme.secondary
+        ServerRestoreReadiness.MANUAL_SIGN_IN_ONLY -> MaterialTheme.colorScheme.tertiary
+        ServerRestoreReadiness.NEEDS_PAIRING -> MaterialTheme.colorScheme.outline
+    }

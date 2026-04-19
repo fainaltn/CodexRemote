@@ -55,12 +55,14 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.compose.viewModel
 import app.findeck.mobile.R
+import app.findeck.mobile.data.model.ServerRestoreReadiness
 import app.findeck.mobile.data.model.Server
 import app.findeck.mobile.data.model.RuntimeCatalogResponse
 import app.findeck.mobile.data.model.RuntimeCreditsSnapshot
 import app.findeck.mobile.data.model.RuntimeModelDescriptor
 import app.findeck.mobile.data.model.RuntimeRateLimitWindow
 import app.findeck.mobile.data.model.RuntimeUsageResponse
+import app.findeck.mobile.data.model.restoreReadiness
 import app.findeck.mobile.data.network.ApiClient
 import app.findeck.mobile.data.repository.ServerRepository
 import app.findeck.mobile.ui.sessions.ShimmerBlock
@@ -493,8 +495,10 @@ fun ServerSettingsScreen(
     val trustMessage = stringResource(R.string.server_settings_trust_message)
     val trustBadgeTrusted = stringResource(R.string.server_settings_trust_badge_trusted)
     val trustBadgeUnpaired = stringResource(R.string.server_settings_trust_badge_unpaired)
+    val trustBadgePaused = stringResource(R.string.server_settings_trust_badge_paused)
     val trustAutoReconnect = stringResource(R.string.server_settings_trust_auto_reconnect)
     val trustClear = stringResource(R.string.server_settings_trust_clear)
+    val trustStartupHint = stringResource(R.string.server_settings_trust_startup_hint)
     val appearanceTitle = stringResource(R.string.server_settings_appearance_title)
     val appearanceMessage = stringResource(R.string.server_settings_appearance_message)
     val notificationsTitle = stringResource(R.string.server_settings_notifications_title)
@@ -519,6 +523,7 @@ fun ServerSettingsScreen(
     val trustMethodTitle = stringResource(R.string.server_settings_trust_method_title)
     val trustPairedAtTitle = stringResource(R.string.server_settings_trust_paired_at_title)
     val trustLastReconnectTitle = stringResource(R.string.server_settings_trust_last_reconnect_title)
+    val trustRestoreReadinessTitle = stringResource(R.string.server_settings_trust_restore_readiness_title)
 
     val notificationsHelper = remember { app.findeck.mobile.notifications.RunCompletedNotificationHelper(context) }
     var canPostNotifications by remember { mutableStateOf(notificationsHelper.canPostNotifications()) }
@@ -768,7 +773,11 @@ fun ServerSettingsScreen(
                         title = trustTitle,
                         message = trustMessage,
                         tone = TimelineNoticeTone.Neutral,
-                        stateLabel = if (trustedHost == null) trustBadgeUnpaired else trustBadgeTrusted,
+                        stateLabel = when {
+                            trustedHost == null -> trustBadgeUnpaired
+                            trustedHost.autoReconnectEnabled -> trustBadgeTrusted
+                            else -> trustBadgePaused
+                        },
                         content = {
                             if (trustedHost == null) {
                                 Button(onClick = onOpenPairing) {
@@ -801,6 +810,17 @@ fun ServerSettingsScreen(
                                             },
                                         )
                                     }
+                                    if (!trustedHost.autoReconnectEnabled) {
+                                        Text(
+                                            text = trustStartupHint,
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        )
+                                    }
+                                    SettingsMetaRow(
+                                        trustRestoreReadinessTitle,
+                                        trustRestoreReadinessLabel(server.restoreReadiness()),
+                                    )
                                     trustedHost.trustLabel?.takeIf { it.isNotBlank() }?.let { label ->
                                         SettingsMetaRow(trustLabelTitle, label)
                                     }
@@ -1296,6 +1316,22 @@ private fun runtimeCreditsLabel(snapshot: RuntimeCreditsSnapshot?): String = whe
     snapshot.hasCredits -> stringResource(R.string.server_settings_usage_credits_available)
     else -> "0"
 }
+
+@Composable
+private fun trustRestoreReadinessLabel(readiness: ServerRestoreReadiness): String =
+    when (readiness) {
+        ServerRestoreReadiness.TRUSTED_RECONNECT_READY ->
+            stringResource(R.string.server_restore_trusted)
+
+        ServerRestoreReadiness.SAVED_PASSWORD_READY ->
+            stringResource(R.string.server_restore_saved_password)
+
+        ServerRestoreReadiness.MANUAL_SIGN_IN_ONLY ->
+            stringResource(R.string.server_restore_manual)
+
+        ServerRestoreReadiness.NEEDS_PAIRING ->
+            stringResource(R.string.server_restore_pair_first)
+    }
 
 @Composable
 private fun runtimeWindowSummary(window: RuntimeRateLimitWindow?): String {

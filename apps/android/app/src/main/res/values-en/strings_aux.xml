@@ -86,10 +86,12 @@
     <string name="server_settings_trust_message">Review the trust state, toggle auto reconnect, or clear the local trust record.</string>
     <string name="server_settings_trust_badge_trusted">Paired</string>
     <string name="server_settings_trust_badge_unpaired">Not paired</string>
+    <string name="server_settings_trust_badge_paused">Auto reconnect paused</string>
     <string name="server_settings_trust_auto_reconnect">Auto reconnect</string>
     <string name="server_settings_trust_clear">Clear trust</string>
     <string name="server_settings_trust_enabled">Auto reconnect enabled</string>
     <string name="server_settings_trust_disabled">Auto reconnect disabled</string>
+    <string name="server_settings_trust_startup_hint">This host will not auto reconnect on cold launch. Open the server list first when you want to get back in.</string>
     <string name="server_settings_trust_cleared">Trust record cleared</string>
     <string name="server_settings_trust_pair_button">Go pair</string>
     <string name="server_settings_appearance_title">Appearance</string>
@@ -150,4 +152,5 @@
     <string name="server_settings_trust_method_title">Pairing method</string>
     <string name="server_settings_trust_paired_at_title">First paired</string>
     <string name="server_settings_trust_last_reconnect_title">Last auto reconnect</string>
+    <string name="server_settings_trust_restore_readiness_title">Cold launch restore</string>
 </resources>

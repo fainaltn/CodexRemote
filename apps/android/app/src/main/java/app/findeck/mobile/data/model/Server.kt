@@ -54,8 +54,117 @@ data class Server(
             !trustedHost?.trustedClientId.isNullOrBlank() &&
             !trustedHost?.trustedClientSecret.isNullOrBlank()
 
+    /** True when the host can be restored on cold launch with a saved password. */
+    val isStoredPasswordLoginEligible: Boolean
+        get() = !appPassword.isNullOrBlank()
+
     /** Whether a trusted pairing claim has already been completed on this device. */
     val hasTrustedPairing: Boolean
         get() = !trustedHost?.trustedClientId.isNullOrBlank() &&
             !trustedHost?.trustedClientSecret.isNullOrBlank()
+}
+
+enum class ColdLaunchRestoreMethod {
+    TRUSTED_RECONNECT,
+    STORED_PASSWORD_LOGIN,
+}
+
+enum class ServerRestoreReadiness {
+    TRUSTED_RECONNECT_READY,
+    SAVED_PASSWORD_READY,
+    MANUAL_SIGN_IN_ONLY,
+    NEEDS_PAIRING,
+}
+
+data class ColdLaunchRestoreCandidate(
+    val server: Server,
+    val method: ColdLaunchRestoreMethod,
+)
+
+enum class ColdLaunchRestoreUnavailableReason {
+    NONE_SAVED,
+    NO_ELIGIBLE_SAVED_HOST,
+}
+
+sealed interface ColdLaunchRestoreDecision {
+    data class Restore(
+        val candidate: ColdLaunchRestoreCandidate,
+    ) : ColdLaunchRestoreDecision
+
+    data class NoRestore(
+        val reason: ColdLaunchRestoreUnavailableReason,
+    ) : ColdLaunchRestoreDecision
+}
+
+fun Server.resolveColdLaunchRestoreMethod(): ColdLaunchRestoreMethod? =
+    when {
+        isTrustedReconnectEligible -> ColdLaunchRestoreMethod.TRUSTED_RECONNECT
+        isStoredPasswordLoginEligible -> ColdLaunchRestoreMethod.STORED_PASSWORD_LOGIN
+        else -> null
+    }
+
+fun Server.restoreReadiness(): ServerRestoreReadiness =
+    when {
+        isTrustedReconnectEligible -> ServerRestoreReadiness.TRUSTED_RECONNECT_READY
+        isStoredPasswordLoginEligible -> ServerRestoreReadiness.SAVED_PASSWORD_READY
+        hasTrustedPairing -> ServerRestoreReadiness.MANUAL_SIGN_IN_ONLY
+        else -> ServerRestoreReadiness.NEEDS_PAIRING
+    }
+
+fun selectColdLaunchRestoreCandidate(
+    servers: List<Server>,
+    activeServerId: String?,
+    preferActiveServer: Boolean = true,
+): ColdLaunchRestoreCandidate? {
+    if (preferActiveServer && !activeServerId.isNullOrBlank()) {
+        servers.firstOrNull { it.id == activeServerId }
+            ?.resolveColdLaunchRestoreMethod()
+            ?.let { method ->
+                return ColdLaunchRestoreCandidate(
+                    server = servers.first { it.id == activeServerId },
+                    method = method,
+                )
+            }
+    }
+
+    return servers
+        .mapNotNull { server ->
+            server.resolveColdLaunchRestoreMethod()?.let { method ->
+                ColdLaunchRestoreCandidate(server = server, method = method)
+            }
+        }
+        .sortedWith(
+            compareBy<ColdLaunchRestoreCandidate> { candidate ->
+                when (candidate.method) {
+                    ColdLaunchRestoreMethod.TRUSTED_RECONNECT -> 0
+                    ColdLaunchRestoreMethod.STORED_PASSWORD_LOGIN -> 1
+                }
+            }.thenByDescending { candidate ->
+                candidate.server.trustedHost?.lastAutoReconnectAt ?: candidate.server.trustedHost?.pairedAt ?: ""
+            }
+        )
+        .firstOrNull()
+}
+
+fun resolveColdLaunchRestoreDecision(
+    servers: List<Server>,
+    activeServerId: String?,
+    preferActiveServer: Boolean = true,
+): ColdLaunchRestoreDecision {
+    val candidate = selectColdLaunchRestoreCandidate(
+        servers = servers,
+        activeServerId = activeServerId,
+        preferActiveServer = preferActiveServer,
+    )
+    if (candidate != null) {
+        return ColdLaunchRestoreDecision.Restore(candidate)
+    }
+
+    return ColdLaunchRestoreDecision.NoRestore(
+        reason = if (servers.isEmpty()) {
+            ColdLaunchRestoreUnavailableReason.NONE_SAVED
+        } else {
+            ColdLaunchRestoreUnavailableReason.NO_ELIGIBLE_SAVED_HOST
+        }
+    )
 }

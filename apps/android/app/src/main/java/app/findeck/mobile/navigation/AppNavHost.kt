@@ -17,6 +17,7 @@ import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
 import app.findeck.mobile.notifications.RunCompletedNotificationPayload
+import app.findeck.mobile.StartupRecoveryAction
 import app.findeck.mobile.StartupUiState
 import app.findeck.mobile.ui.theme.ThemePreference
 import app.findeck.mobile.ui.login.LoginScreen
@@ -45,6 +46,27 @@ internal fun resolveDraftReturnTarget(parentRoute: String?): DraftReturnTarget =
         ?.takeIf { it.isNotBlank() }
         ?.let { DraftReturnTarget(route = it, inclusive = false) }
         ?: DraftReturnTarget(route = Screen.DraftSessionDetail.route, inclusive = true)
+
+internal fun resolveStartupTargetRoute(startupState: StartupUiState): String? =
+    when (startupState) {
+        StartupUiState.Loading,
+        is StartupUiState.Reconnecting,
+        is StartupUiState.NoTrustedServer -> null
+
+        is StartupUiState.Reconnected -> Screen.SessionList.createRoute(startupState.serverId)
+
+        is StartupUiState.ReconnectFailed -> {
+            when (startupState.nextAction) {
+                StartupRecoveryAction.OPEN_PAIRING ->
+                    Screen.Pairing.createRoute(startupState.serverId)
+
+                StartupRecoveryAction.OPEN_LOGIN ->
+                    Screen.Login.createRoute(startupState.serverId)
+
+                StartupRecoveryAction.OPEN_SERVERS -> Screen.ServerList.route
+            }
+        }
+    }
 
 private fun NavBackStackEntry.resolveConcreteRoute(): String? {
     val route = destination.route ?: return null
@@ -116,21 +138,7 @@ fun AppNavHost(
 
     LaunchedEffect(startupState, currentRoute, splashShownAtMs) {
         if (currentRoute != Screen.Splash.route) return@LaunchedEffect
-        val targetRoute = when (val state = startupState) {
-            StartupUiState.Loading,
-            is StartupUiState.Reconnecting,
-            StartupUiState.NoTrustedServer -> null
-
-            is StartupUiState.Reconnected -> Screen.SessionList.createRoute(state.serverId)
-
-            is StartupUiState.ReconnectFailed -> {
-                if (state.requiresPairing) {
-                    Screen.Pairing.createRoute(state.serverId)
-                } else {
-                    Screen.Login.createRoute(state.serverId)
-                }
-            }
-        } ?: return@LaunchedEffect
+        val targetRoute = resolveStartupTargetRoute(startupState) ?: return@LaunchedEffect
 
         val elapsedMs = SystemClock.elapsedRealtime() - splashShownAtMs
         delay((MIN_SPLASH_DURATION_MS - elapsedMs).coerceAtLeast(0L))

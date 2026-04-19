@@ -10,7 +10,12 @@ import androidx.compose.runtime.getValue
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
+import app.findeck.mobile.data.model.ColdLaunchRestoreCandidate
+import app.findeck.mobile.data.model.ColdLaunchRestoreMethod
+import app.findeck.mobile.data.model.ColdLaunchRestoreDecision
+import app.findeck.mobile.data.model.ColdLaunchRestoreUnavailableReason
 import app.findeck.mobile.data.model.Server
+import app.findeck.mobile.data.model.resolveColdLaunchRestoreDecision
 import app.findeck.mobile.data.network.ApiClient
 import app.findeck.mobile.data.repository.ServerRepository
 import app.findeck.mobile.navigation.AppNavHost
@@ -20,6 +25,7 @@ import app.findeck.mobile.ui.theme.FindeckTheme
 import app.findeck.mobile.ui.theme.ThemePreference
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.firstOrNull
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 
@@ -53,62 +59,99 @@ class MainActivityViewModel(application: android.app.Application) : AndroidViewM
         }
 
         startupJob = viewModelScope.launch {
-            val server = repo.getTrustedReconnectServer()
-            if (server == null) {
-                _startupState.value = StartupUiState.NoTrustedServer
-                return@launch
-            }
-
-            _startupState.value = StartupUiState.Reconnecting(
-                serverId = server.id,
-                serverLabel = server.label,
-            )
-
-            val client = ApiClient(server.baseUrl)
-            try {
-                reconnectTrustedServer(client, server)
-                repo.setActiveServer(server.id)
-                repo.touchTrustedReconnect(server.id)
-                _startupState.value = StartupUiState.Reconnected(
-                    serverId = server.id,
-                    serverLabel = server.label,
+            val savedServers = repo.servers.firstOrNull().orEmpty()
+            val activeServerId = repo.activeServerId.firstOrNull()
+            when (
+                val decision = resolveColdLaunchRestoreDecision(
+                    servers = savedServers,
+                    activeServerId = activeServerId,
                 )
-            } catch (error: Exception) {
-                _startupState.value = StartupUiState.ReconnectFailed(
-                    serverId = server.id,
-                    serverLabel = server.label,
-                    message = ApiClient.describeNetworkFailure(error),
-                    requiresPairing = server.hasTrustedPairing,
-                )
-            } finally {
-                client.close()
+            ) {
+                is ColdLaunchRestoreDecision.NoRestore -> {
+                    _startupState.value = StartupUiState.NoTrustedServer(
+                        kind = when (decision.reason) {
+                            ColdLaunchRestoreUnavailableReason.NONE_SAVED ->
+                                StartupNoTrustedServerKind.NONE_SAVED
+
+                            ColdLaunchRestoreUnavailableReason.NO_ELIGIBLE_SAVED_HOST ->
+                                StartupNoTrustedServerKind.NO_ELIGIBLE_RESTORE_HOST
+                        },
+                    )
+                    return@launch
+                }
+
+                is ColdLaunchRestoreDecision.Restore -> {
+                    val restoreCandidate = decision.candidate
+                    val server = restoreCandidate.server
+
+                    _startupState.value = StartupUiState.Reconnecting(
+                        serverId = server.id,
+                        serverLabel = server.label,
+                        restoreMethod = restoreCandidate.method,
+                    )
+
+                    val client = ApiClient(server.baseUrl)
+                    try {
+                        val restoreResult = performColdLaunchRestore(
+                            candidate = restoreCandidate,
+                            client = object : ColdLaunchRestoreClient {
+                                override suspend fun reconnectTrusted(
+                                    clientId: String,
+                                    clientSecret: String,
+                                    deviceLabel: String,
+                                ): String {
+                                    val response = client.reconnectTrustedClient(
+                                        clientId = clientId,
+                                        clientSecret = clientSecret,
+                                        deviceLabel = deviceLabel,
+                                    )
+                                    return response.token
+                                }
+
+                                override suspend fun login(
+                                    password: String,
+                                    deviceLabel: String,
+                                ): String {
+                                    val response = client.login(
+                                        password = password,
+                                        deviceLabel = deviceLabel,
+                                    )
+                                    return response.token
+                                }
+                            },
+                        )
+                        if (restoreResult.method != restoreCandidate.method) {
+                            _startupState.value = StartupUiState.Reconnecting(
+                                serverId = server.id,
+                                serverLabel = server.label,
+                                restoreMethod = restoreResult.method,
+                            )
+                        }
+                        repo.updateToken(server.id, restoreResult.token)
+                        repo.setActiveServer(server.id)
+                        if (restoreResult.method == ColdLaunchRestoreMethod.TRUSTED_RECONNECT) {
+                            repo.touchTrustedReconnect(server.id)
+                        }
+                        _startupState.value = StartupUiState.Reconnected(
+                            serverId = server.id,
+                            serverLabel = server.label,
+                            restoreMethod = restoreResult.method,
+                        )
+                    } catch (error: Exception) {
+                        val failure = classifyStartupFailure(error)
+                        _startupState.value = StartupUiState.ReconnectFailed(
+                            serverId = server.id,
+                            serverLabel = server.label,
+                            message = failure.message,
+                            kind = failure.kind,
+                            nextAction = failure.nextAction,
+                        )
+                    } finally {
+                        client.close()
+                    }
+                }
             }
         }
-    }
-
-    private suspend fun reconnectTrustedServer(client: ApiClient, server: Server) {
-        val trustedClientId = server.trustedHost?.trustedClientId?.takeIf { it.isNotBlank() }
-        val trustedClientSecret =
-            server.trustedHost?.trustedClientSecret?.takeIf { it.isNotBlank() }
-        val storedPassword = server.appPassword?.takeIf { it.isNotBlank() }
-
-        if (trustedClientId != null && trustedClientSecret != null) {
-            val response = client.reconnectTrustedClient(
-                clientId = trustedClientId,
-                clientSecret = trustedClientSecret,
-                deviceLabel = "android",
-            )
-            repo.updateToken(server.id, response.token)
-            return
-        }
-
-        if (storedPassword != null) {
-            val response = client.login(storedPassword, deviceLabel = "android")
-            repo.updateToken(server.id, response.token)
-            return
-        }
-
-        throw IllegalStateException("当前主机缺少可信重连凭据，请重新配对或重新登录。")
     }
 
     fun handleIntent(intent: Intent?) {
@@ -160,21 +203,26 @@ class MainActivity : ComponentActivity() {
 
 sealed interface StartupUiState {
     data object Loading : StartupUiState
-    data object NoTrustedServer : StartupUiState
+    data class NoTrustedServer(
+        val kind: StartupNoTrustedServerKind,
+    ) : StartupUiState
     data class Reconnecting(
         val serverId: String,
         val serverLabel: String,
+        val restoreMethod: ColdLaunchRestoreMethod,
     ) : StartupUiState
 
     data class Reconnected(
         val serverId: String,
         val serverLabel: String,
+        val restoreMethod: ColdLaunchRestoreMethod,
     ) : StartupUiState
 
     data class ReconnectFailed(
         val serverId: String,
         val serverLabel: String,
         val message: String,
-        val requiresPairing: Boolean = false,
+        val kind: StartupFailureKind,
+        val nextAction: StartupRecoveryAction,
     ) : StartupUiState
 }

@@ -31,6 +31,9 @@ import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import app.findeck.mobile.R
+import app.findeck.mobile.data.model.ColdLaunchRestoreMethod
+import app.findeck.mobile.StartupRecoveryAction
+import app.findeck.mobile.StartupNoTrustedServerKind
 import app.findeck.mobile.StartupUiState
 import app.findeck.mobile.ui.sessions.TimelineNoticeCard
 import app.findeck.mobile.ui.sessions.TimelineNoticeTone
@@ -43,34 +46,34 @@ fun SplashScreen(
 ) {
     val title = when (startupState) {
         StartupUiState.Loading -> stringResource(R.string.splash_loading_title)
-        StartupUiState.NoTrustedServer -> stringResource(R.string.splash_waiting_pairing_title)
-        is StartupUiState.Reconnecting -> stringResource(R.string.splash_reconnecting_title)
-        is StartupUiState.Reconnected -> stringResource(R.string.splash_reconnected_title)
+        is StartupUiState.NoTrustedServer -> noTrustedServerTitle(startupState.kind)
+        is StartupUiState.Reconnecting -> reconnectingTitle(startupState.restoreMethod)
+        is StartupUiState.Reconnected -> reconnectedTitle(startupState.restoreMethod)
         is StartupUiState.ReconnectFailed -> stringResource(R.string.splash_reconnect_failed_title)
     }
     val message = when (startupState) {
         StartupUiState.Loading -> stringResource(R.string.splash_loading_message)
-        StartupUiState.NoTrustedServer -> stringResource(R.string.splash_waiting_pairing_message)
-        is StartupUiState.Reconnecting -> stringResource(
-            R.string.splash_reconnecting_message,
+        is StartupUiState.NoTrustedServer -> noTrustedServerMessage(startupState.kind)
+        is StartupUiState.Reconnecting -> reconnectingMessage(
+            startupState.restoreMethod,
             startupState.serverLabel,
         )
-        is StartupUiState.Reconnected -> stringResource(
-            R.string.splash_reconnected_message,
+        is StartupUiState.Reconnected -> reconnectedMessage(
+            startupState.restoreMethod,
             startupState.serverLabel,
         )
         is StartupUiState.ReconnectFailed -> startupState.message
     }
     val footer = when (startupState) {
         StartupUiState.Loading -> stringResource(R.string.splash_bootstrap_note)
-        StartupUiState.NoTrustedServer -> stringResource(R.string.splash_waiting_pairing_footer)
-        is StartupUiState.Reconnecting -> stringResource(R.string.splash_reconnecting_footer)
-        is StartupUiState.Reconnected -> stringResource(R.string.splash_reconnected_footer)
-        is StartupUiState.ReconnectFailed -> stringResource(R.string.splash_reconnect_failed_footer)
+        is StartupUiState.NoTrustedServer -> noTrustedServerFooter(startupState.kind)
+        is StartupUiState.Reconnecting -> reconnectingFooter(startupState.restoreMethod)
+        is StartupUiState.Reconnected -> reconnectedFooter(startupState.restoreMethod)
+        is StartupUiState.ReconnectFailed -> reconnectFailureFooter(startupState.nextAction)
     }
     val stateLabel = when (startupState) {
         StartupUiState.Loading -> stringResource(R.string.splash_state_loading)
-        StartupUiState.NoTrustedServer -> stringResource(R.string.splash_state_waiting_pairing)
+        is StartupUiState.NoTrustedServer -> noTrustedServerStateLabel(startupState.kind)
         is StartupUiState.Reconnecting -> stringResource(R.string.splash_state_reconnecting)
         is StartupUiState.Reconnected -> stringResource(R.string.splash_state_reconnected)
         is StartupUiState.ReconnectFailed -> stringResource(R.string.splash_state_reconnect_failed)
@@ -79,7 +82,7 @@ fun SplashScreen(
         StartupUiState.Loading,
         is StartupUiState.Reconnecting,
         is StartupUiState.Reconnected -> TimelineNoticeTone.Neutral
-        StartupUiState.NoTrustedServer -> TimelineNoticeTone.Warning
+        is StartupUiState.NoTrustedServer -> TimelineNoticeTone.Warning
         is StartupUiState.ReconnectFailed -> TimelineNoticeTone.Error
     }
     val showSpinner = startupState is StartupUiState.Loading || startupState is StartupUiState.Reconnecting
@@ -88,7 +91,7 @@ fun SplashScreen(
         is StartupUiState.Reconnected -> startupState.serverLabel
         is StartupUiState.ReconnectFailed -> startupState.serverLabel
         StartupUiState.Loading,
-        StartupUiState.NoTrustedServer -> null
+        is StartupUiState.NoTrustedServer -> null
     }
 
     Surface(
@@ -264,3 +267,114 @@ private fun MiniPill(text: String) {
         )
     }
 }
+
+@Composable
+private fun reconnectFailureFooter(action: StartupRecoveryAction): String =
+    when (action) {
+        StartupRecoveryAction.OPEN_PAIRING ->
+            stringResource(R.string.splash_reconnect_failed_footer_repair)
+        StartupRecoveryAction.OPEN_LOGIN ->
+            stringResource(R.string.splash_reconnect_failed_footer_login)
+        StartupRecoveryAction.OPEN_SERVERS ->
+            stringResource(R.string.splash_reconnect_failed_footer_servers)
+    }
+
+@Composable
+private fun noTrustedServerTitle(kind: StartupNoTrustedServerKind): String =
+    when (kind) {
+        StartupNoTrustedServerKind.NONE_SAVED ->
+            stringResource(R.string.splash_waiting_pairing_title)
+
+        StartupNoTrustedServerKind.NO_ELIGIBLE_RESTORE_HOST ->
+            stringResource(R.string.splash_no_auto_reconnect_title)
+    }
+
+@Composable
+private fun noTrustedServerMessage(kind: StartupNoTrustedServerKind): String =
+    when (kind) {
+        StartupNoTrustedServerKind.NONE_SAVED ->
+            stringResource(R.string.splash_waiting_pairing_message)
+
+        StartupNoTrustedServerKind.NO_ELIGIBLE_RESTORE_HOST ->
+            stringResource(R.string.splash_no_auto_reconnect_message)
+    }
+
+@Composable
+private fun noTrustedServerFooter(kind: StartupNoTrustedServerKind): String =
+    when (kind) {
+        StartupNoTrustedServerKind.NONE_SAVED ->
+            stringResource(R.string.splash_waiting_pairing_footer)
+
+        StartupNoTrustedServerKind.NO_ELIGIBLE_RESTORE_HOST ->
+            stringResource(R.string.splash_no_auto_reconnect_footer)
+    }
+
+@Composable
+private fun noTrustedServerStateLabel(kind: StartupNoTrustedServerKind): String =
+    when (kind) {
+        StartupNoTrustedServerKind.NONE_SAVED ->
+            stringResource(R.string.splash_state_waiting_pairing)
+
+        StartupNoTrustedServerKind.NO_ELIGIBLE_RESTORE_HOST ->
+            stringResource(R.string.splash_state_no_restore_target)
+    }
+
+@Composable
+private fun reconnectingTitle(method: ColdLaunchRestoreMethod): String =
+    when (method) {
+        ColdLaunchRestoreMethod.TRUSTED_RECONNECT ->
+            stringResource(R.string.splash_reconnecting_title)
+
+        ColdLaunchRestoreMethod.STORED_PASSWORD_LOGIN ->
+            stringResource(R.string.splash_reconnecting_password_title)
+    }
+
+@Composable
+private fun reconnectingMessage(method: ColdLaunchRestoreMethod, serverLabel: String): String =
+    when (method) {
+        ColdLaunchRestoreMethod.TRUSTED_RECONNECT ->
+            stringResource(R.string.splash_reconnecting_message, serverLabel)
+
+        ColdLaunchRestoreMethod.STORED_PASSWORD_LOGIN ->
+            stringResource(R.string.splash_reconnecting_password_message, serverLabel)
+    }
+
+@Composable
+private fun reconnectingFooter(method: ColdLaunchRestoreMethod): String =
+    when (method) {
+        ColdLaunchRestoreMethod.TRUSTED_RECONNECT ->
+            stringResource(R.string.splash_reconnecting_footer)
+
+        ColdLaunchRestoreMethod.STORED_PASSWORD_LOGIN ->
+            stringResource(R.string.splash_reconnecting_password_footer)
+    }
+
+@Composable
+private fun reconnectedTitle(method: ColdLaunchRestoreMethod): String =
+    when (method) {
+        ColdLaunchRestoreMethod.TRUSTED_RECONNECT ->
+            stringResource(R.string.splash_reconnected_title)
+
+        ColdLaunchRestoreMethod.STORED_PASSWORD_LOGIN ->
+            stringResource(R.string.splash_reconnected_password_title)
+    }
+
+@Composable
+private fun reconnectedMessage(method: ColdLaunchRestoreMethod, serverLabel: String): String =
+    when (method) {
+        ColdLaunchRestoreMethod.TRUSTED_RECONNECT ->
+            stringResource(R.string.splash_reconnected_message, serverLabel)
+
+        ColdLaunchRestoreMethod.STORED_PASSWORD_LOGIN ->
+            stringResource(R.string.splash_reconnected_password_message, serverLabel)
+    }
+
+@Composable
+private fun reconnectedFooter(method: ColdLaunchRestoreMethod): String =
+    when (method) {
+        ColdLaunchRestoreMethod.TRUSTED_RECONNECT ->
+            stringResource(R.string.splash_reconnected_footer)
+
+        ColdLaunchRestoreMethod.STORED_PASSWORD_LOGIN ->
+            stringResource(R.string.splash_reconnected_password_footer)
+    }

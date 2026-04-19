@@ -125,10 +125,11 @@ English:
 - Architecture / 架构说明: [docs/architecture.md](./docs/architecture.md)
 - Operations / 运维说明: [docs/operations.md](./docs/operations.md)
 - Roadmap / 路线图: [docs/v0.3.0-roadmap.md](./docs/v0.3.0-roadmap.md)
+- Next phase plan / 下一阶段计划书: [docs/v0.5.x-next-phase-plan-2026-04-19.md](./docs/v0.5.x-next-phase-plan-2026-04-19.md)
 - Android v0.4.0 acceptance / Android v0.4.0 验收清单: [docs/android-v0.4.0-acceptance-checklist.md](./docs/android-v0.4.0-acceptance-checklist.md)
 - Session transition acceptance / 会话切换验收清单: [docs/session-transition-acceptance-checklist.md](./docs/session-transition-acceptance-checklist.md)
 - Release checklist / 发布检查单: [docs/release-checklist.md](./docs/release-checklist.md)
-- Release notes / 发布说明: [docs/release-notes-v0.4.5.md](./docs/release-notes-v0.4.5.md)
+- Release notes / 发布说明: [docs/release-notes-v0.5.0.md](./docs/release-notes-v0.5.0.md)
 
 ## Inbox Cleanup / Inbox 清理
 

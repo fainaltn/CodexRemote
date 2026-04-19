@@ -93,7 +93,7 @@
     <string name="server_settings_trust_cleared">已清除信任记录</string>
     <string name="server_settings_trust_pair_button">去配对</string>
     <string name="server_settings_appearance_title">外观</string>
-    <string name="server_settings_appearance_message">切换当前设备上的控制台主题，不影响后端或网页端。</string>
+    <string name="server_settings_appearance_message">切换当前设备上的 findeck 主题，不影响后端或网页端。</string>
     <string name="server_settings_theme_auto">自动</string>
     <string name="server_settings_theme_light">浅色</string>
     <string name="server_settings_theme_dark">深色</string>

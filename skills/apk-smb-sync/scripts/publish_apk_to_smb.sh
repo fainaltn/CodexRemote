@@ -188,7 +188,7 @@ if [[ -z "${LABEL}" ]]; then
     TARGET_STEM="${TARGET_BASENAME%.*}"
     LABEL="$(derive_label "${SMB_SHARE}" "${TARGET_STEM}")"
   else
-    LABEL="CodexRemote"
+    LABEL="findeck"
   fi
 fi
 

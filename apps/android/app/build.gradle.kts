@@ -6,15 +6,15 @@ plugins {
 }
 
 android {
-    namespace = "dev.codexremote.android"
+    namespace = "app.findeck.mobile"
     compileSdk = 35
 
     defaultConfig {
-        applicationId = "dev.codexremote.android"
+        applicationId = "app.findeck.mobile"
         minSdk = 28
         targetSdk = 35
-        versionCode = 18
-        versionName = "0.4.11"
+        versionCode = 25
+        versionName = "0.5.0"
 
         vectorDrawables {
             useSupportLibrary = true

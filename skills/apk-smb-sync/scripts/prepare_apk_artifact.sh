@@ -9,7 +9,7 @@ REPO_ROOT="$(cd "${SKILL_DIR}/../.." && pwd)"
 DEFAULT_APK_PATH="${REPO_ROOT}/apps/android/app/build/outputs/apk/debug/app-debug.apk"
 DEFAULT_GRADLE_PATH="${REPO_ROOT}/apps/android/app/build.gradle.kts"
 DEFAULT_OUTPUT_DIR="${TMPDIR:-/tmp}/apk-smb-sync"
-DEFAULT_LABEL="CodexRemote"
+DEFAULT_LABEL="findeck"
 
 APK_PATH="${DEFAULT_APK_PATH}"
 GRADLE_PATH="${DEFAULT_GRADLE_PATH}"

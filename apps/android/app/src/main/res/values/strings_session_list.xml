@@ -58,7 +58,7 @@
     <string name="session_list_error_hint">请刷新重试，或检查网络连接。</string>
     <string name="session_list_error_retry">重新连接</string>
     <string name="session_list_empty_projects_title">还没有项目文件夹</string>
-    <string name="session_list_empty_projects_message">先添加一个项目路径，控制台就会把这个主机上的会话整理出来。</string>
+    <string name="session_list_empty_projects_message">先添加一个项目路径，findeck 就会把这个主机上的会话整理出来。</string>
     <string name="session_list_empty_projects_footer">你也可以先从右上角的菜单刷新，确认当前主机状态。</string>
     <string name="session_list_empty_projects_action">新建项目</string>
     <string name="session_list_loading_title">正在整理会话导航</string>
@@ -80,11 +80,6 @@
     <string name="session_list_dialog_hide_body">这不会删除项目目录或已有会话，只是先把“%1$s”从会话列表里隐藏。之后如果再次从“新项目”里选择同一路径，它会重新显示。</string>
     <string name="session_list_dialog_hide_confirm">隐藏</string>
 
-    <string name="session_list_navigation_title_selected">正在多选</string>
-    <string name="session_list_navigation_title_default">项目导航</string>
-    <string name="session_list_navigation_subtitle_selected">已选择 %1$s，继续点按可追加选择。</string>
-    <string name="session_list_navigation_subtitle_current_project">当前聚焦 %1$s，会话与项目层级更容易扫读。</string>
-    <string name="session_list_navigation_subtitle_default">项目按更新时间分组，最近活动会自动更显眼。</string>
     <plurals name="session_list_navigation_project_count">
         <item quantity="one">%1$d 个项目</item>
         <item quantity="other">%1$d 个项目</item>
@@ -97,8 +92,6 @@
         <item quantity="one">%1$d 个近活跃</item>
         <item quantity="other">%1$d 个近活跃</item>
     </plurals>
-    <string name="session_list_navigation_current_project_label">当前项目 · %1$s</string>
-
     <string name="session_list_browse_title">浏览方式</string>
     <string name="session_list_browse_help">长按可隐藏，右侧把手可拖动排序。当前：%1$s</string>
     <string name="session_list_browse_sort_toggle_description">切换文件夹排序，当前为 %1$s</string>

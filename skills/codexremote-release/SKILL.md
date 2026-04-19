@@ -1,15 +1,15 @@
 ---
 name: codexremote-release
-description: Validate and publish the CodexRemote GitHub repository release flow. Use when the user wants to 一键发布仓库, 发布版本到 GitHub, push main, create/update GitHub release, or run the CodexRemote repo release flow. Do not use this skill for APK SMB sync; that belongs to apk-smb-sync.
+description: Validate and publish the findeck GitHub repository release flow. Use when the user wants to 一键发布仓库, 发布版本到 GitHub, push main, create/update GitHub release, or run the findeck repo release flow. Do not use this skill for APK SMB sync; that belongs to apk-smb-sync.
 ---
 
-# CodexRemote Release
+# findeck Release
 
-Use this skill when the user wants to run the project-specific release flow for CodexRemote.
+Use this skill when the user wants to run the project-specific release flow for findeck.
 
 ## What This Skill Does
 
-This skill turns the current CodexRemote workspace into a repeatable GitHub release path:
+This skill turns the current findeck workspace into a repeatable GitHub release path:
 
 1. Read and verify the project version
 2. Run release validation for web and Android
@@ -73,7 +73,7 @@ Useful overrides:
 
 ## Guardrails
 
-- This flow is for CodexRemote only; the release commit title must be `Release v<version>`
+- This flow is for findeck only; the release commit title must be `Release v<version>`
 - The Git branch must be `main` unless the user explicitly asks for something else
 - The release notes file must exist before release creation
 - The script must fail fast on version mismatches between root, workspace packages, and Android
@@ -85,5 +85,5 @@ Useful overrides:
 
 - This skill is intentionally project-specific rather than generic
 - The script uses `gh` for release creation, so GitHub auth must already be active
-- The APK asset should use the same prepared filename shape as SMB delivery: `YYYY-MM-DD_CodexRemote_v<version>.apk`
+- The APK asset should use the same prepared filename shape as SMB delivery: `YYYY-MM-DD_findeck_v<version>.apk`
 - If the release tag already exists, stop and ask whether to skip release creation or edit the existing release manually

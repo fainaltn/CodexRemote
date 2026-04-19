@@ -46,6 +46,14 @@
     <string name="session_timeline_code_language_text">text</string>
     <string name="session_timeline_code_copied">Copied</string>
     <string name="session_timeline_output_continues">Output is still streaming…</string>
+    <string name="session_timeline_table_card_title">Table output</string>
+    <string name="session_timeline_table_card_summary">%1$d columns · %2$d rows</string>
+    <string name="session_timeline_table_card_action">Open</string>
+    <string name="session_timeline_table_card_more_columns">%1$d more columns</string>
+    <string name="session_timeline_table_viewer_title">Full table</string>
+    <string name="session_timeline_table_zoom_value">Zoom %1$d%%</string>
+    <string name="session_timeline_table_zoom_reset">Reset</string>
+    <string name="session_timeline_table_close">Close</string>
     <string name="session_timeline_reply_settled_title">This run has settled</string>
     <string name="session_timeline_reply_settled_message_with_output">The streamed output has settled into the final result, and you can keep browsing, copying, or retrying it.</string>
     <string name="session_timeline_reply_settled_message_empty">This run has finished, and there is no extra text output.</string>

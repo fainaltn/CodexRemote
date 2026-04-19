@@ -1,12 +1,12 @@
 # Release Checklist
 
-## Release focus for v0.4.5
+## Release Focus for v0.5.0
 
-- Web and Android session detail now follow the lighter `summary + tail + history pagination` entry path more consistently
-- Long-history sessions now default to lighter recent-history windows instead of dumping full history on first paint
-- Session lists and detail headers now make `当前项目 / 当前会话 / 最近活跃` easier to distinguish
-- Recovery, degraded, synced, and transition states are now clearer across Web and Android
-- Android session detail now keeps repo state lighter by default and folds memory citation output into a collapsible block
+- Android now installs under `app.findeck.mobile`
+- Android visible branding is unified to `findeck`
+- In-app function language stays focused on `控制台 / Console`
+- Mobile table output now lands in a dedicated full-screen preview workflow
+- Splash, top-home summary, settings runtime descriptions, and icon resources are aligned with the current product direction
 
 ## Verified in this workspace
 
@@ -20,7 +20,7 @@
 - `npm run build --workspace @codexremote/web`
 - `cd apps/android && ./gradlew :app:compileDebugKotlin`
 - `cd apps/android && ANDROID_HOME=/opt/homebrew/share/android-commandlinetools ANDROID_SDK_ROOT=/opt/homebrew/share/android-commandlinetools ./gradlew :app:assembleDebug`
-- `cd apps/android && ./gradlew :app:testDebugUnitTest --tests dev.codexremote.android.ui.sessions.ComposerSuggestionsTest`
+- `cd apps/android && ./gradlew :app:testDebugUnitTest --tests "app.findeck.mobile.ui.sessions.RichTextBlocksTest"`
 - `npm run test --workspace @codexremote/server -- src/__tests__/pairing-store.test.ts src/__tests__/pairing.test.ts src/__tests__/session-archive.test.ts src/__tests__/composer-ux.test.ts src/__tests__/runtime.test.ts src/__tests__/runtime-route.test.ts src/__tests__/run-approvals.test.ts src/__tests__/files-download.test.ts`
 - resumed-session manual check: resume an existing thread and verify it can create a file under the project root
 - Android manual check: trusted-host pairing succeeds and later cold launch prefers reconnect
@@ -42,6 +42,7 @@
 - ensure generated launchd launcher scripts in `~/Library/Application Support/CodexRemote/launchd/` are not copied back into the repo
 - review Android `local.properties` stays local-only
 - keep `apps/android/local.properties.example` as the committed template, not your real SDK path
+- confirm the Android package installs as `app.findeck.mobile` and that notification deep links still reopen the correct session
 
 ## Expected ignored outputs
 

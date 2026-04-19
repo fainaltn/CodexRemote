@@ -1,7 +1,7 @@
-# CodexRemote
+# findeck
 
-中文：CodexRemote 是一个面向单机 Codex CLI 的轻量远程控制栈，可通过浏览器或 Android 手机查看、创建、运行和管理会话。  
-English: CodexRemote is a lightweight remote control stack for a single Codex CLI host, designed for browsing, creating, running, and managing sessions from a browser or an Android phone.
+中文：findeck 是一个面向单机 Codex CLI 的轻量远程控制栈，可通过浏览器或 Android 手机查看、创建、运行和管理会话。  
+English: findeck is a lightweight remote control stack for a single Codex CLI host, designed for browsing, creating, running, and managing sessions from a browser or an Android phone.
 
 ## Overview / 项目概览
 

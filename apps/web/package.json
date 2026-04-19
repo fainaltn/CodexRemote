@@ -1,6 +1,6 @@
 {
   "name": "@codexremote/web",
-  "version": "0.4.5",
+  "version": "0.5.0",
   "private": true,
   "description": "Next.js mobile-first web client for CodexRemote",
   "scripts": {

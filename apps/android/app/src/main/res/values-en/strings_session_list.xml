@@ -80,11 +80,6 @@
     <string name="session_list_dialog_hide_body">This will not delete the project folder or existing sessions. It only hides “%1$s” from the session list for now. If you pick the same path again from “New project”, it will show up again.</string>
     <string name="session_list_dialog_hide_confirm">Hide</string>
 
-    <string name="session_list_navigation_title_selected">Multi-select mode</string>
-    <string name="session_list_navigation_title_default">Project navigation</string>
-    <string name="session_list_navigation_subtitle_selected">Selected %1$s. Keep tapping to add more.</string>
-    <string name="session_list_navigation_subtitle_current_project">Focused on %1$s, making the session and project hierarchy easier to scan.</string>
-    <string name="session_list_navigation_subtitle_default">Projects are grouped by update time, and recent activity stands out automatically.</string>
     <plurals name="session_list_navigation_project_count">
         <item quantity="one">%1$d project</item>
         <item quantity="other">%1$d projects</item>
@@ -97,8 +92,6 @@
         <item quantity="one">%1$d recent session</item>
         <item quantity="other">%1$d recent sessions</item>
     </plurals>
-    <string name="session_list_navigation_current_project_label">Current project · %1$s</string>
-
     <string name="session_list_browse_title">Browse mode</string>
     <string name="session_list_browse_help">Long-press to hide, drag the handle on the right to reorder. Current: %1$s</string>
     <string name="session_list_browse_sort_toggle_description">Switch folder sorting, current: %1$s</string>

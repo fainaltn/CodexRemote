@@ -1,25 +1,25 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="common_back">Back</string>
-    <string name="console_brand_label">Precision Console</string>
+    <string name="console_brand_label">Console</string>
 
-    <string name="splash_brand_chip">Precision Console</string>
-    <string name="splash_tagline">A remote workspace for the Codex CLI</string>
-    <string name="splash_description">Connect to your host, unlock the workspace, and steer sessions from a calmer mobile control surface.</string>
+    <string name="splash_brand_chip">Console</string>
+    <string name="splash_tagline">Your personal remote deck</string>
+    <string name="splash_description">Connect to your host and open sessions.</string>
     <string name="splash_status">Preparing secure host access…</string>
-    <string name="splash_bootstrap_note">We will organize the connection, sign-in, and session navigation before opening the console.</string>
+    <string name="splash_bootstrap_note">We check the connection before opening the console.</string>
     <string name="splash_bootstrap_state">Secure boot</string>
-    <string name="splash_loading_title">Preparing the console</string>
-    <string name="splash_loading_message">The app first checks whether this device already has a trusted host and whether it can enter the workspace directly.</string>
+    <string name="splash_loading_title">Opening the console</string>
+    <string name="splash_loading_message">Checking for a trusted host saved on this device.</string>
     <string name="splash_loading_detail">Organizing connection state…</string>
     <string name="splash_waiting_pairing_title">Waiting for first pairing</string>
     <string name="splash_waiting_pairing_message">This device does not have a trusted host yet. Open the server list or enter a pairing code to begin.</string>
     <string name="splash_waiting_pairing_footer">If the terminal is already showing a one-time pairing code, you can go straight to the pairing entry.</string>
     <string name="splash_reconnecting_title">Restoring trusted connection</string>
-    <string name="splash_reconnecting_message">Connecting to %1$s and trying to restore the saved trusted session.</string>
-    <string name="splash_reconnecting_footer">If reconnect fails, the app will route you to sign-in or pairing.</string>
+    <string name="splash_reconnecting_message">Connecting to %1$s and restoring the saved trusted session.</string>
+    <string name="splash_reconnecting_footer">If reconnect fails, the app routes you to sign-in or pairing.</string>
     <string name="splash_reconnected_title">Trusted connection restored</string>
-    <string name="splash_reconnected_message">Reconnected to %1$s. Opening the session workspace now.</string>
+    <string name="splash_reconnected_message">Reconnected to %1$s. Opening sessions now.</string>
     <string name="splash_reconnected_footer">This host stays the preferred reconnect target on this device.</string>
     <string name="splash_reconnect_failed_title">Trusted reconnect failed</string>
     <string name="splash_reconnect_failed_footer">If the trusted credentials are stale, pair again. If only the app password changed, sign in again.</string>
@@ -34,11 +34,11 @@
     <string name="login_current_host">Current host</string>
     <string name="login_preparing_environment">Preparing login environment</string>
     <string name="login_screen_title">Unlock host</string>
-    <string name="login_brand_title">Precision Console</string>
+    <string name="login_brand_title">Control Console</string>
     <string name="login_brand_subtitle">Verify the connection first, then enter the app password to unlock this host securely.</string>
     <string name="login_selected_host_title">Host selected</string>
     <string name="login_unlock_method_title">Unlock method</string>
-    <string name="login_unlock_method_body">Use the CodexRemote app password, not the system account password.</string>
+    <string name="login_unlock_method_body">Use the findeck app password, not the system account password.</string>
     <string name="login_password_label">App password</string>
     <string name="login_password_hint">We will check host reachability first, then submit the unlock request.</string>
     <string name="login_saved_password_detected">Saved password detected on this device</string>
@@ -62,7 +62,7 @@
     <string name="server_list_intro_state_trusted">Trusted host</string>
     <string name="server_list_intro_state_untrusted">Unpaired host</string>
     <string name="server_empty_title">No servers configured yet</string>
-    <string name="server_empty_message">Add a CodexRemote host and this page will show its connection status and sign-in entry.</string>
+    <string name="server_empty_message">Add a findeck host and this page will show its connection status and sign-in entry.</string>
     <string name="server_empty_footer">Tap the + in the bottom-right corner to start the add flow.</string>
     <string name="server_empty_state_label">Empty state</string>
     <string name="server_add_button">Add server</string>
@@ -91,7 +91,7 @@
     <string name="server_trust_unpaired">Unpaired</string>
 
     <string name="add_server_title">Add server</string>
-    <string name="add_server_help">Connect to the CodexRemote service running on macOS. Enter the API address and the web UI address. You can type IP:port directly and the app will auto-fill http://.</string>
+    <string name="add_server_help">Connect to the findeck service running on macOS. Enter the API address and the web UI address. You can type IP:port directly and the app will auto-fill http://.</string>
     <string name="add_server_name_label">Name (optional)</string>
     <string name="add_server_name_placeholder">My Mac</string>
     <string name="add_server_api_label">API address</string>
@@ -107,7 +107,7 @@
     <string name="server_pairing_name_label">Host name (optional)</string>
     <string name="server_pairing_api_label">API address</string>
     <string name="server_pairing_code_label">Pairing code or QR payload</string>
-    <string name="server_pairing_code_hint">Plain pairing codes work, and so do pasted payloads like codexremote://pair?...</string>
+    <string name="server_pairing_code_hint">Plain pairing codes work, and so do pasted payloads like findeck://pair?...</string>
     <string name="server_pairing_trust_label">Trusted reconnect</string>
     <string name="server_pairing_trust_message">When enabled, the app will try this trusted reconnect path again on next launch or foreground resume.</string>
     <string name="server_pairing_trust_enabled_state">Auto reconnect enabled</string>

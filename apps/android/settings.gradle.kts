@@ -20,5 +20,5 @@ dependencyResolutionManagement {
     }
 }
 
-rootProject.name = "CodexRemote"
+rootProject.name = "findeck"
 include(":app")

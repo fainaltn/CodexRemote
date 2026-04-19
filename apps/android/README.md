@@ -1,7 +1,7 @@
 # apps/android
 
-中文：CodexRemote 的原生 Android 客户端。  
-English: Native Android client for CodexRemote.
+中文：findeck 的原生 Android 客户端。  
+English: Native Android client for findeck.
 
 ## Stack / 技术栈
 

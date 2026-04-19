@@ -1,25 +1,25 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="common_back">返回</string>
-    <string name="console_brand_label">精准控制台</string>
+    <string name="console_brand_label">控制台</string>
 
-    <string name="splash_brand_chip">精准控制台</string>
-    <string name="splash_tagline">面向 Codex CLI 的远程工作台</string>
-    <string name="splash_description">连接主机、解锁工作区，并以更稳定的移动端控制面板管理会话。</string>
+    <string name="splash_brand_chip">控制台</string>
+    <string name="splash_tagline">你的个人远程工作台</string>
+    <string name="splash_description">连接主机并进入会话。</string>
     <string name="splash_status">正在准备安全连接…</string>
-    <string name="splash_bootstrap_note">启动后会先整理连接、登录和会话导航，再进入控制台。</string>
+    <string name="splash_bootstrap_note">启动后会先检查连接，再进入控制台。</string>
     <string name="splash_bootstrap_state">安全启动中</string>
-    <string name="splash_loading_title">正在准备控制台</string>
-    <string name="splash_loading_message">应用会优先检查本机保存的可信主机，并决定是否直接进入工作区。</string>
+    <string name="splash_loading_title">正在打开控制台</string>
+    <string name="splash_loading_message">正在检查本机保存的可信主机。</string>
     <string name="splash_loading_detail">正在整理连接状态…</string>
     <string name="splash_waiting_pairing_title">等待首次配对</string>
-    <string name="splash_waiting_pairing_message">当前设备还没有可信主机，先去服务器列表或直接输入配对码即可开始。</string>
+    <string name="splash_waiting_pairing_message">当前设备还没有可信主机，去服务器列表或直接输入配对码即可开始。</string>
     <string name="splash_waiting_pairing_footer">如果终端已经显示一次性配对码，可以直接走配对入口。</string>
     <string name="splash_reconnecting_title">正在恢复可信连接</string>
-    <string name="splash_reconnecting_message">正在连接 %1$s，并尝试恢复上次保存的可信会话。</string>
-    <string name="splash_reconnecting_footer">如果重连失败，应用会带你回到登录或重新配对入口。</string>
+    <string name="splash_reconnecting_message">正在连接 %1$s，并恢复上次保存的可信会话。</string>
+    <string name="splash_reconnecting_footer">如果失败，会回到登录或重新配对入口。</string>
     <string name="splash_reconnected_title">已恢复可信连接</string>
-    <string name="splash_reconnected_message">已重新连接到 %1$s，正在进入会话工作区。</string>
+    <string name="splash_reconnected_message">已重新连接到 %1$s，正在进入会话。</string>
     <string name="splash_reconnected_footer">这台主机会继续作为当前设备的优先重连目标。</string>
     <string name="splash_reconnect_failed_title">可信重连失败</string>
     <string name="splash_reconnect_failed_footer">如果是可信凭据失效，请重新配对；如果只是密码失效，请重新登录。</string>
@@ -34,11 +34,11 @@
     <string name="login_current_host">当前主机</string>
     <string name="login_preparing_environment">正在准备登录环境</string>
     <string name="login_screen_title">解锁主机</string>
-    <string name="login_brand_title">精准控制台</string>
+    <string name="login_brand_title">控制台</string>
     <string name="login_brand_subtitle">先验证连接，再输入应用密码，安全解锁当前主机。</string>
     <string name="login_selected_host_title">主机已选中</string>
     <string name="login_unlock_method_title">解锁方式</string>
-    <string name="login_unlock_method_body">使用 CodexRemote 应用密码，而不是系统账户密码。</string>
+    <string name="login_unlock_method_body">使用 findeck 应用密码，而不是系统账户密码。</string>
     <string name="login_password_label">应用密码</string>
     <string name="login_password_hint">会先验证主机可达性，再提交解锁请求。</string>
     <string name="login_saved_password_detected">已检测到本机保存的密码</string>
@@ -62,7 +62,7 @@
     <string name="server_list_intro_state_trusted">可信主机</string>
     <string name="server_list_intro_state_untrusted">未配对主机</string>
     <string name="server_empty_title">还没有配置服务器</string>
-    <string name="server_empty_message">添加一个 CodexRemote 主机后，这里会显示它的连接状态和登录入口。</string>
+    <string name="server_empty_message">添加一个 findeck 主机后，这里会显示它的连接状态和登录入口。</string>
     <string name="server_empty_footer">右下角的 + 会带你进入添加流程。</string>
     <string name="server_empty_state_label">空状态</string>
     <string name="server_add_button">添加服务器</string>
@@ -91,7 +91,7 @@
     <string name="server_trust_unpaired">未配对</string>
 
     <string name="add_server_title">添加服务器</string>
-    <string name="add_server_help">连接运行在 macOS 上的 CodexRemote 服务。请输入 API 地址，以及网页界面地址。可以直接填 IP:端口，应用会自动补全 http://。</string>
+    <string name="add_server_help">连接运行在 macOS 上的 findeck 服务。请输入 API 地址，以及网页界面地址。可以直接填 IP:端口，应用会自动补全 http://。</string>
     <string name="add_server_name_label">名称（可选）</string>
     <string name="add_server_name_placeholder">我的 Mac</string>
     <string name="add_server_api_label">API 地址</string>
@@ -107,7 +107,7 @@
     <string name="server_pairing_name_label">主机名称（可选）</string>
     <string name="server_pairing_api_label">API 地址</string>
     <string name="server_pairing_code_label">配对码或 QR 文本</string>
-    <string name="server_pairing_code_hint">支持纯配对码，也支持粘贴形如 codexremote://pair?... 的载荷文本。</string>
+    <string name="server_pairing_code_hint">支持纯配对码，也支持粘贴形如 findeck://pair?... 的载荷文本。</string>
     <string name="server_pairing_trust_label">可信重连</string>
     <string name="server_pairing_trust_message">开启后，应用会在下次启动或回到前台时优先尝试自动重连。</string>
     <string name="server_pairing_trust_enabled_state">自动重连已开启</string>

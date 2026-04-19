@@ -1,4 +1,4 @@
-# ProGuard rules for CodexRemote Android app
+# ProGuard rules for findeck Android app
 
 # Keep kotlinx.serialization
 -keepattributes *Annotation*, InnerClasses
@@ -12,10 +12,10 @@
 }
 
 # Keep app data models for serialization
--keep,includedescriptorclasses class dev.codexremote.android.data.model.**$$serializer { *; }
--keepclassmembers class dev.codexremote.android.data.model.** {
+-keep,includedescriptorclasses class app.findeck.mobile.data.model.**$$serializer { *; }
+-keepclassmembers class app.findeck.mobile.data.model.** {
     *** Companion;
 }
--keepclasseswithmembers class dev.codexremote.android.data.model.** {
+-keepclasseswithmembers class app.findeck.mobile.data.model.** {
     kotlinx.serialization.KSerializer serializer(...);
 }

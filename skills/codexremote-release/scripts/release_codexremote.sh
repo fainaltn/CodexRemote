@@ -8,7 +8,7 @@ REPO_ROOT="$(cd "${SKILL_DIR}/../.." && pwd)"
 APK_PREPARE_SCRIPT="${REPO_ROOT}/skills/apk-smb-sync/scripts/prepare_apk_artifact.sh"
 ANDROID_DIR="${REPO_ROOT}/apps/android"
 ANDROID_APK_PATH="${ANDROID_DIR}/app/build/outputs/apk/debug/app-debug.apk"
-RELEASE_ASSET_OUTPUT_DIR="${TMPDIR:-/tmp}/codexremote-release-assets"
+RELEASE_ASSET_OUTPUT_DIR="${TMPDIR:-/tmp}/findeck-release-assets"
 
 DRY_RUN=0
 SKIP_PUSH=0

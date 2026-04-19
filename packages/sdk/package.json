@@ -1,6 +1,6 @@
 {
   "name": "@findeck/sdk",
-  "version": "0.5.0",
+  "version": "0.5.2",
   "private": true,
   "description": "Host-agent client SDK for findeck (Phase 2)",
   "scripts": {

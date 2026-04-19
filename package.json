@@ -1,6 +1,6 @@
 {
   "name": "findeck",
-  "version": "0.5.0",
+  "version": "0.5.2",
   "private": true,
   "description": "Personal remote control stack for Codex CLI",
   "scripts": {

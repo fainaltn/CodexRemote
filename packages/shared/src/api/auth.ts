@@ -77,6 +77,20 @@ export const PairingClaimResponse = z.object({
 });
 export type PairingClaimResponse = z.infer<typeof PairingClaimResponse>;
 
+export const PairingClaimFailureReason = z.enum([
+  "invalid_code_format",
+  "code_not_found",
+  "code_expired",
+  "code_already_claimed",
+]);
+export type PairingClaimFailureReason = z.infer<typeof PairingClaimFailureReason>;
+
+export const PairingClaimFailureResponse = z.object({
+  error: z.string(),
+  reason: PairingClaimFailureReason,
+});
+export type PairingClaimFailureResponse = z.infer<typeof PairingClaimFailureResponse>;
+
 // --- POST /api/auth/reconnect ---
 
 export const TrustedReconnectRequest = z.object({
@@ -92,3 +106,20 @@ export const TrustedReconnectResponse = z.object({
   trustedClient: TrustedClient,
 });
 export type TrustedReconnectResponse = z.infer<typeof TrustedReconnectResponse>;
+
+export const TrustedReconnectFailureReason = z.enum([
+  "client_not_found",
+  "client_revoked",
+  "client_secret_mismatch",
+]);
+export type TrustedReconnectFailureReason = z.infer<typeof TrustedReconnectFailureReason>;
+
+export const TrustedReconnectRecoveryAction = z.enum(["re_pair"]);
+export type TrustedReconnectRecoveryAction = z.infer<typeof TrustedReconnectRecoveryAction>;
+
+export const TrustedReconnectFailureResponse = z.object({
+  error: z.string(),
+  reason: TrustedReconnectFailureReason,
+  recoveryAction: TrustedReconnectRecoveryAction,
+});
+export type TrustedReconnectFailureResponse = z.infer<typeof TrustedReconnectFailureResponse>;

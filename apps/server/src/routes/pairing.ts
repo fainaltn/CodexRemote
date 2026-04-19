@@ -2,6 +2,7 @@ import { networkInterfaces } from "node:os";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import {
   PairingCodeResponse,
+  PairingClaimFailureResponse,
   PairingClaimRequest,
   PairingClaimResponse,
   TrustedReconnectRequest,
@@ -113,14 +114,34 @@ export function pairingRoutes() {
         parsed.data.code,
         parsed.data.deviceLabel,
       );
-      if (!result) {
-        return reply.status(404).send({ error: "Pairing code not found or expired" });
+      if (!result.ok) {
+        const body: PairingClaimFailureResponse = {
+          error: pairingClaimFailureMessage(result.reason),
+          reason: result.reason,
+        };
+        app.log.warn(
+          {
+            event: "pairing_claim_failed",
+            reason: result.reason,
+            deviceLabel: parsed.data.deviceLabel ?? null,
+          },
+          "Pairing claim failed",
+        );
+        return reply.status(pairingClaimFailureStatus(result.reason)).send(body);
       }
 
       const body: PairingClaimResponse = {
         ...tokenResponse(result.token),
         trustedClient: result.trustedClient,
       };
+      app.log.info(
+        {
+          event: "pairing_claim_succeeded",
+          clientId: result.trustedClient.clientId,
+          deviceLabel: result.trustedClient.deviceLabel ?? null,
+        },
+        "Pairing claim succeeded",
+      );
       return reply.send(body);
     });
 
@@ -136,17 +157,81 @@ export function pairingRoutes() {
         parsed.data.clientSecret,
         parsed.data.deviceLabel,
       );
-      if (!result) {
-        return reply
-          .status(401)
-          .send({ error: "Trusted client credentials are invalid" });
+      if (!result.ok) {
+        const body = {
+          error: trustedReconnectFailureMessage(result.reason),
+          reason: result.reason,
+          recoveryAction: "re_pair" as const,
+        };
+        app.log.warn(
+          {
+            event: "trusted_reconnect_failed",
+            reason: result.reason,
+            recoveryAction: body.recoveryAction,
+            clientId: parsed.data.clientId,
+            deviceLabel: parsed.data.deviceLabel ?? null,
+          },
+          "Trusted reconnect failed",
+        );
+        return reply.status(401).send(body);
       }
 
       const body: TrustedReconnectResponse = {
         ...tokenResponse(result.token),
         trustedClient: result.trustedClient,
       };
+      app.log.info(
+        {
+          event: "trusted_reconnect_succeeded",
+          clientId: result.trustedClient.clientId,
+          deviceLabel: result.trustedClient.deviceLabel ?? null,
+        },
+        "Trusted reconnect succeeded",
+      );
       return reply.send(body);
     });
   };
+}
+
+function pairingClaimFailureStatus(
+  reason: "invalid_code_format" | "code_not_found" | "code_expired" | "code_already_claimed",
+): number {
+  switch (reason) {
+    case "invalid_code_format":
+      return 400;
+    case "code_not_found":
+      return 404;
+    case "code_expired":
+      return 410;
+    case "code_already_claimed":
+      return 409;
+  }
+}
+
+function pairingClaimFailureMessage(
+  reason: "invalid_code_format" | "code_not_found" | "code_expired" | "code_already_claimed",
+): string {
+  switch (reason) {
+    case "invalid_code_format":
+      return "Pairing code format is invalid";
+    case "code_not_found":
+      return "Pairing code was not found on this host";
+    case "code_expired":
+      return "Pairing code has expired";
+    case "code_already_claimed":
+      return "Pairing code was already claimed";
+  }
+}
+
+function trustedReconnectFailureMessage(
+  reason: "client_not_found" | "client_revoked" | "client_secret_mismatch",
+): string {
+  switch (reason) {
+    case "client_not_found":
+      return "Trusted reconnect is not registered on this host";
+    case "client_revoked":
+      return "Trusted reconnect was revoked on this host";
+    case "client_secret_mismatch":
+      return "Trusted reconnect secret no longer matches this host";
+  }
 }

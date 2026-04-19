@@ -26,10 +26,49 @@ export interface PairingClaimRecord {
   trustedClient: TrustedClientCredentials;
 }
 
+export type PairingClaimFailureReason =
+  | "invalid_code_format"
+  | "code_not_found"
+  | "code_expired"
+  | "code_already_claimed";
+
+export interface PairingClaimFailure {
+  ok: false;
+  reason: PairingClaimFailureReason;
+}
+
+export interface PairingClaimSuccess {
+  ok: true;
+  token: StoredToken;
+  trustedClient: TrustedClientCredentials;
+}
+
+export type PairingClaimResult = PairingClaimFailure | PairingClaimSuccess;
+
 export interface TrustedReconnectRecord {
   token: StoredToken;
   trustedClient: TrustedClientRecord;
 }
+
+export type TrustedReconnectFailureReason =
+  | "client_not_found"
+  | "client_revoked"
+  | "client_secret_mismatch";
+
+export interface TrustedReconnectFailure {
+  ok: false;
+  reason: TrustedReconnectFailureReason;
+}
+
+export interface TrustedReconnectSuccess {
+  ok: true;
+  token: StoredToken;
+  trustedClient: TrustedClientRecord;
+}
+
+export type TrustedReconnectResult =
+  | TrustedReconnectFailure
+  | TrustedReconnectSuccess;
 
 const PAIRING_CODE_LENGTH = 8;
 const PAIRING_CODE_TTL_MS = 15 * 60 * 1000;
@@ -126,19 +165,20 @@ export function createPairingCode(): PairingCodeRecord {
 export function claimPairingCode(
   codeInput: string,
   deviceLabel?: string,
-): PairingClaimRecord | null {
+): PairingClaimResult {
   const db = getDb();
   const normalizedCode = normalizePairingCode(codeInput);
   if (!isPairingCodeValid(normalizedCode)) {
-    return null;
+    return {
+      ok: false,
+      reason: "invalid_code_format",
+    };
   }
 
   const now = nowIso();
   const codeHash = hashValue(normalizedCode);
 
   return db.transaction(() => {
-    pruneExpiredPairingCodes(db, now);
-
     const pairingRow = db
       .prepare(
         `SELECT code_id, code_display, created_at, expires_at, claimed_at
@@ -155,12 +195,29 @@ export function claimPairingCode(
         }
       | undefined;
 
-    if (
-      !pairingRow ||
-      pairingRow.claimed_at !== null ||
-      new Date(pairingRow.expires_at) <= new Date(now)
-    ) {
-      return null;
+    if (!pairingRow) {
+      const failure: PairingClaimFailure = {
+        ok: false,
+        reason: "code_not_found",
+      };
+      return failure;
+    }
+
+    if (pairingRow.claimed_at !== null) {
+      const failure: PairingClaimFailure = {
+        ok: false,
+        reason: "code_already_claimed",
+      };
+      return failure;
+    }
+
+    if (new Date(pairingRow.expires_at) <= new Date(now)) {
+      db.prepare(`DELETE FROM pairing_codes WHERE code_id = ?`).run(pairingRow.code_id);
+      const failure: PairingClaimFailure = {
+        ok: false,
+        reason: "code_expired",
+      };
+      return failure;
     }
 
     const clientId = crypto.randomUUID();
@@ -189,7 +246,8 @@ export function claimPairingCode(
     ).run(now, clientId, pairingRow.code_id);
 
     const token = createToken(trustedDeviceLabel ?? undefined);
-    return {
+    const success: PairingClaimSuccess = {
+      ok: true,
       token,
       trustedClient: {
         clientId,
@@ -201,6 +259,9 @@ export function claimPairingCode(
         revokedAt: null,
       },
     };
+
+    pruneExpiredPairingCodes(db, now);
+    return success;
   })();
 }
 
@@ -208,7 +269,7 @@ export function reconnectTrustedClient(
   clientId: string,
   clientSecret: string,
   deviceLabel?: string,
-): TrustedReconnectRecord | null {
+): TrustedReconnectResult {
   const db = getDb();
   const now = nowIso();
   const secretHash = hashValue(clientSecret);
@@ -232,14 +293,30 @@ export function reconnectTrustedClient(
         }
       | undefined;
 
-    if (!trustedRow || trustedRow.revoked_at !== null) {
-      return null;
+    if (!trustedRow) {
+      const failure: TrustedReconnectFailure = {
+        ok: false,
+        reason: "client_not_found",
+      };
+      return failure;
+    }
+
+    if (trustedRow.revoked_at !== null) {
+      const failure: TrustedReconnectFailure = {
+        ok: false,
+        reason: "client_revoked",
+      };
+      return failure;
     }
 
     const provided = Buffer.from(secretHash, "hex");
     const stored = Buffer.from(trustedRow.client_secret_hash, "hex");
     if (provided.length !== stored.length || !crypto.timingSafeEqual(provided, stored)) {
-      return null;
+      const failure: TrustedReconnectFailure = {
+        ok: false,
+        reason: "client_secret_mismatch",
+      };
+      return failure;
     }
 
     const nextLabel = deviceLabel ?? trustedRow.device_label;
@@ -250,7 +327,8 @@ export function reconnectTrustedClient(
     ).run(nextLabel, now, now, clientId);
 
     const token = createToken(nextLabel ?? undefined);
-    return {
+    const success: TrustedReconnectSuccess = {
+      ok: true,
       token,
       trustedClient: {
         clientId: trustedRow.client_id,
@@ -261,6 +339,7 @@ export function reconnectTrustedClient(
         revokedAt: null,
       },
     };
+    return success;
   })();
 }
 
